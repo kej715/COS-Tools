@@ -1,0 +1,207 @@
+/*--------------------------------------------------------------------------
+**
+**  Copyright 2021 Kevin E. Jordan
+**
+**  Name: cosdataset.c
+**
+**  Description:
+**      This file privides functions for managing COS structured datasets.
+**
+**  Licensed under the Apache License, Version 2.0 (the "License");
+**  you may not use this file except in compliance with the License.
+**  You may obtain a copy of the License at
+**
+**      http://www.apache.org/licenses/LICENSE-2.0
+**
+**  Unless required by applicable law or agreed to in writing, software
+**  distributed under the License is distributed on an "AS IS" BASIS,
+**  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+**  See the License for the specific language governing permissions and
+**  limitations under the License.
+**
+**--------------------------------------------------------------------------
+*/
+
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "cosdataset.h"
+
+static int appendCW(Dataset *ds, u64 cw);
+static int flushBuffer(Dataset *ds);
+static void setFWI(Dataset *ds);
+
+static int appendCW(Dataset *ds, u64 cw) {
+    int i;
+    int shiftCount;
+
+    ds->lastCtrlWordIndex = ds->cursor;
+    for (i = 0, shiftCount = 56; i < 8; i++, shiftCount -= 8) {
+         ds->buffer[ds->cursor++] = (cw >> shiftCount) & 0xff;
+    }
+    return (ds->cursor >= COS_BLOCK_SIZE) ? flushBuffer(ds) : 0;
+
+}
+
+/*
+ *  cosDsClose - close a dataset
+ */
+int cosDsClose(Dataset *ds) {
+    int n;
+
+    if (ds == NULL) return 0;
+    n = write(ds->fd, ds->buffer, ds->cursor);
+    if (n != ds->cursor) return -1;
+    close(ds->fd);
+    free(ds);
+    return 0;
+}
+
+/*
+ *  cosDsCreate - create a dataset
+ */
+Dataset *cosDsCreate(char *pathname) {
+    Dataset *ds;
+
+    ds = (Dataset *)malloc(sizeof(Dataset));
+    if (ds == NULL) return NULL;
+    memset(ds, 0, sizeof(Dataset));
+    ds->fd = open(pathname, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+    if (ds->fd == -1) {
+        free(ds);
+        return NULL;
+    }
+    ds->cursor = 8;
+    return ds;
+}
+
+/*
+ *  cosDsWrite - write a sequence of bytes to a dataset
+ */
+int cosDsWrite(Dataset *ds, u8 *buffer, int len) {
+    int residue;
+    int written;
+
+    if (ds == NULL) return -1;
+    residue = COS_BLOCK_SIZE - ds->cursor;
+    written = 0;
+    while (len >= residue) {
+        memcpy(ds->buffer + ds->cursor, buffer, residue);
+        ds->cursor += residue;
+        if (flushBuffer(ds) == -1) return -1;
+        written += residue;
+        buffer += residue;
+        len -= residue;
+        residue = COS_BLOCK_SIZE - 8;
+    }
+    memcpy(ds->buffer + ds->cursor, buffer, len);
+    ds->cursor += len;
+    written += len;
+    return written;
+}
+
+/*
+ *  cosDsWriteEOD - write an end of data indication to a dataset
+ */
+int cosDsWriteEOD(Dataset *ds) {
+    u64 rcw;
+
+    if (ds == NULL) return -1;
+
+    if (ds->cursor >= COS_BLOCK_SIZE && flushBuffer(ds) == -1) return -1;
+    setFWI(ds);
+    rcw = (u64)COS_CW_EOD << 60;
+    return appendCW(ds, rcw);
+}
+
+/*
+ *  cosDsWriteEOF - write an end of file indication to a dataset
+ */
+int cosDsWriteEOF(Dataset *ds) {
+    u64 rcw;
+
+    if (ds == NULL) return -1;
+
+    if (ds->cursor >= COS_BLOCK_SIZE && flushBuffer(ds) == -1) return -1;
+    setFWI(ds);
+    rcw = ((u64)COS_CW_EOF << 60) | ((ds->currentBlock - ds->lastFileBlock) << 24);
+    if (appendCW(ds, rcw) == -1) return -1;
+    ds->lastFileBlock = ds->lastRecordBlock = ds->currentBlock;
+    return 0;
+}
+
+/*
+ *  cosDsWriteEOR - write an end of record indication to a dataset
+ */
+int cosDsWriteEOR(Dataset *ds) {
+    int incr;
+    u64 rcw;
+    int ubc;
+
+    if (ds == NULL) return -1;
+
+    incr = (8 - (ds->cursor & 7)) & 7;
+    ds->cursor += incr;
+    ubc = incr * 8;
+    if (ds->cursor >= COS_BLOCK_SIZE && flushBuffer(ds) == -1) return -1;
+    setFWI(ds);
+    rcw = ((u64)COS_CW_EOR << 60)
+        | ((u64)ubc << 50)
+        | ((ds->currentBlock - ds->lastFileBlock) << 24)
+        | ((ds->currentBlock - ds->lastRecordBlock) << 9);
+    if (appendCW(ds, rcw) == -1) return -1;
+    ds->lastRecordBlock = ds->currentBlock;
+    return 0;
+}
+
+/*
+ *  cosDsWriteWord - write a word to a dataset
+ */
+int cosDsWriteWord(Dataset *ds, u64 word) {
+    int i;
+    int incr;
+    int shiftCount;
+
+    if ((ds->cursor & 7) != 0) { // advance to start of next word
+        incr = (8 - (ds->cursor & 7)) & 7;
+        ds->cursor += incr;
+    }
+    if (ds->cursor >= COS_BLOCK_SIZE && flushBuffer(ds) == -1) return -1;
+    for (i = 0, shiftCount = 56; i < 8; i++, shiftCount -= 8) {
+         ds->buffer[ds->cursor++] = (word >> shiftCount) & 0xff;
+    }
+    return 0;
+}
+
+static int flushBuffer(Dataset *ds) {
+    u64 bn;
+    int i;
+    int n;
+    int shiftCount;
+
+    setFWI(ds);
+    n = write(ds->fd, ds->buffer, ds->cursor);
+    if (n < ds->cursor) return -1;
+    ds->bytesWritten += n;
+    memset(ds->buffer, 0, 8);
+    ds->lastCtrlWordIndex = 0;
+    ds->currentBlock += 1;
+    bn = ds->currentBlock << 9;
+    for (i = 3, shiftCount = 32; i < 8; i++, shiftCount -= 8) {
+         ds->buffer[i] = (bn >> shiftCount) & 0xff;
+    }
+    ds->cursor = 8;
+    return 0;
+}
+
+static void setFWI(Dataset *ds) {
+    int cwi;
+    int fwi;
+
+    cwi = ds->lastCtrlWordIndex;
+    fwi = ((ds->cursor - cwi) / 8) - 1;
+    ds->buffer[cwi + 6] = (ds->buffer[cwi + 6] & 0xfe) | ((fwi >> 8) & 1);
+    ds->buffer[cwi + 7] = fwi & 0xff;
+}
