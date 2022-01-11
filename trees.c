@@ -37,7 +37,7 @@ static Symbol *allocSymbol(char *id, int len, Value *value);
 static void freeName(Name *name);
 static void freeQualifier(Qualifier *qualifier);
 static void freeSymbol(Symbol *symbol);
-static void resetBlock(Block *block);
+static void resetSection(Section *section);
 
 Literal *addLiteral(Token *expression) {
     Literal *lp;
@@ -74,17 +74,16 @@ ErrorCode addLocationSymbol(char *id, int len, u16 attributes) {
 
     err = Err_None;
     val.type = NumberType_Integer;
-    val.attributes = attributes;
-    val.block = currentBlock;
-    if (currentModule->isAbsolute == FALSE) val.attributes |= SYM_RELOCATABLE;
-    val.intValue = currentBlock->locationCounter;
+    val.attributes = attributes | getRelativeAttribute(currentSection);
+    val.section = currentSection;
+    val.intValue = currentSection->locationCounter;
     if ((attributes & SYM_WORD_ADDRESS) != 0) val.intValue >>= 2;
     symbol = findSymbol(id, len, currentQualifier);
     if (symbol != NULL) {
         if (pass == 1) {
             if ((symbol->value.attributes & SYM_UNDEFINED) != 0) {
                 symbol->value.attributes = val.attributes;
-                symbol->value.block = val.block;
+                symbol->value.section = val.section;
                 symbol->value.intValue = val.intValue;
             }
             else {
@@ -92,7 +91,7 @@ ErrorCode addLocationSymbol(char *id, int len, u16 attributes) {
             }
         }
         else if (symbol->value.intValue != val.intValue
-                 || symbol->value.block != val.block
+                 || symbol->value.section != val.section
                  || ((symbol->value.attributes ^ val.attributes) & ~(SYM_UNDEFINED|SYM_ENTRY)) != 0) {
             err = Err_DoubleDefinition;
         }
@@ -104,7 +103,7 @@ ErrorCode addLocationSymbol(char *id, int len, u16 attributes) {
 }
 
 Module *addModule(char *id, int len) {
-    Block *block;
+    Section *section;
     Module *module;
     Name *name;
     Qualifier *qualifier;
@@ -126,23 +125,30 @@ Module *addModule(char *id, int len) {
     module->image = (u8 *)allocate(module->imageSize);
     savedModule = currentModule;
     currentModule = module;
-    block = (Block *)allocate(sizeof(Block));       // add nominal block
-    block->id = "";
-    module->firstBlock = block;
-    block->next = (Block *)allocate(sizeof(Block)); // add liternals block
-    block = block->next;
-    block->id = "=";
-    module->lastBlock = block;
+    section = (Section *)allocate(sizeof(Section));       // add nominal section
+    section->id = "";
+    module->firstSection = section;
+    section->next = (Section *)allocate(sizeof(Section)); // add liternals section
+    section = section->next;
+    section->id = "=";
+    module->lastSection = section;
     module->qualifiers = qualifier = addQualifier("", 0);
     val.type = NumberType_Integer;
     val.attributes = SYM_PARCEL_ADDRESS|SYM_COUNTER;
-    val.block = NULL;
+    val.section = NULL;
     val.intValue = 0;
     addSymbol("*",  1, qualifier, &val);
+    addSymbol("*A", 2, qualifier, &val);
+    addSymbol("*a", 2, qualifier, &val);
+    addSymbol("*B", 2, qualifier, &val);
+    addSymbol("*b", 2, qualifier, &val);
     addSymbol("*O", 2, qualifier, &val);
+    addSymbol("*o", 2, qualifier, &val);
     val.attributes = SYM_COUNTER;
     addSymbol("*P", 2, qualifier, &val);
+    addSymbol("*p", 2, qualifier, &val);
     addSymbol("*W", 2, qualifier, &val);
+    addSymbol("*w", 2, qualifier, &val);
     currentModule = savedModule;
     return module;
 }
@@ -159,7 +165,7 @@ Name *addName(Name **root, char *id, int len) {
         return new;
     }
     while (current != NULL) {
-        valence = strncasecmp(current->id, id, len);
+        valence = strncmp(current->id, id, len);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -202,7 +208,7 @@ Qualifier *addQualifier(char *id, int len) {
         return new;
     }
     while (current != NULL) {
-        valence = strncasecmp(current->id, id, len);
+        valence = strncmp(current->id, id, len);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -233,6 +239,22 @@ Qualifier *addQualifier(char *id, int len) {
     return new;
 }
 
+Section *addSection(Module *module, char *id, int len, SectionType type) {
+    Section *section;
+
+    section = (Section *)allocate(sizeof(Section));
+    section->id = (char *)allocate(len + 1);
+    memcpy(section->id, id, len);
+    section->locationAttributes = SYM_PARCEL_ADDRESS;
+    if (type == SectionType_Stack || type == SectionType_TaskCom)
+        section->locationAttributes |= SYM_IMMOBILE;
+    else
+        section->locationAttributes |= SYM_RELOCATABLE;
+    module->lastSection->next = section;
+    module->lastSection = section;
+    return section;
+}
+
 Symbol *addSymbol(char *id, int len, Qualifier *qualifier, Value *value) {
     Symbol *current;
     Symbol *new;
@@ -246,7 +268,7 @@ Symbol *addSymbol(char *id, int len, Qualifier *qualifier, Value *value) {
     }
 
     while (current != NULL) {
-        valence = strncasecmp(current->id, id, len);
+        valence = strncmp(current->id, id, len);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -290,11 +312,11 @@ static void adjustSymValsForQuals(Qualifier *qualifier) {
 
 static void adjustSymValsForSyms(Symbol *symbol) {
     if (symbol == NULL) return;
-    if (symbol->value.block != NULL) {
+    if (symbol->value.section != NULL) {
         if ((symbol->value.attributes & SYM_WORD_ADDRESS) != 0)
-            symbol->value.intValue += symbol->value.block->originOffset >> 2;
+            symbol->value.intValue += symbol->value.section->originOffset >> 2;
         else if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0)
-            symbol->value.intValue += symbol->value.block->originOffset;
+            symbol->value.intValue += symbol->value.section->originOffset;
     }
     adjustSymValsForSyms(symbol->left);
     adjustSymValsForSyms(symbol->right);
@@ -332,21 +354,21 @@ static Symbol *allocSymbol(char *id, int len, Value *value) {
     symbol->id = s;
     symbol->value.type = value->type;
     symbol->value.attributes = value->attributes;
-    symbol->value.block = value->block;
+    symbol->value.section = value->section;
     memcpy(&symbol->value, value, sizeof(Value));
     return symbol;
 }
 
-void calculateBlockOffsets(Module *module) {
-    Block *block;
+void calculateSectionOffsets(Module *module) {
+    Section *section;
     u32 offset;
 
     offset = 0;
-    block = module->firstBlock;
-    while (block != NULL) {
-        block->originOffset = block->originCounter = block->locationCounter = offset;
-        offset = (offset + block->size + 3) & 0xfffffc;
-        block = block->next;
+    section = module->firstSection;
+    while (section != NULL) {
+        section->originOffset = section->originCounter = section->locationCounter = offset;
+        offset = (offset + section->size + 3) & 0xfffffc;
+        section = section->next;
     }
     module->size = (offset + 3) >> 2; // size in words
 }
@@ -366,7 +388,7 @@ Name *findName(Name *root, char *id, int len) {
 
     current = root;
     while (current != NULL) {
-        valence = strncasecmp(current->id, id, (size_t)len);
+        valence = strncmp(current->id, id, (size_t)len);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -406,7 +428,7 @@ Qualifier *findQualifier(char *id) {
 
     current = currentModule->qualifiers;
     while (current != NULL) {
-        valence = strcasecmp(current->id, id);
+        valence = strcmp(current->id, id);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -423,7 +445,7 @@ Qualifier *findQualifierWithLen(char *id, int len) {
 
     current = currentModule->qualifiers;
     while (current != NULL) {
-        valence = strncasecmp(current->id, id, (size_t)len);
+        valence = strncmp(current->id, id, (size_t)len);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -442,7 +464,7 @@ Symbol *findSymbol(char *id, int len, Qualifier *qualifier) {
 
     current = qualifier->symbols;
     while (current != NULL) {
-        valence = strncasecmp(current->id, id, (size_t)len);
+        valence = strncmp(current->id, id, (size_t)len);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -470,19 +492,40 @@ static void freeSymbol(Symbol *symbol) {
     free(symbol);
 }
 
-void resetModule(Module *module) {
-    Block *block;
-
-    block = module->firstBlock;
-    while (block != NULL) {
-        resetBlock(block);
-        block = block->next;
+u16 getRelativeAttribute(Section *section) {
+    switch (section->type) {
+    case SectionType_Mixed:
+    case SectionType_Code:
+    case SectionType_Data:
+        return currentModule->isAbsolute ? 0 : SYM_RELOCATABLE;
+    case SectionType_Stack:
+    case SectionType_TaskCom:
+        return SYM_IMMOBILE;
+    case SectionType_Common:
+    case SectionType_Dynamic:
+        return SYM_RELOCATABLE;
+    default:
+        fprintf(stderr, "Unknown section type: %d\n", currentSection->type);
+        exit(1);
     }
 }
 
-static void resetBlock(Block *block) {
-    block->originCounter = block->originOffset;
-    block->locationCounter = block->originOffset;
-    block->wordBitPosCounter = 0;
-    block->parcelBitPosCounter = 0;
+void resetModule(Module *module) {
+    Section *section;
+
+    for (section = module->firstSection; section != NULL; section = section->next) {
+        resetSection(section);
+    }
+}
+
+static void resetSection(Section *section) {
+    section->originCounter = section->originOffset;
+    section->locationCounter = section->originOffset;
+    section->locationAttributes = SYM_PARCEL_ADDRESS;
+    if (section->type == SectionType_Stack || section->type == SectionType_TaskCom)
+        section->locationAttributes |= SYM_IMMOBILE;
+    else
+        section->locationAttributes |= SYM_RELOCATABLE;
+    section->wordBitPosCounter = 0;
+    section->parcelBitPosCounter = 0;
 }

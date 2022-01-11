@@ -87,6 +87,8 @@ static void emitPassFill(void);
 static void emitString(char *s, int len, int count, JustifyType justification);
 static u64 extractSubfield(u64 word, int startingBitPos, int len);
 static MacroParam *findMacroParam(MacroDefn *defn, char *name, int len);
+static SectionLocation findSectionLocation(char *name, int len);
+static SectionType findSectionType(char *name, int len);
 static void forceDataWordBoundary(void);
 static void forceInstWordBoundary(void);
 static void freeInstruction(NamedInstruction *instruction);
@@ -199,16 +201,16 @@ static ErrorCode BITP(void) {
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
     if (val.intValue == 16) {
-        if (currentBlock->parcelBitPosCounter > 0) {
-            currentBlock->originCounter += 1;
-            currentBlock->locationCounter += 1;
+        if (currentSection->parcelBitPosCounter > 0) {
+            currentSection->originCounter += 1;
+            currentSection->locationCounter += 1;
         }
-        currentBlock->parcelBitPosCounter = 0;
-        currentBlock->wordBitPosCounter = 0;
+        currentSection->parcelBitPosCounter = 0;
+        currentSection->wordBitPosCounter = 0;
     }
     else if (val.intValue >= 0 && val.intValue < 16) {
-        currentBlock->parcelBitPosCounter = val.intValue;
-        currentBlock->wordBitPosCounter = ((currentBlock->locationCounter & 0x03) * 16) + val.intValue;
+        currentSection->parcelBitPosCounter = val.intValue;
+        currentSection->wordBitPosCounter = ((currentSection->locationCounter & 0x03) * 16) + val.intValue;
     }
     else {
         err = Err_OperandField;
@@ -228,16 +230,16 @@ static ErrorCode BITW(void) {
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
     if (val.intValue == 64) {
-        currentBlock->wordBitPosCounter = 0;
-        currentBlock->parcelBitPosCounter = 0;
-        currentBlock->originCounter = (currentBlock->originCounter & 0xfffffc) + 4;
-        currentBlock->locationCounter = (currentBlock->locationCounter & 0xfffffc) + 4;
+        currentSection->wordBitPosCounter = 0;
+        currentSection->parcelBitPosCounter = 0;
+        currentSection->originCounter = (currentSection->originCounter & 0xfffffc) + 4;
+        currentSection->locationCounter = (currentSection->locationCounter & 0xfffffc) + 4;
     }
     else if (val.intValue >= 0 && val.intValue < 64) {
-        currentBlock->wordBitPosCounter = val.intValue;
-        currentBlock->parcelBitPosCounter = val.intValue % 16;
-        currentBlock->originCounter = (currentBlock->originCounter & 0xfffffc) + (val.intValue / 16);
-        currentBlock->locationCounter = (currentBlock->locationCounter & 0xfffffc) + (val.intValue / 16);
+        currentSection->wordBitPosCounter = val.intValue;
+        currentSection->parcelBitPosCounter = val.intValue % 16;
+        currentSection->originCounter = (currentSection->originCounter & 0xfffffc) + (val.intValue / 16);
+        currentSection->locationCounter = (currentSection->locationCounter & 0xfffffc) + (val.intValue / 16);
     }
     else {
         err = Err_OperandField;
@@ -246,51 +248,45 @@ static ErrorCode BITW(void) {
 }
 
 static ErrorCode BLOCK(void) {
-    Block *block;
+    Section *section;
     ErrorCode err;
-    Block *new;
     char *s;
     Token token;
 
     err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
     if (currentModule->id[0] == '\0') return Err_InstructionPlacement;
     if (strcmp(operandField, "*") == 0) {
-        if (blockStackPtr > 0) {
-            currentBlock = blockStack[--blockStackPtr];
+        if (sectionStackPtr > 0) {
+            currentSection = sectionStack[--sectionStackPtr];
         }
         return Err_None;
     }
     s = getNextToken(operandField, &token);
     if (*s != '\0') return Err_OperandField;
     if (token.type == TokenType_None) {
-        if (blockStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
-        blockStack[blockStackPtr++] = currentBlock;
-        currentBlock = currentModule->firstBlock;
+        if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+        sectionStack[sectionStackPtr++] = currentSection;
+        currentSection = currentModule->firstSection;
     }
     else if (isUnqualifiedName(&token)) {
-        if (blockStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
-        block = currentModule->firstBlock;
-        while (block != NULL) {
-            if (strncasecmp(block->id, token.details.name.ptr, token.details.name.len) == 0
-                && block->id[token.details.name.len] == '\0') break;
-            block = block->next;
+        if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+        section = currentModule->firstSection;
+        while (section != NULL) {
+            if (strncmp(section->id, token.details.name.ptr, token.details.name.len) == 0
+                && section->id[token.details.name.len] == '\0') break;
+            section = section->next;
         }
-        if (block == NULL) {
+        if (section == NULL) {
             if (pass == 1) {
-                new = (Block *)allocate(sizeof(Block));
-                new->id = (char *)allocate(token.details.name.len + 1);
-                memcpy(new->id, token.details.name.ptr, token.details.name.len);
-                currentModule->lastBlock->next = new;
-                currentModule->lastBlock = new;
-                block = new;
+                section = addSection(currentModule, token.details.name.ptr, token.details.name.len, SectionType_Mixed);
             }
             else {
-                fprintf(stderr, "Block vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+                fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
                 exit(1);
             }
         }
-        blockStack[blockStackPtr++] = currentBlock;
-        currentBlock = block;
+        sectionStack[sectionStackPtr++] = currentSection;
+        currentSection = section;
     }
     else {
         err = Err_OperandField;
@@ -312,8 +308,8 @@ static ErrorCode BSS(void) {
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
     if (*s != '\0' || isParcelType(&val) || isInteger(&val) == FALSE) return Err_OperandField;
-    currentBlock->originCounter   += val.intValue * 4;
-    currentBlock->locationCounter += val.intValue * 4;
+    currentSection->originCounter   += val.intValue * 4;
+    currentSection->locationCounter += val.intValue * 4;
     listValue(&val);
     return err;
 }
@@ -324,6 +320,7 @@ static ErrorCode BSSZ(void) {
     u16 savedListControl;
     Value val;
 
+    if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     err = Err_None;
     forceInstWordBoundary();
     listCodeLocation();
@@ -376,7 +373,7 @@ static ErrorCode CON(void) {
     Value val;
 
     if (operandField[0] == '\0') return Err_OperandField;
-
+    if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     forceDataWordBoundary();
     if (locationFieldToken != NULL) {
         err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
@@ -387,7 +384,7 @@ static ErrorCode CON(void) {
         if (*s == ',') {
             val.type = NumberType_Integer;
             val.attributes = 0;
-            val.block = NULL;
+            val.section = NULL;
             val.intValue = 0;
         }
         else {
@@ -413,7 +410,7 @@ static ErrorCode DATA(void) {
     Value val;
 
     if (operandField[0] == '\0') return Err_OperandField;
-
+    if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     if (locationFieldToken != NULL) {
         forceDataWordBoundary();
         err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
@@ -444,7 +441,7 @@ static ErrorCode DATA(void) {
         freeToken(expression);
         if (*s == ',') {
             s += 1;
-            if (currentBlock->wordBitPosCounter == 0) {
+            if (currentSection->wordBitPosCounter == 0) {
                 listFlush();
                 listCodeLocation();
             }
@@ -533,7 +530,7 @@ static ErrorCode ENTRY(void) {
             if (symbol == NULL) {
                 val.type = NumberType_Integer;
                 val.attributes = SYM_UNDEFINED|SYM_ENTRY;
-                val.block = NULL;
+                val.section = NULL;
                 val.intValue = 0;
                 symbol = addSymbol(token.details.name.ptr, token.details.name.len, qualifier, &val);
             }
@@ -596,7 +593,7 @@ static ErrorCode EXT(void) {
             if (symbol == NULL) {
                 val.type = NumberType_Integer;
                 val.attributes = SYM_EXTERNAL;
-                val.block = NULL;
+                val.section = NULL;
                 val.intValue = 0;
                 symbol = addSymbol(token.details.name.ptr, token.details.name.len, qualifier, &val);
                 n += 1;
@@ -624,9 +621,44 @@ static ErrorCode EXT(void) {
     return err;
 }
 
-/*
- *  IDENT name
- */
+static ErrorCode FORMAT(void) {
+    ErrorCode err;
+    char *s;
+    Token token;
+
+    err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
+    if (strcmp(operandField, "*") == 0) {
+        if (sourceFormatStackPtr > 0) {
+            currentSourceFormat = sourceFormatStack[--sourceFormatStackPtr];
+        }
+        return Err_None;
+    }
+    s = getNextToken(operandField, &token);
+    if (*s != '\0') return Err_OperandField;
+    if (sourceFormatStackPtr >= SOURCE_FORMAT_STACK_SIZE) return Err_TooManyEntries;
+    sourceFormatStack[sourceFormatStackPtr++] = currentSourceFormat;
+    if (token.type == TokenType_None) {
+        currentSourceFormat = defaultSourceFormat;
+    }
+    else if (isUnqualifiedName(&token) && token.details.name.len == 3) {
+        if (strncasecmp(token.details.name.ptr, "NEW", 3) == 0) {
+            currentSourceFormat = SourceFormat_New;
+        }
+        else if (strncasecmp(token.details.name.ptr, "OLD", 3) == 0) {
+            currentSourceFormat = SourceFormat_Old;
+        }
+        else {
+            sourceFormatStackPtr -= 1;
+            err = Err_OperandField;
+        }
+    }
+    else {
+        sourceFormatStackPtr -= 1;
+        err = Err_OperandField;
+    }
+    return err;
+}
+
 static ErrorCode IDENT(void) {
     ErrorCode err;
     Module *module;
@@ -651,8 +683,8 @@ static ErrorCode IDENT(void) {
         currentModule = module;
     }
     currentQualifier = findQualifier("");
-    currentBlock = currentModule->firstBlock;
-    blockStackPtr = 0;
+    currentSection = currentModule->firstSection;
+    sectionStackPtr = 0;
     macroStackPtr = 0;
     qualifierStackPtr = 0;
     resetBase();
@@ -729,7 +761,7 @@ static ErrorCode IFA(void) {
                 cond = (val.attributes & SYM_RELOCATABLE) == 0;
             }
             else if (strncasecmp(op, "COM", 3) == 0) {
-                cond = (val.attributes & SYM_COMMON) != 0;
+                cond = isCommonSection(val.section);
             }
             else if (strncasecmp(op, "DEF", 3) == 0) {
                 cond = (val.attributes & SYM_UNDEFINED) == 0;
@@ -954,11 +986,20 @@ static ErrorCode LOC(void) {
     Value val;
 
     err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
+    if (isCodeSection(currentSection) == FALSE && isDataSection(currentSection) == FALSE)
+        return Err_InstructionPlacement;
     forceInstWordBoundary();
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
-    if (*s != '\0' || isParcelType(&val) || isInteger(&val) == FALSE) return Err_OperandField;
-    currentBlock->locationCounter = val.intValue * 4;
+    if (*s != '\0'
+        || isParcelType(&val)
+        || isInteger(&val) == FALSE
+        || val.intValue < 0
+        || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
+        || isAbsoluteType(&val) != currentModule->isAbsolute
+        || (val.section != NULL && val.section != currentSection))
+        return Err_OperandField;
+    currentSection->locationCounter = val.intValue * 4;
     return err;
 }
 
@@ -1100,7 +1141,7 @@ static ErrorCode MACRO(void) {
         }
         s = getNextName(s, &id, &len);
         if (locationParamLen == macroNameLen
-            && strncasecmp(locationParam, name->id, locationParamLen) == 0
+            && strncmp(locationParam, name->id, locationParamLen) == 0
             && len == 4
             && strncasecmp(id, "ENDM", 4) == 0) {
             return Err_None; // end of macro definition
@@ -1233,14 +1274,14 @@ static ErrorCode MICSIZE(void) {
     symbol = findSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, currentQualifier);
     val.type = NumberType_Integer;
     val.attributes = SYM_REDEFINABLE;
-    val.block = NULL;
+    val.section = NULL;
     val.intValue = strlen((char *)name->value);
     if (symbol == NULL) {
         symbol = addSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, currentQualifier, &val);
     }
     else if ((symbol->value.attributes & SYM_REDEFINABLE) != 0) {
         symbol->value.attributes = val.attributes;
-        symbol->value.block = val.block;
+        symbol->value.section = val.section;
         symbol->value.intValue = val.intValue;
     }
     else if (symbol->value.attributes != val.attributes || symbol->value.intValue != val.intValue) {
@@ -1273,18 +1314,20 @@ static ErrorCode OPSYN(void) {
  */
 static ErrorCode ORG(void) {
     ErrorCode err;
-    bool isNominalBlock;
+    bool isNominalSection;
     bool isRelocatable;
     i64 originValue;
     char *s;
     Value val;
 
     err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
+    if (isCodeSection(currentSection) == FALSE && isDataSection(currentSection) == FALSE)
+        return Err_InstructionPlacement;
     s = operandField;
     if (*s == '\0') {
         val.type = NumberType_Integer;
-        val.attributes = 0;
-        val.block = currentBlock;
+        val.attributes = getRelativeAttribute(currentSection);
+        val.section = currentSection;
         val.intValue = 0;
     }
     else {
@@ -1297,22 +1340,23 @@ static ErrorCode ORG(void) {
         || isInteger(&val) == FALSE
         || val.intValue < 0
         || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
-        || (val.block != NULL && val.block != currentBlock))
+        || isAbsoluteType(&val) != currentModule->isAbsolute
+        || (val.section != NULL && val.section != currentSection))
         return Err_OperandField;
     originValue = val.intValue * 4;
-    isNominalBlock = currentBlock == currentModule->firstBlock;
+    isNominalSection = currentSection == currentModule->firstSection;
     isRelocatable = (val.attributes & SYM_RELOCATABLE) != 0;
-    if (isRelocatable == FALSE && (isNominalBlock == FALSE || currentModule->isAbsolute == FALSE)) {
+    if (isRelocatable == FALSE && (isNominalSection == FALSE || currentModule->isAbsolute == FALSE)) {
         return Err_OperandField;
     }
-    else if (isRelocatable && isNominalBlock && currentModule->isAbsolute) {
+    else if (isRelocatable && isNominalSection && currentModule->isAbsolute) {
         return Err_OperandField;
     }
-    else if (originValue < currentBlock->originCounter && (isNominalBlock == FALSE || currentModule->isOriginSet)) {
+    else if (originValue < currentSection->originCounter && (isNominalSection == FALSE || currentModule->isOriginSet)) {
         return Err_OperandField;
     }
-    currentBlock->originCounter = currentBlock->locationCounter = originValue;
-    if (isNominalBlock && currentModule->isOriginSet == FALSE) {
+    currentSection->originCounter = currentSection->locationCounter = originValue;
+    if (isNominalSection && currentModule->isOriginSet == FALSE) {
         currentModule->origin = val.intValue;
         currentModule->isOriginSet = TRUE;
     }
@@ -1354,6 +1398,138 @@ static ErrorCode QUAL(void) {
 
 static ErrorCode REP(void) {
     return Err_ResultField;
+}
+
+static ErrorCode SECTION(void) {
+    ErrorCode err;
+    int i;
+    char *id;
+    bool isCommon;
+    int len;
+    SectionLocation location;
+    SectionLocation locations[2];
+    char *s;
+    Section *section;
+    Symbol *symbol;
+    Token token;
+    SectionType type;
+    SectionType types[2];
+    Value val;
+
+    if (currentModule->id[0] == '\0') return Err_InstructionPlacement;
+    if (strcmp(operandField, "*") == 0) {
+        if (sectionStackPtr > 0) {
+            currentSection = sectionStack[--sectionStackPtr];
+        }
+        return Err_None;
+    }
+    if (locationFieldToken != NULL) {
+        id = locationFieldToken->details.name.ptr;
+        len = locationFieldToken->details.name.len;
+    }
+    else {
+        id = "";
+        len = 0;
+    }
+    s = operandField;
+    for (i = 0; i < 2; i++) {
+        s = getNextToken(s, &token);
+        if (isUnqualifiedName(&token)) {
+            types[i] = findSectionType(token.details.name.ptr, token.details.name.len);
+            if (types[i] == SectionType_None) {
+                locations[i] = findSectionLocation(token.details.name.ptr, token.details.name.len);
+                if (locations[i] == SectionLocation_None) return Err_OperandField;
+            }
+        }
+        else if (token.type == TokenType_None) {
+            types[i] = SectionType_None;
+            locations[i] = SectionLocation_None;
+        }
+        else {
+            return Err_OperandField;
+        }
+        if (*s == ',' && i == 0) s += 1;
+    }
+    if (*s != '\0') return Err_OperandField;
+    if (types[0] != SectionType_None) {
+        if (types[1] == SectionType_None)
+            type = types[0];
+        else
+            return Err_OperandField;
+    }
+    else if (types[1] != SectionType_None) {
+        type = types[1];
+    }
+    else {
+        type = SectionType_Mixed;
+    }
+    if (locations[0] != SectionLocation_None) {
+        if (locations[1] == SectionLocation_None)
+            location = locations[0];
+        else
+            return Err_OperandField;
+    }
+    else if (locations[1] != SectionLocation_None) {
+        location = locations[1];
+    }
+    else {
+        location = SectionLocation_CM;
+    }
+    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+    isCommon = type == SectionType_Common
+            || type == SectionType_Dynamic
+            || type == SectionType_TaskCom;
+    section = currentModule->firstSection;
+    while (section != NULL) {
+        if (strncmp(section->id, id, len) == 0
+            && section->id[len] == '\0'
+            && ((section->type == type && section->location == location)
+                || isCommon || isCommonSection(section)))
+            break;
+        section = section->next;
+    }
+    if (section == NULL) {
+        if (pass == 1) {
+            section = addSection(currentModule, id, len, type);
+        }
+        else {
+            fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+            exit(1);
+        }
+    }
+    else if ((isCommon || isCommonSection(section)) && (type != section->type || location != section->location)) {
+        return Err_OperandField;
+    }
+    if (type == SectionType_TaskCom) {
+        if (len < 1) return Err_LocationField;
+        symbol = findSymbol(id, len, currentQualifier);
+        if (symbol == NULL) {
+            val.type = NumberType_Integer;
+            val.intValue = 0;
+            val.attributes = SYM_WORD_ADDRESS|SYM_RELOCATABLE;
+            val.section = section;
+            symbol = addSymbol(id, len, currentQualifier, &val);
+        }
+        else if (pass == 1) {
+            if ((symbol->value.attributes & SYM_UNDEFINED) != 0) {
+                symbol->value.type = NumberType_Integer;
+                symbol->value.attributes = SYM_WORD_ADDRESS|SYM_RELOCATABLE;
+                symbol->value.section = section;
+                symbol->value.intValue = 0;
+            }
+            else {
+                return Err_DoubleDefinition;
+            }
+        }
+        else if (symbol->value.intValue != 0
+                 || symbol->value.section != section
+                 || symbol->value.attributes != (SYM_WORD_ADDRESS|SYM_RELOCATABLE)) {
+            return Err_DoubleDefinition;
+        }
+    }
+    sectionStack[sectionStackPtr++] = currentSection;
+    currentSection = section;
+    return Err_None;
 }
 
 static ErrorCode SET(void) {
@@ -1488,7 +1664,7 @@ static ErrorCode VWD(void) {
     Value val;
 
     if (operandField[0] == '\0') return Err_OperandField;
-
+    if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     if (locationFieldToken != NULL) {
         forceDataWordBoundary();
         err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
@@ -1534,7 +1710,7 @@ static ErrorCode VWD(void) {
         }
         if (*s == ',') {
             s += 1;
-            if (currentBlock->wordBitPosCounter == 0) listFlush();
+            if (currentSection->wordBitPosCounter == 0) listFlush();
         }
         else if (*s != '\0') {
             err = Err_OperandField;
@@ -4108,15 +4284,15 @@ static void addPattern(char *s, InstructionHandler handler) {
  *  advanceBitPosition - advance to the next bit position at which to emit code
  */
 void advanceBitPosition(int count) {
-    currentBlock->parcelBitPosCounter += count;
-    while (currentBlock->parcelBitPosCounter > 15) {
-        currentBlock->originCounter += 1;
-        currentBlock->locationCounter += 1;
-        currentBlock->parcelBitPosCounter -= 16;
+    currentSection->parcelBitPosCounter += count;
+    while (currentSection->parcelBitPosCounter > 15) {
+        currentSection->originCounter += 1;
+        currentSection->locationCounter += 1;
+        currentSection->parcelBitPosCounter -= 16;
     }
-    currentBlock->wordBitPosCounter = ((currentBlock->locationCounter & 0x03) * 16) + currentBlock->parcelBitPosCounter;
-    if (pass == 1 && currentBlock->originCounter > currentBlock->size) {
-        currentBlock->size = currentBlock->originCounter;
+    currentSection->wordBitPosCounter = ((currentSection->locationCounter & 0x03) * 16) + currentSection->parcelBitPosCounter;
+    if (pass == 1 && currentSection->originCounter > currentSection->size) {
+        currentSection->size = currentSection->originCounter;
     }
 }
 
@@ -4259,9 +4435,9 @@ static ErrorCode defineSymbol(u16 attributes) {
                 val.attributes = SYM_PARCEL_ADDRESS;
                 break;
             case 'V':
-                if ((val.attributes & SYM_RELOCATABLE) != 0) err = registerError(Err_OperandField);
+                if (isRelocatableType(&val)) err = registerError(Err_OperandField);
                 val.attributes = 0;
-                val.block = NULL;
+                val.section = NULL;
                 break;
             case 'W':
                 if (isParcelType(&val)) val.intValue /= 4;
@@ -4287,7 +4463,7 @@ static ErrorCode defineSymbol(u16 attributes) {
     }
     else if ((symbol->value.attributes & SYM_REDEFINABLE) != 0) {
         symbol->value.attributes = val.attributes;
-        symbol->value.block = val.block;
+        symbol->value.section = val.section;
         symbol->value.intValue = val.intValue;
     }
     else if (symbol->value.attributes != val.attributes || symbol->value.intValue != val.intValue) {
@@ -4307,7 +4483,7 @@ static void emit_g_h_i_jkm(u8 g, u8 h, u8 i, Value *jkm) {
     u32 instr;
 
     instr = (g << 28) | (h << 25) | (i << 22) | (jkm->intValue & MASK22);
-    putHalfWord(currentModule, currentBlock->originCounter, instr);
+    putHalfWord(currentModule, currentSection->originCounter, instr);
     listCodeLocation();
     listCode10_22(instr, jkm->attributes);
     advanceBitPosition(32);
@@ -4320,7 +4496,7 @@ static void emit_gh_i_j_k(u8 gh, u8 i, u8 j, u8 k) {
     u16 instr;
 
     instr = (gh << 9) | (i << 6) | (j << 3) | k;
-    putParcel(currentModule, currentBlock->originCounter, instr);
+    putParcel(currentModule, currentSection->originCounter, instr);
     listCodeLocation();
     listCode16(instr);
     advanceBitPosition(16);
@@ -4333,7 +4509,7 @@ static void emit_gh_i_jk(u8 gh, u8 i, u8 jk) {
     u16 instr;
 
     instr = (gh << 9) | (i << 6) | (jk & MASK6);
-    putParcel(currentModule, currentBlock->originCounter, instr);
+    putParcel(currentModule, currentSection->originCounter, instr);
     listCodeLocation();
     listCode16(instr);
     advanceBitPosition(16);
@@ -4346,7 +4522,7 @@ static void emit_gh_ijk(u8 gh, u16 ijk) {
     u16 instr;
 
     instr = (gh << 9) | (ijk & MASK9);
-    putParcel(currentModule, currentBlock->originCounter, instr);
+    putParcel(currentModule, currentSection->originCounter, instr);
     listCodeLocation();
     listCode16(instr);
     advanceBitPosition(16);
@@ -4359,7 +4535,7 @@ static void emit_gh_i_jkm(u8 gh, u8 i, Value *jkm) {
     u32 instr;
 
     instr = (gh << 25) | (i << 22) | (jkm->intValue & MASK22);
-    putHalfWord(currentModule, currentBlock->originCounter, instr);
+    putHalfWord(currentModule, currentSection->originCounter, instr);
     listCodeLocation();
     listCode10_22(instr, jkm->attributes);
     advanceBitPosition(32);
@@ -4372,7 +4548,7 @@ static void emit_gh_ijkm(u8 gh, Value *ijkm) {
     u32 instr;
 
     instr = (gh << 25) | (ijkm->intValue & MASK24);
-    putHalfWord(currentModule, currentBlock->originCounter, instr);
+    putHalfWord(currentModule, currentSection->originCounter, instr);
     listCodeLocation();
     listCode7_24(instr, ijkm->attributes);
     advanceBitPosition(32);
@@ -4390,12 +4566,12 @@ static void emitFieldBits(u64 bits, int len, u16 attributes, bool doListFlush) {
     u64 subfield;
     int subfieldLen;
 
-    currentWord = getWord(currentModule, currentBlock->originCounter);
-    emptyBitCount = 64 - currentBlock->wordBitPosCounter;
+    currentWord = getWord(currentModule, currentSection->originCounter);
+    emptyBitCount = 64 - currentSection->wordBitPosCounter;
     while (len > emptyBitCount) {
         shiftCount = len - emptyBitCount;
         currentWord |= bits >> shiftCount;
-        putWord(currentModule, currentBlock->originCounter, currentWord);
+        putWord(currentModule, currentSection->originCounter, currentWord);
         subfieldLen = 64 - startingBitPos;
         subfield = extractSubfield(currentWord, startingBitPos, subfieldLen);
         listField(subfield, subfieldLen, attributes, 21);
@@ -4404,16 +4580,16 @@ static void emitFieldBits(u64 bits, int len, u16 attributes, bool doListFlush) {
         len = shiftCount;
         bits = extractSubfield(bits, 64 - len, len);
         advanceBitPosition(emptyBitCount);
-        currentWord = getWord(currentModule, currentBlock->originCounter);
+        currentWord = getWord(currentModule, currentSection->originCounter);
         startingBitPos = 0;
-        emptyBitCount = 64 - currentBlock->wordBitPosCounter;
+        emptyBitCount = 64 - currentSection->wordBitPosCounter;
     }
     if (len > 0) {
-        shiftCount = 64 - (currentBlock->wordBitPosCounter + len);
+        shiftCount = 64 - (currentSection->wordBitPosCounter + len);
         currentWord |= bits << shiftCount;
-        putWord(currentModule, currentBlock->originCounter, currentWord);
+        putWord(currentModule, currentSection->originCounter, currentWord);
         advanceBitPosition(len);
-        if (currentBlock->wordBitPosCounter == 0) {
+        if (currentSection->wordBitPosCounter == 0) {
             subfieldLen = 64 - startingBitPos;
             subfield = extractSubfield(currentWord, startingBitPos, subfieldLen);
             listField(subfield, subfieldLen, attributes, 21);
@@ -4436,11 +4612,11 @@ static void emitFieldEnd(u16 attributes) {
     int shiftCount;
     u64 subfield;
 
-    len = currentBlock->wordBitPosCounter - startingBitPos;
+    len = currentSection->wordBitPosCounter - startingBitPos;
     if (len > 0) {
-        lastCol = (currentBlock->wordBitPosCounter + 1) / 3;
-        subfield = extractSubfield(getWord(currentModule, currentBlock->originCounter), startingBitPos, len);
-        lastBitPos = (currentBlock->wordBitPosCounter - 1) % 3;
+        lastCol = (currentSection->wordBitPosCounter + 1) / 3;
+        subfield = extractSubfield(getWord(currentModule, currentSection->originCounter), startingBitPos, len);
+        lastBitPos = (currentSection->wordBitPosCounter - 1) % 3;
         if (lastBitPos > 0) {
             shiftCount = 3 - lastBitPos;
             subfield <<= shiftCount;
@@ -4454,27 +4630,27 @@ static void emitFieldEnd(u16 attributes) {
  *  emitFieldStart - begin the emission of a field of bits
  */
 static void emitFieldStart(void) {
-    startingBitPos = currentBlock->wordBitPosCounter;
+    startingBitPos = currentSection->wordBitPosCounter;
 }
 
 /*
- *  emitLiterals - emit literals into the literals block
+ *  emitLiterals - emit literals into the literals section
  */
 void emitLiterals(void) {
     Literal *literal;
-    Block *savedBlock;
+    Section *savedSection;
     u16 savedListControl;
     Token *str;
     Value val;
 
-    savedBlock = currentBlock;
+    savedSection = currentSection;
     savedListControl = currentListControl;
-    currentBlock = currentModule->firstBlock->next; // Literals block is always 2nd in module
+    currentSection = currentModule->firstSection->next; // Literals section is always 2nd in module
     currentListControl = 0; // suppress listing completely
     literal = currentModule->literals;
     while (literal != NULL) {
         forceDataWordBoundary();
-        literal->offset = currentBlock->locationCounter;
+        literal->offset = currentSection->locationCounter;
         if (literal->expression->type == TokenType_String) {
             emitString(literal->expression->details.string.ptr, literal->expression->details.string.len,
                        literal->expression->details.string.count, literal->expression->details.string.justification);
@@ -4487,7 +4663,7 @@ void emitLiterals(void) {
         }
         literal = literal->next;
     }
-    currentBlock = savedBlock;
+    currentSection = savedSection;
     currentListControl = savedListControl;
 }
 
@@ -4498,7 +4674,7 @@ static void emitPassFill(void) {
     u16 instr;
 
     instr = 001000;
-    putParcel(currentModule, currentBlock->originCounter, instr);
+    putParcel(currentModule, currentSection->originCounter, instr);
     listClearSource();
     listCodeLocation();
     listCode16(instr);
@@ -4582,12 +4758,12 @@ static MacroParam *findMacroParam(MacroDefn *defn, char *name, int len) {
     MacroParam *pp;
 
     if (defn->locationParam != NULL
-        && strncasecmp(defn->locationParam->name, name, len) == 0
+        && strncmp(defn->locationParam->name, name, len) == 0
         && defn->locationParam->name[len] == '\0')
         return defn->locationParam;
     pp = defn->params;
     while (pp != NULL) {
-        if (strncasecmp(pp->name, name, len) == 0 && pp->name[len] == '\0')
+        if (strncmp(pp->name, name, len) == 0 && pp->name[len] == '\0')
             return pp;
         pp = pp->next;
     }
@@ -4595,12 +4771,68 @@ static MacroParam *findMacroParam(MacroDefn *defn, char *name, int len) {
 }
 
 /*
+ *  findSectionLocation - fina a match for the name of a section location
+ */
+typedef struct sectionLocationTableEntry {
+    char *name;
+    int len;
+    SectionLocation location;
+} SectionLocationTableEntry;
+
+static SectionLocationTableEntry sectionLocationTable[] = {
+    {"CM", 2, SectionLocation_CM},
+    {"EM", 2, SectionLocation_EM},
+    {"LM", 2, SectionLocation_LM},
+    {NULL, 0, 0}
+};
+
+static SectionLocation findSectionLocation(char *name, int len) {
+    SectionLocationTableEntry *entry;
+
+    for (entry = &sectionLocationTable[0]; entry->name != NULL; entry++) {
+        if (entry->len == len && strncasecmp(entry->name, name, len) == 0)
+            return entry->location;
+    }
+    return SectionLocation_None;
+}
+
+/*
+ *  findSectionType - fina a match for the name of a section type
+ */
+typedef struct sectionTypeTableEntry {
+    char *name;
+    int len;
+    SectionType type;
+} SectionTypeTableEntry;
+
+static SectionTypeTableEntry sectionTypeTable[] = {
+    {"MIXED",   5, SectionType_Mixed},
+    {"CODE",    4, SectionType_Code},
+    {"DATA",    4, SectionType_Data},
+    {"STACK",   5, SectionType_Stack},
+    {"COMMON",  6, SectionType_Common},
+    {"DYNAMIC", 7, SectionType_Dynamic},
+    {"TASKCOM", 7, SectionType_TaskCom},
+    {NULL,      0, 0}
+};
+
+static SectionType findSectionType(char *name, int len) {
+    SectionTypeTableEntry *entry;
+
+    for (entry = &sectionTypeTable[0]; entry->name != NULL; entry++) {
+        if (entry->len == len && strncasecmp(entry->name, name, len) == 0)
+            return entry->type;
+    }
+    return SectionType_None;
+}
+
+/*
  *  forceDataWordBoundary - advance location and origin counters to next word boundary, if necessary
  */
 static void forceDataWordBoundary(void) {
-    if (currentBlock->parcelBitPosCounter > 0)
-        advanceBitPosition(16 - currentBlock->parcelBitPosCounter);
-    while ((currentBlock->locationCounter & 0x03) != 0) {
+    if (currentSection->parcelBitPosCounter > 0)
+        advanceBitPosition(16 - currentSection->parcelBitPosCounter);
+    while ((currentSection->locationCounter & 0x03) != 0) {
         advanceBitPosition(16);
     }
 }
@@ -4613,7 +4845,7 @@ static void forceInstWordBoundary(void) {
 
     savedListControl = currentListControl;
     currentListControl = 0;
-    while ((currentBlock->locationCounter & 0x03) != 0) {
+    while ((currentSection->locationCounter & 0x03) != 0) {
         emitPassFill();
     }
     currentListControl = savedListControl;
@@ -5075,9 +5307,11 @@ void instInit(void) {
     addInstruction("DATA",    0, DATA);
     addInstruction("OPSYN",   0, OPSYN);
     addInstruction("ENDM",    0, ENDM);
+    addInstruction("FORMAT",  0, FORMAT);
     addInstruction("START",   0, START);
     addInstruction("=",       0, EQU);
     addInstruction("LIST",    0, LIST);
+    addInstruction("SECTION", 0, SECTION);
     addInstruction("ERRIF",   0, ERRIF);
     addInstruction("BITW",    0, BITW);
     addInstruction("END",     0, END);
@@ -5140,6 +5374,21 @@ void instInit(void) {
     addInstruction("ECI",     INST_MACHINE, ECI);
 }
 
+bool isCodeSection(Section *section) {
+    return section != NULL && (section->type == SectionType_Mixed || section->type == SectionType_Code);
+}
+
+bool isCommonSection(Section *section) {
+    return section != NULL
+        && (section->type == SectionType_Common
+            || section->type == SectionType_Dynamic
+            || section->type == SectionType_TaskCom);
+}
+
+bool isDataSection(Section *section) {
+    return section != NULL && (section->type == SectionType_Mixed || section->type == SectionType_Data);
+}
+
 static bool isEquivNode(PatternNode *node1, PatternNode *node2) {
     if (node1->type == node2->type) {
         switch (node1->type) {
@@ -5180,6 +5429,10 @@ static bool isInteger(Value *val) {
 
 static bool isIntegerRange(Value *val, int lowerBound, int upperBound) {
     return (isInteger(val) && val->intValue >= lowerBound && val->intValue <= upperBound);
+}
+
+bool isNamedCommonSection(Section *section) {
+    return section != NULL && section->type == SectionType_Common && *section->id != '\0';
 }
 
 static bool isNegOne(Value *val) {
@@ -5860,7 +6113,7 @@ static void skipLines(Token *locationFieldToken, int count) {
                 if (isUnqualifiedName(&token)
                     && *s == ' '
                     && condToken->details.name.len == token.details.name.len
-                    && strncasecmp(condToken->details.name.ptr, token.details.name.ptr, token.details.name.len) == 0)
+                    && strncmp(condToken->details.name.ptr, token.details.name.ptr, token.details.name.len) == 0)
                     break;
             }
         }

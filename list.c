@@ -38,7 +38,6 @@ static void resetListingLine(void);
 
 #define LINES_PER_PAGE      55
 #define LISTING_LINE_LENGTH 132
-#define COL_BLOCK           76
 #define COL_CAL_VERSION     76
 #define COL_CPU_TYPE        66
 #define COL_DATE            96
@@ -48,6 +47,7 @@ static void resetListingLine(void);
 #define COL_CODE            19
 #define COL_PAGE            115
 #define COL_QUALIFIER       96
+#define COL_SECTION         74
 #define COL_SOURCE          44
 #define COL_SUBTITLE        1
 #define COL_TIME            105
@@ -138,7 +138,7 @@ void listCode7_24(u32 bits, u16 attributes) {
 }
 
 void listCodeLocation(void) {
-    listLocation(currentBlock->originCounter);
+    listLocation(currentSection->originCounter);
 }
 
 void listEject(void) {
@@ -165,24 +165,22 @@ void listErrorSummary(void) {
     ErrorCode code;
 
     if (isListSuppressed()) return;
-    if (listingFile != NULL) {
-        listEject();
-        strcpy(subtitle, "ERROR SUMMARY");
-        if (errorCount > 0) {
-            sprintf(listingLine, " %d ERROR%s\n", errorCount, (errorCount > 1) ? "S" : "");
-            listFlush();
-        }
-        if (warningCount > 0) {
-            sprintf(listingLine, " %d WARNING%s\n", warningCount, (warningCount > 1) ? "S" : "");
-            listFlush();
-        }
-        if (errorCount + warningCount > 0) {
-            listSpace(1);
-            for (code = Err_DataItem; code <= Warn_RedefinedMacro; code++) {
-                if ((errorUnion & (1 << code)) != 0) {
-                    sprintf(listingLine, " %-2s %s\n", getErrorIndicator(code), getErrorMessage(code));
-                    listFlush();
-                }
+    listEject();
+    strcpy(subtitle, "ERROR SUMMARY");
+    if (errorCount > 0) {
+        sprintf(listingLine, " %d ERROR%s\n", errorCount, (errorCount > 1) ? "S" : "");
+        listFlush();
+    }
+    if (warningCount > 0) {
+        sprintf(listingLine, " %d WARNING%s\n", warningCount, (warningCount > 1) ? "S" : "");
+        listFlush();
+    }
+    if (errorCount + warningCount > 0) {
+        listSpace(1);
+        for (code = Err_DataItem; code <= Warn_RedefinedMacro; code++) {
+            if ((errorUnion & (1 << code)) != 0) {
+                sprintf(listingLine, " %-2s %s\n", getErrorIndicator(code), getErrorMessage(code));
+                listFlush();
             }
         }
     }
@@ -276,12 +274,12 @@ static void listPageHeader(void) {
         headerLine[0] = ' ';
         if (subtitle[0] != '\0') {
             hp = &headerLine[COL_SUBTITLE];
-            limit = &headerLine[COL_BLOCK-2];
+            limit = &headerLine[COL_SECTION-2];
             cp = subtitle;
             while (*cp != '\0' && hp < limit) *hp++ = *cp++;
         }
-        sprintf(buf, "BLOCK: %s", ""); // TODO: obtain current block name
-        hp = &headerLine[COL_BLOCK];
+        sprintf(buf, "SECTION: %s", currentSection->id);
+        hp = &headerLine[COL_SECTION];
         limit = &headerLine[COL_QUALIFIER-2];
         cp = buf;
         while (*cp != '\0' && hp < limit) *hp++ = *cp++;
@@ -332,7 +330,7 @@ static void listSymbols(Symbol *symbol) {
 
     if (symbol != NULL) {
         listSymbols(symbol->left);
-        if (*symbol->id != '*') {
+        if ((symbol->value.attributes & SYM_COUNTER) == 0) {
             sprintf(listingLine, " %-8s ", symbol->id);
             col = 10;
             listingLine[col++] = ((symbol->value.attributes & SYM_REDEFINABLE) != 0) ? 'R' : ' ';
@@ -348,7 +346,7 @@ static void listSymbols(Symbol *symbol) {
                 listingLine[col++] = '+';
             else
                 listingLine[col++] = ' ';
-            listingLine[col++] = ((symbol->value.attributes & SYM_COMMON)      != 0) ? 'C' : ' ';
+            listingLine[col++] = isCommonSection(symbol->value.section) ? 'C' : ' ';
             col += 2;
             if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0)
                 sprintf(&listingLine[col], "%lo%c\n", symbol->value.intValue >> 2, parcelIndicator[symbol->value.intValue & 0x03]);

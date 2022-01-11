@@ -24,21 +24,22 @@
 **--------------------------------------------------------------------------
 */
 
-#define ARG_STACK_SIZE          100
-#define BASE_STACK_SIZE         100
-#define BLOCK_STACK_SIZE        100
-#define COLUMN_LIMIT            72
-#define FALSE                   0
-#define IMAGE_INCREMENT         4096
-#define LIST_CONTROL_STACK_SIZE 100
-#define MACRO_STACK_SIZE        100
-#define MAX_ERROR_INDICATIONS   7
-#define MAX_FILE_PATH_LENGTH    256
-#define MAX_SOURCE_LINE_LENGTH  90
-#define MAX_RESULT_FIELD_EXPRS  3
-#define MAX_TITLE_LENGTH        64
-#define OP_STACK_SIZE           100
-#define QUALIFIER_STACK_SIZE    100
-#define TRUE                    1
+#define ARG_STACK_SIZE           100
+#define BASE_STACK_SIZE          100
+#define BLOCK_STACK_SIZE         100
+#define COLUMN_LIMIT             72
+#define FALSE                    0
+#define IMAGE_INCREMENT          4096
+#define LIST_CONTROL_STACK_SIZE  100
+#define MACRO_STACK_SIZE         100
+#define MAX_ERROR_INDICATIONS    7
+#define MAX_FILE_PATH_LENGTH     256
+#define MAX_SOURCE_LINE_LENGTH   90
+#define MAX_RESULT_FIELD_EXPRS   3
+#define MAX_TITLE_LENGTH         64
+#define OP_STACK_SIZE            100
+#define QUALIFIER_STACK_SIZE     100
+#define SOURCE_FORMAT_STACK_SIZE 100
+#define TRUE                     1
 
 #endif

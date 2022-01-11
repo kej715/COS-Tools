@@ -48,7 +48,7 @@ static MacroDefn *findMacroDefn(char *id, int len);
 static int findStringEnd(int cursor);
 static void getFields(void);
 static int getNextField(int cursor, int *start);
-static bool haveCompatibleBlocks(Value *val1, Value *val2);
+static bool haveCompatibleSections(Value *val1, Value *val2);
 static char *interpolateMicros(char *dst, int dstLen, char *src, int srcLen);
 static bool isRegisterDesignator(char *s, int len, Token *token);
 static bool isLocCtrDelimiter(char c);
@@ -62,6 +62,7 @@ static void popOp(OpStackEntry *op);
 static void pushArg(Value *arg);
 static void pushOp(Token *token);
 static void resetLocationField(void);
+static void setRelativeAttributes(Value *val1, Value *val2);
 
 static char fields[(COLUMN_LIMIT+2)*3];
 
@@ -289,12 +290,12 @@ ErrorCode evaluateExpression(Token *expression, Value *value) {
         popArg(value);
     else if (err == Err_Undefined) {
         value->attributes = SYM_UNDEFINED;
-        value->block = NULL;
+        value->section = NULL;
         value->intValue = 0;
     }
     else {
         value->attributes = 0;
-        value->block = NULL;
+        value->section = NULL;
         value->intValue = 0;
         err = Err_Expression;
     }
@@ -304,7 +305,7 @@ ErrorCode evaluateExpression(Token *expression, Value *value) {
 static ErrorCode evaluateExprHelper(Token *expression) {
     ErrorCode err;
     Literal *literal;
-    Block *literalsBlock;
+    Section *literalsSection;
     OpStackEntry op;
     Token *rightArg;
     Value val;
@@ -317,7 +318,7 @@ static ErrorCode evaluateExprHelper(Token *expression) {
     case TokenType_Number:
         val.type = expression->details.number.type;
         val.attributes = 0;
-        val.block = NULL;
+        val.section = NULL;
         val.intValue = expression->details.number.intValue;
         pushArg(&val);
         break;
@@ -348,9 +349,9 @@ static ErrorCode evaluateExprHelper(Token *expression) {
             literal = addLiteral(expression->details.operator.rightArg);
             val.type = NumberType_Integer;
             val.attributes = SYM_WORD_ADDRESS|SYM_LITERAL;
-            val.block = literalsBlock = currentModule->firstBlock->next; // 2nd block is always literals block
+            val.section = literalsSection = currentModule->firstSection->next; // 2nd section is always literals section
             if (pass == 1 || currentModule->isAbsolute == FALSE) val.attributes |= SYM_RELOCATABLE;
-            val.intValue = (literalsBlock->originOffset + literal->offset) >> 2;
+            val.intValue = (literalsSection->originOffset + literal->offset) >> 2;
             pushArg(&val);
             opStackPtr -= 1;
             return err;
@@ -415,7 +416,7 @@ static ErrorCode evaluateString(Token *token) {
 
     val.type = NumberType_Integer;
     val.attributes = 0;
-    val.block = NULL;
+    val.section = NULL;
     val.intValue = 0;
     s = token->details.string.ptr;
     limit = s + token->details.string.len;
@@ -448,25 +449,37 @@ static ErrorCode evaluateSymbol(Token *token) {
     if (symbol != NULL) {
         err = Err_None;
         val.type = symbol->value.type;
-        if (symbol->id[0] == '*') {
+        if ((symbol->value.attributes & SYM_COUNTER) != 0) {
             val.attributes = SYM_PARCEL_ADDRESS;
-            val.block = NULL;
-            if (currentModule->isAbsolute == FALSE) val.attributes |= SYM_RELOCATABLE;
+            val.section = NULL;
             if (strcmp(symbol->id, "*") == 0) {
-                val.block = currentBlock;
-                val.intValue = currentBlock->locationCounter;
+                val.section = currentSection;
+                val.intValue = currentSection->locationCounter;
+                val.attributes = currentSection->locationAttributes;
             }
-            else if (strcmp(symbol->id, "*O") == 0) {
-                val.block = currentBlock;
-                val.intValue = currentBlock->originCounter;
+            else if (strcasecmp(symbol->id, "*A") == 0) {
+                val.section = currentSection;
+                val.intValue = currentSection->locationCounter;
             }
-            else if (strcmp(symbol->id, "*P") == 0) {
+            else if (strcasecmp(symbol->id, "*B") == 0) {
+                val.section = currentSection;
+                val.intValue = currentSection->originCounter;
+            }
+            else if (strcasecmp(symbol->id, "*O") == 0) {
+                val.section = currentSection;
+                val.intValue = currentSection->originCounter;
+                if (currentSection->type == SectionType_Stack || currentSection->type == SectionType_TaskCom)
+                    val.attributes |= SYM_IMMOBILE;
+                else
+                    val.attributes |= SYM_RELOCATABLE;
+            }
+            else if (strcasecmp(symbol->id, "*P") == 0) {
                 val.attributes = 0;
-                val.intValue = currentBlock->parcelBitPosCounter;
+                val.intValue = currentSection->parcelBitPosCounter;
             }
-            else if (strcmp(symbol->id, "*W") == 0) {
+            else if (strcasecmp(symbol->id, "*W") == 0) {
                 val.attributes = 0;
-                val.intValue = currentBlock->wordBitPosCounter;
+                val.intValue = currentSection->wordBitPosCounter;
             }
             else {
                 val.attributes |= SYM_UNDEFINED;
@@ -476,7 +489,7 @@ static ErrorCode evaluateSymbol(Token *token) {
         }
         else {
             val.attributes = symbol->value.attributes;
-            val.block = symbol->value.block;
+            val.section = symbol->value.section;
             val.intValue = symbol->value.intValue;
             if ((val.attributes & SYM_UNDEFINED) != 0) err = Err_Undefined;
         }
@@ -484,7 +497,7 @@ static ErrorCode evaluateSymbol(Token *token) {
     else {
         val.type = NumberType_Integer;
         val.attributes = SYM_UNDEFINED;
-        val.block = NULL;
+        val.section = NULL;
         val.intValue = 0;
         err = Err_Undefined;
     }
@@ -501,6 +514,7 @@ static ErrorCode executeOperator(OperatorType opType) {
 
     if (argStackPtr < 1) return Err_Expression;
     popArg(&rightArg);
+    if (rightArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
     err = Err_None;
     switch (opType) {
     case Op_Negate:
@@ -511,6 +525,7 @@ static ErrorCode executeOperator(OperatorType opType) {
         pushArg(&rightArg);
         break;
     case Op_Complement:
+        if (isAbsoluteType(&rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
         rightArg.intValue = ~rightArg.intValue;
         pushArg(&rightArg);
         break;
@@ -520,7 +535,7 @@ static ErrorCode executeOperator(OperatorType opType) {
             rightArg.attributes &= ~SYM_WORD_ADDRESS;
         }
         rightArg.attributes |= SYM_PARCEL_ADDRESS;
-        if (rightArg.block == NULL) rightArg.block = currentBlock;
+        if (rightArg.section == NULL) rightArg.section = currentSection;
         pushArg(&rightArg);
         break;
     case Op_Word:
@@ -529,7 +544,7 @@ static ErrorCode executeOperator(OperatorType opType) {
             rightArg.attributes &= ~SYM_PARCEL_ADDRESS;
         }
         rightArg.attributes |= SYM_WORD_ADDRESS;
-        if (rightArg.block == NULL) rightArg.block = currentBlock;
+        if (rightArg.section == NULL) rightArg.section = currentSection;
         pushArg(&rightArg);
         break;
     case Op_Literal:
@@ -543,21 +558,22 @@ static ErrorCode executeOperator(OperatorType opType) {
         rightArg.type = NumberType_Integer;
         rightArg.attributes = SYM_PARCEL_ADDRESS|SYM_LITERAL;
         if (pass == 1 || currentModule->isAbsolute == FALSE) rightArg.attributes |= SYM_RELOCATABLE;
-        rightArg.block = currentModule->firstBlock->next; // 2nd block is always literals block
+        rightArg.section = currentModule->firstSection->next; // 2nd section is always literals section
         rightArg.intValue = literal->offset;
         pushArg(&rightArg);
         break;
     case Op_Add:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (haveCompatibleBlocks(&leftArg, &rightArg) == FALSE) err = registerError(Err_RelocatableField);
+        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
+        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
         if (getValueType(&leftArg) == getValueType(&rightArg)) {
             leftArg.intValue = leftArg.intValue + rightArg.intValue;
         }
         else if (isValueType(&leftArg)) {
             leftArg.intValue = leftArg.intValue + rightArg.intValue;
             leftArg.attributes = rightArg.attributes;
-            leftArg.block = rightArg.block;
+            leftArg.section = rightArg.section;
         }
         else if (isWordType(&leftArg)) {
             if (isValueType(&rightArg)) {
@@ -583,15 +599,16 @@ static ErrorCode executeOperator(OperatorType opType) {
         break;
     case Op_Subtract:
         if (argStackPtr < 1) return Err_Expression;
+        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
         popArg(&leftArg);
-        if (haveCompatibleBlocks(&leftArg, &rightArg) == FALSE) err = registerError(Err_RelocatableField);
+        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
         if (getValueType(&leftArg) == getValueType(&rightArg)) {
             leftArg.intValue = leftArg.intValue - rightArg.intValue;
         }
         else if (isValueType(&leftArg)) {
             leftArg.intValue = leftArg.intValue - rightArg.intValue;
             leftArg.attributes = rightArg.attributes;
-            leftArg.block = rightArg.block;
+            leftArg.section = rightArg.section;
         }
         else if (isWordType(&leftArg)) {
             if (isValueType(&rightArg)) {
@@ -618,7 +635,11 @@ static ErrorCode executeOperator(OperatorType opType) {
     case Op_Multiply:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (haveCompatibleBlocks(&leftArg, &rightArg) == FALSE) err = registerError(Err_RelocatableField);
+        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
+        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE
+            || (isAbsoluteType(&leftArg) == FALSE && isAbsoluteType(&rightArg) == FALSE)
+            || (isExternalType(&leftArg) && isExternalType(&rightArg)))
+            err = registerError(Warn_ExpressionElement);
         if (getValueType(&leftArg) == getValueType(&rightArg)) {
             leftArg.intValue = leftArg.intValue * rightArg.intValue;
             if (isValueType(&leftArg) == FALSE) {
@@ -629,7 +650,7 @@ static ErrorCode executeOperator(OperatorType opType) {
         else if (isValueType(&leftArg)) {
             leftArg.intValue = leftArg.intValue * rightArg.intValue;
             leftArg.attributes = rightArg.attributes;
-            leftArg.block = rightArg.block;
+            leftArg.section = rightArg.section;
         }
         else if (isWordType(&leftArg)) {
             if (isValueType(&rightArg)) {
@@ -651,13 +672,22 @@ static ErrorCode executeOperator(OperatorType opType) {
                 err = Warn_ExpressionElement;
             }
         }
+        setRelativeAttributes(&leftArg, &rightArg);
         pushArg(&leftArg);
         break;
     case Op_Divide:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (haveCompatibleBlocks(&leftArg, &rightArg) == FALSE) err = registerError(Err_RelocatableField);
-        if (rightArg.intValue == 0) return Err_Expression;
+        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
+        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE
+            || isAbsoluteType(&leftArg) == FALSE
+            || isAbsoluteType(&rightArg) == FALSE
+            || (isExternalType(&leftArg) && isExternalType(&rightArg)))
+            err = registerError(Warn_ExpressionElement);
+        if (rightArg.intValue == 0) {
+            pushArg(&rightArg);
+            return Err_Expression;
+        }
         if (getValueType(&leftArg) == getValueType(&rightArg)) {
             leftArg.intValue = leftArg.intValue / rightArg.intValue;
             leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
@@ -665,7 +695,7 @@ static ErrorCode executeOperator(OperatorType opType) {
         else if (isValueType(&leftArg)) {
             leftArg.intValue = leftArg.intValue / rightArg.intValue;
             leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-            leftArg.block = rightArg.block;
+            leftArg.section = rightArg.section;
             err = Warn_ExpressionElement;
         }
         else if (isWordType(&leftArg)) {
@@ -688,6 +718,7 @@ static ErrorCode executeOperator(OperatorType opType) {
                 err = Warn_ExpressionElement;
             }
         }
+        setRelativeAttributes(&leftArg, &rightArg);
         pushArg(&leftArg);
         break;
     default:
@@ -771,23 +802,46 @@ static void getFields(void) {
     *operandField = '\0';
     if (sourceLine[0] == '*') return;
     cursor = 0;
-    while (cursor < COLUMN_LIMIT) {
-        cursor = getNextField(cursor, &start);
-        len = cursor - start;
-        if (len <= 0) break;
-        if (start <= 1) {
-            s = interpolateMicros(locationField, COLUMN_LIMIT, &sourceLine[start], len);
-            *s = '\0';
+    if (currentSourceFormat == SourceFormat_New) {
+        while (cursor < COLUMN_LIMIT) {
+            cursor = getNextField(cursor, &start);
+            len = cursor - start;
+            if (len <= 0) break;
+            if (start < 1) {
+                s = interpolateMicros(locationField, COLUMN_LIMIT, &sourceLine[start], len);
+                *s = '\0';
+            }
+            else if (*resultField == '\0' && (*locationField != '\0' || start > 0)) {
+                s = interpolateMicros(resultField, COLUMN_LIMIT, &sourceLine[start], len);
+                *s = '\0';
+                resultFieldEnd = (s - resultField) - 1;
+            }
+            else if (*operandField == '\0' && *resultField != '\0') {
+                s = interpolateMicros(operandField, COLUMN_LIMIT, &sourceLine[start], len);
+                *s = '\0';
+                break;
+            }
         }
-        else if (resultField[0] == '\0' && (start < 34 || locationField[0] != '\0')) {
-            s = interpolateMicros(resultField, COLUMN_LIMIT, &sourceLine[start], len);
-            *s = '\0';
-            resultFieldEnd = (s - resultField) - 1;
-        }
-        else if (operandField[0] == '\0' && resultField[0] != '\0' && (start < 34 || resultFieldEnd >= 34)) {
-            s = interpolateMicros(operandField, COLUMN_LIMIT, &sourceLine[start], len);
-            *s = '\0';
-            break;
+    }
+    else { // SourceFormat_Old
+        while (cursor < COLUMN_LIMIT) {
+            cursor = getNextField(cursor, &start);
+            len = cursor - start;
+            if (len <= 0) break;
+            if (start <= 1) {
+                s = interpolateMicros(locationField, COLUMN_LIMIT, &sourceLine[start], len);
+                *s = '\0';
+            }
+            else if (resultField[0] == '\0' && (start < 34 || locationField[0] != '\0')) {
+                s = interpolateMicros(resultField, COLUMN_LIMIT, &sourceLine[start], len);
+                *s = '\0';
+                resultFieldEnd = (s - resultField) - 1;
+            }
+            else if (operandField[0] == '\0' && resultField[0] != '\0' && (start < 34 || resultFieldEnd >= 34)) {
+                s = interpolateMicros(operandField, COLUMN_LIMIT, &sourceLine[start], len);
+                *s = '\0';
+                break;
+            }
         }
     }
 }
@@ -799,7 +853,7 @@ static int getNextField(int cursor, int *start) {
     *start = cursor;
     while (cursor < COLUMN_LIMIT) {
         c = sourceLine[cursor];
-        if (c == '\0' || c == ' ') break;
+        if (c == '\0' || c == ' ' || (c == ';' && currentSourceFormat == SourceFormat_New)) break;
         if (c == '\'') {
             if (cursor > *start) {
                 switch (sourceLine[cursor - 1]) {
@@ -926,7 +980,9 @@ char *getNextToken(char *s, Token *token) {
         s = parseString(s, token);
     }
     //
-    //  Recognize syntax for special counters *, *O, *P, and *W
+    //  Recognize syntax for special counters *, *A, *B, *O, *P, and *W,
+    //  and also recognize syntax for floating point multiplication
+    //  machine instruction register references.
     //
     else if (*s == '*') {
         // preset to the most likely token type
@@ -942,9 +998,16 @@ char *getNextToken(char *s, Token *token) {
         }
         else {
             switch (c) {
+            case 'A':
+            case 'a':
+            case 'B':
+            case 'b':
             case 'O':
+            case 'o':
             case 'P':
+            case 'p':
             case 'W':
+            case 'w':
                 if (isNameChar(*(s + 1)) == FALSE) {
                     token->type = TokenType_Name;
                     token->details.name.ptr = s - 1;
@@ -1170,8 +1233,8 @@ u16 getValueType(Value *value) {
     return value->attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
 }
 
-static bool haveCompatibleBlocks(Value *val1, Value *val2) {
-    return (val1->block == val2->block || val1->block == NULL || val2->block == NULL);
+static bool haveCompatibleSections(Value *val1, Value *val2) {
+    return (val1->section == val2->section || val1->section == NULL || val2->section == NULL);
 }
 
 static char *interpolateMicros(char *dst, int dstLen, char *src, int srcLen) {
@@ -1202,6 +1265,18 @@ static char *interpolateMicros(char *dst, int dstLen, char *src, int srcLen) {
         src += 1;
     }
     return dst;
+}
+
+bool isAbsoluteType(Value *val) {
+    return (val->attributes & (SYM_IMMOBILE|SYM_RELOCATABLE|SYM_EXTERNAL)) == 0;
+}
+
+bool isExternalType(Value *val) {
+    return (val->attributes & SYM_EXTERNAL) == 0;
+}
+
+bool isImmobileType(Value *val) {
+    return (val->attributes & SYM_IMMOBILE) != 0;
 }
 
 static bool isLocCtrDelimiter(char c) {
@@ -1236,6 +1311,10 @@ static bool isQualDelimiter(char c) {
         if (qualDelimiters[i] == c) return TRUE;
     }
     return FALSE;
+}
+
+bool isRelocatableType(Value *val) {
+    return (val->attributes & SYM_RELOCATABLE) != 0;
 }
 
 static bool isRegisterDesignator(char *s, int len, Token *token) {
@@ -1728,16 +1807,16 @@ ErrorCode parseSourceLine(void) {
             inst = findInstruction(resultField, len);
             if (inst != NULL) {
                 if ((inst->attributes & INST_MACHINE) != 0) {
-                    if (currentModule->id[0] == '\0') {
-                        err = registerError(Err_InstructionPlacement);
-                    }
-                    else {
+                    if (currentModule->id[0] != '\0' && isCodeSection(currentSection)) {
                         if (locationFieldToken != NULL) {
                             err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr,
                                                                   locationFieldToken->details.name.len,
                                                                   SYM_PARCEL_ADDRESS));
                         }
                         err = registerError((*inst->handler)());
+                    }
+                    else {
+                        err = registerError(Err_InstructionPlacement);
                     }
                 }
                 else { // pseudo-instruction
@@ -1747,11 +1826,11 @@ ErrorCode parseSourceLine(void) {
             //
             //  Process other machine instruction forms
             //
-            else if (currentModule->id[0] == '\0') {
-                err = registerError(Err_InstructionPlacement);
+            else if (currentModule->id[0] != '\0' && isCodeSection(currentSection)) {
+                err = registerError(processMachineInstruction());
             }
             else {
-                err = registerError(processMachineInstruction());
+                err = registerError(Err_InstructionPlacement);
             }
         }
     }
@@ -1926,6 +2005,30 @@ static void resetLocationField(void) {
     if (locationFieldToken != NULL) {
         freeToken(locationFieldToken);
         locationFieldToken = NULL;
+    }
+}
+
+static void setRelativeAttributes(Value *val1, Value *val2) {
+    int absoluteCount;
+    int externalCount;
+    int immobileCount;
+    int relocatableCount;
+
+    absoluteCount = externalCount = immobileCount = relocatableCount = 0;
+    if (isAbsoluteType(val1))    absoluteCount    += 1;
+    if (isAbsoluteType(val2))    absoluteCount    += 1;
+    if (isExternalType(val1))    externalCount    += 1;
+    if (isExternalType(val2))    externalCount    += 1;
+    if (isImmobileType(val1))    immobileCount    += 1;
+    if (isImmobileType(val2))    immobileCount    += 1;
+    if (isRelocatableType(val1)) relocatableCount += 1;
+    if (isRelocatableType(val2)) relocatableCount += 1;
+    if (absoluteCount == 2) return;
+    if (immobileCount == 1 && absoluteCount >= 0 && externalCount == 0 && relocatableCount == 0) {
+        val1->attributes |= SYM_IMMOBILE;
+    }
+    else if (relocatableCount == 1 && absoluteCount >= 0 && immobileCount == 0 && externalCount == 0) {
+        val1->attributes |= SYM_RELOCATABLE;
     }
 }
 

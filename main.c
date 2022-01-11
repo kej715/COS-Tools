@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
         module->isOriginSet = FALSE;
         currentModule = module;
         emitLiterals();
-        calculateBlockOffsets(currentModule);
+        calculateSectionOffsets(currentModule);
         adjustSymbolValues(currentModule);
     }
     runPass(2);
@@ -164,7 +164,7 @@ void resetBase(void) {
 static void resetDefaultModule(void) {
     currentModule = findModule("", 0);
     resetModule(currentModule);
-    currentBlock = currentModule->firstBlock;
+    currentSection = currentModule->firstSection;
 }
 
 static void resetQualifierStack(void) {

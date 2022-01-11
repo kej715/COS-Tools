@@ -77,6 +77,14 @@ typedef enum errorCode {
 #define LIST_WMR    0x800
 
 /*
+ *  Source code formats
+ */
+typedef enum sourceFormatType {
+    SourceFormat_New = 0,
+    SourceFormat_Old
+} SourceFormatType;
+
+/*
  *  Types supporting macro definitions
  */
 typedef enum macroParamType {
@@ -121,7 +129,7 @@ typedef struct macroCall {
 } MacroCall;
 
 /*
- *  Instances of Name are associated with blocks, duplicateds,
+ *  Instances of Name are associated with sections, duplicateds,
  *  macros, micros, and modules.
  */
 
@@ -140,9 +148,9 @@ typedef struct name {
 #define SYM_PARCEL_ADDRESS  0x004
 #define SYM_LITERAL         0x008
 #define SYM_RELOCATABLE     0x010
-#define SYM_EXTERNAL        0x020
-#define SYM_ENTRY           0x040
-#define SYM_COMMON          0x080
+#define SYM_IMMOBILE        0x020
+#define SYM_EXTERNAL        0x040
+#define SYM_ENTRY           0x080
 #define SYM_COUNTER         0x100
 #define SYM_UNDEFINED       0x200
 
@@ -157,7 +165,7 @@ typedef enum numberType {
 typedef struct value {
     NumberType type;
     u16 attributes;
-    struct block *block;
+    struct section *section;
     union {
         i64 intValue;
         f64 floatValue;
@@ -180,19 +188,41 @@ typedef struct qualifier {
 } Qualifier;
 
 /*
- *  Block definition
+ *  Section definition
  */
+typedef enum sectionType {
+    SectionType_Mixed = 0,
+    SectionType_Code,
+    SectionType_Data,
+    SectionType_Stack,
+    SectionType_Common,
+    SectionType_Dynamic,
+    SectionType_TaskCom,
+    SectionType_None
+} SectionType;
 
-typedef struct block {
-    struct block *next;
+typedef enum sectionLocation {
+    SectionLocation_CM = 0,
+    SectionLocation_EM,
+    SectionLocation_LM,
+    SectionLocation_None
+} SectionLocation;
+
+typedef struct section {
+    struct section *next;
     char *id;
+    SectionType type;
+    SectionLocation location;
     u32 originOffset;
     u32 size;
     u32 originCounter;
     u32 locationCounter;
+    u16 locationAttributes;
     u8  wordBitPosCounter;
     u8  parcelBitPosCounter;
-} Block;
+    u32 relocationCoefficient;
+    u32 immobileCoefficient;
+} Section;
 
 /*
  *  Named instruction definitions
@@ -389,8 +419,8 @@ typedef struct module {
     Symbol *start;
     Symbol *entryPoints;
     Symbol *externals;
-    Block *firstBlock;
-    Block *lastBlock;
+    Section *firstSection;
+    Section *lastSection;
     u8 *image;
     u32 imageSize;
 } Module;
