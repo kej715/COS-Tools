@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "cosdataset.h"
 #include "proto.h"
 #include "types.h"
@@ -33,6 +34,7 @@ static void parseArgs(int argc, char *argv[]);
 static void resetDefaultModule(void);
 static void resetQualifierStack(void);
 static int  runPass(int passNo);
+static void timeInit(void);
 static void usage(void);
 static void writeModuleImages(void);
 
@@ -42,6 +44,7 @@ int main(int argc, char *argv[]) {
     Module *module;
 
     parseArgs(argc, argv);
+    timeInit();
     instInit();
     listInit();
     (void)addModule("", 0);
@@ -49,15 +52,13 @@ int main(int argc, char *argv[]) {
     runPass(1);
     for (module = firstModule; module != NULL; module = module->next) {
         module->isOriginSet = FALSE;
-        currentModule = module;
-        emitLiterals();
-        calculateSectionOffsets(currentModule);
-        adjustSymbolValues(currentModule);
+        emitLiterals(module);
+        createObjectBlocks(module);
+        adjustSymbolValues(module);
     }
     runPass(2);
     for (module = firstModule; module != NULL; module = module->next) {
-        currentModule = module;
-        emitLiterals();
+        emitLiterals(module);
     }
     listErrorSummary();
     listSymbolTable();
@@ -197,6 +198,17 @@ static int runPass(int passNo) {
         }
     }
     return 0;
+}
+
+static void timeInit(void) {
+    time_t clock;
+    struct tm *tmp;
+
+    clock = time(NULL);
+    tmp = localtime(&clock);
+    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_year - 100);
+    sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
+    sprintf(currentJDate, "%02d/%03d", tmp->tm_year - 100, tmp->tm_yday + 1);
 }
 
 static void usage(void) {

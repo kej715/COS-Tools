@@ -64,7 +64,7 @@ Literal *addLiteral(Token *expression) {
     }
 }
 
-ErrorCode addLocationSymbol(char *id, int len, u16 attributes) {
+ErrorCode addLocationSymbol(Section *section, char *id, int len, u16 attributes) {
     ErrorCode err;
     Symbol *symbol;
     Value val;
@@ -74,9 +74,9 @@ ErrorCode addLocationSymbol(char *id, int len, u16 attributes) {
 
     err = Err_None;
     val.type = NumberType_Integer;
-    val.attributes = attributes | getRelativeAttribute(currentSection);
-    val.section = currentSection;
-    val.intValue = currentSection->locationCounter;
+    val.attributes = attributes | getRelativeAttribute(section);
+    val.section = section;
+    val.intValue = section->locationCounter;
     if ((attributes & SYM_WORD_ADDRESS) != 0) val.intValue >>= 2;
     symbol = findSymbol(id, len, currentQualifier);
     if (symbol != NULL) {
@@ -121,17 +121,10 @@ Module *addModule(char *id, int len) {
     lastModule = module;
     name->value = module;
     module->id = name->id;
-    module->imageSize = IMAGE_INCREMENT;
-    module->image = (u8 *)allocate(module->imageSize);
     savedModule = currentModule;
     currentModule = module;
-    section = (Section *)allocate(sizeof(Section));       // add nominal section
-    section->id = "";
-    module->firstSection = section;
-    section->next = (Section *)allocate(sizeof(Section)); // add liternals section
-    section = section->next;
-    section->id = "=";
-    module->lastSection = section;
+    section = addSection(module, "",  0, SectionType_Mixed, SectionLocation_CM);
+    section = addSection(module, "=", 1, SectionType_Mixed, SectionLocation_CM);
     module->qualifiers = qualifier = addQualifier("", 0);
     val.type = NumberType_Integer;
     val.attributes = SYM_PARCEL_ADDRESS|SYM_COUNTER;
@@ -239,18 +232,21 @@ Qualifier *addQualifier(char *id, int len) {
     return new;
 }
 
-Section *addSection(Module *module, char *id, int len, SectionType type) {
+Section *addSection(Module *module, char *id, int len, SectionType type, SectionLocation location) {
     Section *section;
 
     section = (Section *)allocate(sizeof(Section));
     section->id = (char *)allocate(len + 1);
     memcpy(section->id, id, len);
-    section->locationAttributes = SYM_PARCEL_ADDRESS;
-    if (type == SectionType_Stack || type == SectionType_TaskCom)
-        section->locationAttributes |= SYM_IMMOBILE;
-    else
-        section->locationAttributes |= SYM_RELOCATABLE;
-    module->lastSection->next = section;
+    section->module = module;
+    section->type = type;
+    section->location = location;
+    if (module->lastSection != NULL) {
+        module->lastSection->next = section;
+    }
+    else {
+        module->firstSection = section;
+    }
     module->lastSection = section;
     return section;
 }
@@ -359,18 +355,68 @@ static Symbol *allocSymbol(char *id, int len, Value *value) {
     return symbol;
 }
 
-void calculateSectionOffsets(Module *module) {
-    Section *section;
+void createObjectBlocks(Module *module) {
+    u16 index;
+    ObjectBlock *localObjectBlock;
+    ObjectBlock *objectBlock;
     u32 offset;
+    Section *section;
 
+    localObjectBlock = NULL;
+    index = 0;
     offset = 0;
-    section = module->firstSection;
-    while (section != NULL) {
-        section->originOffset = section->originCounter = section->locationCounter = offset;
-        offset = (offset + section->size + 3) & 0xfffffc;
-        section = section->next;
+    for (section = module->firstSection; section != NULL; section = section->next) {
+        switch (section->type) {
+        case SectionType_Mixed:
+        case SectionType_Code:
+        case SectionType_Data:
+            if (localObjectBlock == NULL) {
+                localObjectBlock = (ObjectBlock *)allocate(sizeof(ObjectBlock));
+                localObjectBlock->id = module->id;
+                localObjectBlock->index = index++;
+                localObjectBlock->type = SectionType_Mixed;
+                localObjectBlock->location = section->location;
+                localObjectBlock->image = (u8 *)allocate(IMAGE_INCREMENT);
+                localObjectBlock->imageSize = IMAGE_INCREMENT;
+                if (module->lastObjectBlock != NULL) {
+                    module->lastObjectBlock->next = localObjectBlock;
+                }
+                else {
+                    module->firstObjectBlock = localObjectBlock;
+                }
+                module->lastObjectBlock = localObjectBlock;
+            }
+            section->originOffset = section->originCounter = section->locationCounter = offset;
+            section->objectBlock = localObjectBlock;
+            offset = (offset + section->size + 3) & 0xfffffc;
+            break;
+        case SectionType_Common:
+            objectBlock = (ObjectBlock *)allocate(sizeof(ObjectBlock));
+            objectBlock->id = section->id;
+            objectBlock->index = index++;
+            objectBlock->type = section->type;
+            objectBlock->location = section->location;
+            objectBlock->image = (u8 *)allocate(IMAGE_INCREMENT);
+            objectBlock->imageSize = IMAGE_INCREMENT;
+            if (module->lastObjectBlock != NULL) {
+                module->lastObjectBlock->next = objectBlock;
+            }
+            else {
+                module->firstObjectBlock = objectBlock;
+            }
+            module->lastObjectBlock = section->objectBlock = objectBlock;
+            // fall through
+        case SectionType_Stack:
+        case SectionType_Dynamic:
+        case SectionType_TaskCom:
+            section->originOffset = section->originCounter = section->locationCounter = 0;
+            break;
+        default:
+            fprintf(stderr, "Unknown section type: %d\n", section->type);
+            exit(1);
+        }
     }
-    module->size = (offset + 3) >> 2; // size in words
+    module->size = (offset + 3) >> 2; // program block size in words
 }
 
 Module *findModule(char *id, int len) {
@@ -505,9 +551,63 @@ u16 getRelativeAttribute(Section *section) {
     case SectionType_Dynamic:
         return SYM_RELOCATABLE;
     default:
-        fprintf(stderr, "Unknown section type: %d\n", currentSection->type);
+        fprintf(stderr, "Unknown section type: %d\n", section->type);
         exit(1);
     }
+}
+
+bool isAbsolute(Value *val) {
+    return (val->attributes & (SYM_IMMOBILE|SYM_RELOCATABLE|SYM_EXTERNAL)) == 0;
+}
+
+bool isCodeSection(Section *section) {
+    return section != NULL && (section->type == SectionType_Mixed || section->type == SectionType_Code);
+}
+
+bool isCommonSection(Section *section) {
+    return section != NULL
+        && (section->type == SectionType_Common
+            || section->type == SectionType_Dynamic
+            || section->type == SectionType_TaskCom);
+}
+
+bool isDataSection(Section *section) {
+    return section != NULL
+        && (section->type == SectionType_Mixed
+            || section->type == SectionType_Data
+            || (section->type == SectionType_Common && *section->id != '\0'));
+}
+
+bool isExternal(Value *val) {
+    return (val->attributes & SYM_EXTERNAL) != 0;
+}
+
+bool isImmobile(Value *val) {
+    return (val->attributes & SYM_IMMOBILE) != 0;
+}
+
+bool isNamedCommonSection(Section *section) {
+    return section != NULL && section->type == SectionType_Common && *section->id != '\0';
+}
+
+bool isParcelAddress(Value *value) {
+    return (value->attributes & SYM_PARCEL_ADDRESS) != 0;
+}
+
+bool isPlainValue(Value *value) {
+    return (value->attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
+}
+
+bool isRelative(Value *val) {
+    return (val->attributes & (SYM_RELOCATABLE|SYM_IMMOBILE)) != 0;
+}
+
+bool isRelocatable(Value *val) {
+    return (val->attributes & SYM_RELOCATABLE) != 0;
+}
+
+bool isWordAddress(Value *value) {
+    return (value->attributes & SYM_WORD_ADDRESS) != 0;
 }
 
 void resetModule(Module *module) {
@@ -521,11 +621,6 @@ void resetModule(Module *module) {
 static void resetSection(Section *section) {
     section->originCounter = section->originOffset;
     section->locationCounter = section->originOffset;
-    section->locationAttributes = SYM_PARCEL_ADDRESS;
-    if (section->type == SectionType_Stack || section->type == SectionType_TaskCom)
-        section->locationAttributes |= SYM_IMMOBILE;
-    else
-        section->locationAttributes |= SYM_RELOCATABLE;
     section->wordBitPosCounter = 0;
     section->parcelBitPosCounter = 0;
 }

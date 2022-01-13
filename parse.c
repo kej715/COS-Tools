@@ -48,7 +48,6 @@ static MacroDefn *findMacroDefn(char *id, int len);
 static int findStringEnd(int cursor);
 static void getFields(void);
 static int getNextField(int cursor, int *start);
-static bool haveCompatibleSections(Value *val1, Value *val2);
 static char *interpolateMicros(char *dst, int dstLen, char *src, int srcLen);
 static bool isRegisterDesignator(char *s, int len, Token *token);
 static bool isLocCtrDelimiter(char c);
@@ -62,7 +61,6 @@ static void popOp(OpStackEntry *op);
 static void pushArg(Value *arg);
 static void pushOp(Token *token);
 static void resetLocationField(void);
-static void setRelativeAttributes(Value *val1, Value *val2);
 
 static char fields[(COLUMN_LIMIT+2)*3];
 
@@ -214,8 +212,11 @@ Token *copyToken(Token *token) {
             memcpy(new->details.string.ptr, token->details.string.ptr, token->details.string.len);
         }
         break;
-    case TokenType_Number:
     case TokenType_Operator:
+        new->details.operator.leftArg = copyToken(token->details.operator.leftArg);
+        new->details.operator.rightArg = copyToken(token->details.operator.rightArg);
+        break;
+    case TokenType_Number:
     case TokenType_None:
     case TokenType_Error:
         // nothing more to copy
@@ -259,7 +260,7 @@ bool equalTokens(Token *t1, Token *t2) {
         break;
     case TokenType_Operator:
         return t1->details.operator.type == t2->details.operator.type
-            &&  equalTokens(t1->details.operator.leftArg, t2->details.operator.leftArg)
+            && equalTokens(t1->details.operator.leftArg, t2->details.operator.leftArg)
             && equalTokens(t1->details.operator.rightArg, t2->details.operator.rightArg);
     case TokenType_Number:
         if (t1->details.number.type == t2->details.number.type) {
@@ -282,12 +283,45 @@ bool equalTokens(Token *t1, Token *t2) {
 
 ErrorCode evaluateExpression(Token *expression, Value *value) {
     ErrorCode err;
+    Section *relocationSection;
+    Section *section;
 
     argStackPtr = 0;
     opStackPtr = 0;
+    for (section = currentModule->firstSection; section != NULL; section = section->next) {
+         section->relocationCoefficient = section->immobileCoefficient = 0;
+    }
     err = evaluateExprHelper(expression);
-    if (argStackPtr == 1 && opStackPtr == 0)
+    if (argStackPtr == 1 && opStackPtr == 0) {
         popArg(value);
+        if (isRelative(value)) {
+            if (isImmobile(value))
+                value->section->immobileCoefficient += value->coefficient;
+            else
+                value->section->relocationCoefficient += value->coefficient;
+        }
+        relocationSection = NULL;
+        for (section = currentModule->firstSection; section != NULL; section = section->next) {
+             if (section->relocationCoefficient == 1 && relocationSection == NULL) {
+                 relocationSection = section;
+             }
+             else if (section->relocationCoefficient != 0) {
+                 err = Err_RelocatableField;
+             }
+             if (section->immobileCoefficient == 1 && relocationSection == NULL) {
+                 relocationSection = section;
+             }
+             else if (section->immobileCoefficient != 0) {
+                 err = Err_RelocatableField;
+             }
+        }
+        if (relocationSection != NULL) {
+            if (isExternal(value))
+                err = Err_RelocatableField;
+            else
+                value->section = relocationSection;
+        }
+    }
     else if (err == Err_Undefined) {
         value->attributes = SYM_UNDEFINED;
         value->section = NULL;
@@ -297,7 +331,7 @@ ErrorCode evaluateExpression(Token *expression, Value *value) {
         value->attributes = 0;
         value->section = NULL;
         value->intValue = 0;
-        err = Err_Expression;
+        if (err == Err_None) err = Err_Expression;
     }
     return err;
 }
@@ -319,6 +353,7 @@ static ErrorCode evaluateExprHelper(Token *expression) {
         val.type = expression->details.number.type;
         val.attributes = 0;
         val.section = NULL;
+        val.coefficient = 0;
         val.intValue = expression->details.number.intValue;
         pushArg(&val);
         break;
@@ -344,13 +379,28 @@ static ErrorCode evaluateExprHelper(Token *expression) {
             }
         }
         pushOp(expression);
-        if (expression->details.operator.type == Op_Literal
-            && expression->details.operator.rightArg->type == TokenType_String) {
+        if (expression->details.operator.type == Op_Literal) {
+            if (expression->details.operator.rightArg->type != TokenType_String) {
+                err = evaluateExprHelper(expression->details.operator.rightArg);
+                while (opStackPtr > 0
+                       && opStack[opStackPtr - 1].type != Op_Literal
+                       && expression->details.operator.precedence >= opStack[opStackPtr - 1].precedence) {
+                    popOp(&op);
+                    err = registerError(executeOperator(op.type));
+                }
+                popArg(&val);
+            }
             literal = addLiteral(expression->details.operator.rightArg);
             val.type = NumberType_Integer;
             val.attributes = SYM_WORD_ADDRESS|SYM_LITERAL;
             val.section = literalsSection = currentModule->firstSection->next; // 2nd section is always literals section
-            if (pass == 1 || currentModule->isAbsolute == FALSE) val.attributes |= SYM_RELOCATABLE;
+            if (pass == 1 || currentModule->isAbsolute == FALSE) {
+                val.attributes |= SYM_RELOCATABLE;
+                val.coefficient = 1;
+            }
+            else {
+                val.coefficient = 0;
+            }
             val.intValue = (literalsSection->originOffset + literal->offset) >> 2;
             pushArg(&val);
             opStackPtr -= 1;
@@ -379,7 +429,10 @@ static char *evaluateMicro(char *s, int len) {
     name = findName(currentModule->micros, s, len);
     if (name != NULL) return name->value;
     if (len == 4) {
-        if (strncasecmp("$CNC", s, len) == 0) {
+        if (strncasecmp("$APP", s, len) == 0) {
+            return "^";
+        }
+        else if (strncasecmp("$CNC", s, len) == 0) {
             return "_";
         }
         else if (strncasecmp("$CPU", s, len) == 0) {
@@ -390,7 +443,10 @@ static char *evaluateMicro(char *s, int len) {
         }
     }
     else if (len == 5) {
-        if (strncasecmp("$DATE", s, len) == 0) {
+        if (strncasecmp("$CMNT", s, len) == 0) {
+            return ";";
+        }
+        else if (strncasecmp("$DATE", s, len) == 0) {
             return currentDate;
         }
         else if (strncasecmp("$TIME", s, len) == 0) {
@@ -417,6 +473,7 @@ static ErrorCode evaluateString(Token *token) {
     val.type = NumberType_Integer;
     val.attributes = 0;
     val.section = NULL;
+    val.coefficient = 0;
     val.intValue = 0;
     s = token->details.string.ptr;
     limit = s + token->details.string.len;
@@ -442,6 +499,7 @@ static ErrorCode evaluateString(Token *token) {
 
 static ErrorCode evaluateSymbol(Token *token) {
     ErrorCode err;
+    bool isLocCtr;
     Symbol *symbol;
     Value val;
 
@@ -451,27 +509,34 @@ static ErrorCode evaluateSymbol(Token *token) {
         val.type = symbol->value.type;
         if ((symbol->value.attributes & SYM_COUNTER) != 0) {
             val.attributes = SYM_PARCEL_ADDRESS;
-            val.section = NULL;
-            if (strcmp(symbol->id, "*") == 0) {
-                val.section = currentSection;
-                val.intValue = currentSection->locationCounter;
-                val.attributes = currentSection->locationAttributes;
+            val.section = currentSection;
+            val.externalSymbol = NULL;
+            isLocCtr = strcmp(symbol->id, "*") == 0;
+            if (isLocCtr || strcasecmp(symbol->id, "*O") == 0) {
+                val.intValue = isLocCtr ? currentSection->locationCounter : currentSection->originCounter;
+                switch (currentSection->type) {
+                case SectionType_Mixed:
+                case SectionType_Code:
+                case SectionType_Data:
+                    if (currentSection->module->isAbsolute) break;
+                    // fall through
+                case SectionType_Common:
+                case SectionType_Dynamic:
+                    val.attributes |= SYM_RELOCATABLE;
+                    break;
+                case SectionType_Stack:
+                case SectionType_TaskCom:
+                    val.attributes |= SYM_IMMOBILE;
+                default:
+                    fprintf(stderr, "Unknown section type: %d\n", currentSection->type);
+                    exit(1);
+                }
             }
             else if (strcasecmp(symbol->id, "*A") == 0) {
-                val.section = currentSection;
                 val.intValue = currentSection->locationCounter;
             }
             else if (strcasecmp(symbol->id, "*B") == 0) {
-                val.section = currentSection;
                 val.intValue = currentSection->originCounter;
-            }
-            else if (strcasecmp(symbol->id, "*O") == 0) {
-                val.section = currentSection;
-                val.intValue = currentSection->originCounter;
-                if (currentSection->type == SectionType_Stack || currentSection->type == SectionType_TaskCom)
-                    val.attributes |= SYM_IMMOBILE;
-                else
-                    val.attributes |= SYM_RELOCATABLE;
             }
             else if (strcasecmp(symbol->id, "*P") == 0) {
                 val.attributes = 0;
@@ -491,6 +556,7 @@ static ErrorCode evaluateSymbol(Token *token) {
             val.attributes = symbol->value.attributes;
             val.section = symbol->value.section;
             val.intValue = symbol->value.intValue;
+            if ((val.attributes & SYM_EXTERNAL)  != 0) val.externalSymbol = symbol;
             if ((val.attributes & SYM_UNDEFINED) != 0) err = Err_Undefined;
         }
     }
@@ -501,6 +567,7 @@ static ErrorCode evaluateSymbol(Token *token) {
         val.intValue = 0;
         err = Err_Undefined;
     }
+    val.coefficient = (val.attributes & (SYM_RELOCATABLE|SYM_IMMOBILE)) == 0 ? 0 : 1;
     pushArg(&val);
     return err;
 }
@@ -519,18 +586,19 @@ static ErrorCode executeOperator(OperatorType opType) {
     switch (opType) {
     case Op_Negate:
         rightArg.intValue = -rightArg.intValue;
+        rightArg.coefficient = -rightArg.coefficient;
         pushArg(&rightArg);
         break;
     case Op_Plus:
         pushArg(&rightArg);
         break;
     case Op_Complement:
-        if (isAbsoluteType(&rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
+        if (isAbsolute(&rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
         rightArg.intValue = ~rightArg.intValue;
         pushArg(&rightArg);
         break;
     case Op_Parcel:
-        if (isWordType(&rightArg)) {
+        if (isWordAddress(&rightArg)) {
             rightArg.intValue *= 4;
             rightArg.attributes &= ~SYM_WORD_ADDRESS;
         }
@@ -539,7 +607,7 @@ static ErrorCode executeOperator(OperatorType opType) {
         pushArg(&rightArg);
         break;
     case Op_Word:
-        if (isParcelType(&rightArg)) {
+        if (isParcelAddress(&rightArg)) {
             rightArg.intValue /= 4;
             rightArg.attributes &= ~SYM_PARCEL_ADDRESS;
         }
@@ -547,36 +615,33 @@ static ErrorCode executeOperator(OperatorType opType) {
         if (rightArg.section == NULL) rightArg.section = currentSection;
         pushArg(&rightArg);
         break;
-    case Op_Literal:
-        expression.type = TokenType_Number;
-        expression.details.number.type = rightArg.type;
-        if (rightArg.type == NumberType_Integer)
-            expression.details.number.intValue = rightArg.intValue;
-        else
-            expression.details.number.floatValue = rightArg.floatValue;
-        literal = addLiteral(&expression);
-        rightArg.type = NumberType_Integer;
-        rightArg.attributes = SYM_PARCEL_ADDRESS|SYM_LITERAL;
-        if (pass == 1 || currentModule->isAbsolute == FALSE) rightArg.attributes |= SYM_RELOCATABLE;
-        rightArg.section = currentModule->firstSection->next; // 2nd section is always literals section
-        rightArg.intValue = literal->offset;
-        pushArg(&rightArg);
-        break;
     case Op_Add:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
-        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
+        if (leftArg.type != NumberType_Integer)
+            err = registerError(Warn_ExpressionElement);
+        if (isExternal(&leftArg) && isExternal(&rightArg))
+            err = registerError(Err_RelocatableField);
+        if (isRelative(&rightArg)) {
+            if (isImmobile(&rightArg))
+                rightArg.section->immobileCoefficient += rightArg.coefficient;
+            else
+                rightArg.section->relocationCoefficient += rightArg.coefficient;
+        }
+        else if (isExternal(&rightArg)) {
+            leftArg.attributes |= SYM_EXTERNAL;
+            leftArg.externalSymbol = rightArg.externalSymbol;
+        }
         if (getValueType(&leftArg) == getValueType(&rightArg)) {
             leftArg.intValue = leftArg.intValue + rightArg.intValue;
         }
-        else if (isValueType(&leftArg)) {
+        else if (isPlainValue(&leftArg)) {
             leftArg.intValue = leftArg.intValue + rightArg.intValue;
-            leftArg.attributes = rightArg.attributes;
-            leftArg.section = rightArg.section;
+            leftArg.attributes = (leftArg.attributes & ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS))
+                               | (rightArg.attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS));
         }
-        else if (isWordType(&leftArg)) {
-            if (isValueType(&rightArg)) {
+        else if (isWordAddress(&leftArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue + rightArg.intValue;
             }
             else {
@@ -586,7 +651,7 @@ static ErrorCode executeOperator(OperatorType opType) {
             }
         }
         else { // left is parcel type
-            if (isValueType(&rightArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue + rightArg.intValue;
             }
             else {
@@ -595,23 +660,37 @@ static ErrorCode executeOperator(OperatorType opType) {
                 err = Warn_ExpressionElement;
             }
         }
+        if (leftArg.section == NULL && isExternal(&leftArg) == FALSE)
+            leftArg.section = rightArg.section;
         pushArg(&leftArg);
         break;
     case Op_Subtract:
         if (argStackPtr < 1) return Err_Expression;
-        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
         popArg(&leftArg);
-        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
+        if (leftArg.type != NumberType_Integer)
+            err = registerError(Warn_ExpressionElement);
+        if (isExternal(&leftArg) && isExternal(&rightArg))
+            err = registerError(Err_RelocatableField);
+        if (isRelative(&rightArg)) {
+            if (isImmobile(&rightArg))
+                rightArg.section->immobileCoefficient -= rightArg.coefficient;
+            else
+                rightArg.section->relocationCoefficient -= rightArg.coefficient;
+        }
+        else if (isExternal(&rightArg)) {
+            leftArg.attributes |= SYM_EXTERNAL;
+            leftArg.externalSymbol = rightArg.externalSymbol;
+        }
         if (getValueType(&leftArg) == getValueType(&rightArg)) {
             leftArg.intValue = leftArg.intValue - rightArg.intValue;
         }
-        else if (isValueType(&leftArg)) {
+        else if (isPlainValue(&leftArg)) {
             leftArg.intValue = leftArg.intValue - rightArg.intValue;
-            leftArg.attributes = rightArg.attributes;
-            leftArg.section = rightArg.section;
+            leftArg.attributes = (leftArg.attributes & ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS))
+                               | (rightArg.attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS));
         }
-        else if (isWordType(&leftArg)) {
-            if (isValueType(&rightArg)) {
+        else if (isWordAddress(&leftArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue - rightArg.intValue;
             }
             else {
@@ -621,7 +700,7 @@ static ErrorCode executeOperator(OperatorType opType) {
             }
         }
         else { // left is parcel type
-            if (isValueType(&rightArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue - rightArg.intValue;
             }
             else {
@@ -630,30 +709,51 @@ static ErrorCode executeOperator(OperatorType opType) {
                 err = Warn_ExpressionElement;
             }
         }
+        if (leftArg.section == NULL && isExternal(&leftArg) == FALSE)
+            leftArg.section = rightArg.section;
         pushArg(&leftArg);
         break;
     case Op_Multiply:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
-        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE
-            || (isAbsoluteType(&leftArg) == FALSE && isAbsoluteType(&rightArg) == FALSE)
-            || (isExternalType(&leftArg) && isExternalType(&rightArg)))
+        if (leftArg.type != NumberType_Integer)
             err = registerError(Warn_ExpressionElement);
+        if (isExternal(&leftArg) == FALSE || isExternal(&rightArg) == FALSE) {
+            if (isAbsolute(&leftArg)) {
+                if (isAbsolute(&rightArg) == FALSE) {
+                    leftArg.coefficient = leftArg.intValue;
+                    leftArg.attributes |= rightArg.attributes & (SYM_RELOCATABLE|SYM_IMMOBILE|SYM_EXTERNAL);
+                    leftArg.section = rightArg.section;
+                }
+            }
+            else if (isAbsolute(&rightArg)) {
+                if (isAbsolute(&leftArg) == FALSE) leftArg.coefficient = rightArg.intValue;
+            }
+            else { // both arguments are relocatable
+                err = registerError(Warn_ExpressionElement);
+            }
+            if (isExternal(&rightArg)) {
+                leftArg.attributes |= SYM_EXTERNAL;
+                leftArg.externalSymbol = rightArg.externalSymbol;
+            }
+        }
+        else { // both args are external
+            err = registerError(Err_RelocatableField);
+        }
         if (getValueType(&leftArg) == getValueType(&rightArg)) {
             leftArg.intValue = leftArg.intValue * rightArg.intValue;
-            if (isValueType(&leftArg) == FALSE) {
+            if (isPlainValue(&leftArg) == FALSE) {
                 leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
                 err = Warn_ExpressionElement;
             }
         }
-        else if (isValueType(&leftArg)) {
+        else if (isPlainValue(&leftArg)) {
             leftArg.intValue = leftArg.intValue * rightArg.intValue;
-            leftArg.attributes = rightArg.attributes;
-            leftArg.section = rightArg.section;
+            leftArg.attributes = (leftArg.attributes & ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS))
+                               | (rightArg.attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS));
         }
-        else if (isWordType(&leftArg)) {
-            if (isValueType(&rightArg)) {
+        else if (isWordAddress(&leftArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue * rightArg.intValue;
             }
             else {
@@ -663,7 +763,7 @@ static ErrorCode executeOperator(OperatorType opType) {
             }
         }
         else { // left is parcel type
-            if (isValueType(&rightArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue * rightArg.intValue;
             }
             else {
@@ -672,18 +772,16 @@ static ErrorCode executeOperator(OperatorType opType) {
                 err = Warn_ExpressionElement;
             }
         }
-        setRelativeAttributes(&leftArg, &rightArg);
         pushArg(&leftArg);
         break;
     case Op_Divide:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (leftArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
-        if (haveCompatibleSections(&leftArg, &rightArg) == FALSE
-            || isAbsoluteType(&leftArg) == FALSE
-            || isAbsoluteType(&rightArg) == FALSE
-            || (isExternalType(&leftArg) && isExternalType(&rightArg)))
+        if (leftArg.type != NumberType_Integer)
             err = registerError(Warn_ExpressionElement);
+        if ((leftArg.attributes & (SYM_RELOCATABLE|SYM_IMMOBILE|SYM_EXTERNAL)) != 0
+            || (rightArg.attributes & (SYM_RELOCATABLE|SYM_IMMOBILE|SYM_EXTERNAL)) != 0)
+            err = registerError(Err_RelocatableField);
         if (rightArg.intValue == 0) {
             pushArg(&rightArg);
             return Err_Expression;
@@ -692,14 +790,13 @@ static ErrorCode executeOperator(OperatorType opType) {
             leftArg.intValue = leftArg.intValue / rightArg.intValue;
             leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
         }
-        else if (isValueType(&leftArg)) {
+        else if (isPlainValue(&leftArg)) {
             leftArg.intValue = leftArg.intValue / rightArg.intValue;
             leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-            leftArg.section = rightArg.section;
             err = Warn_ExpressionElement;
         }
-        else if (isWordType(&leftArg)) {
-            if (isValueType(&rightArg)) {
+        else if (isWordAddress(&leftArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue / rightArg.intValue;
             }
             else {
@@ -709,7 +806,7 @@ static ErrorCode executeOperator(OperatorType opType) {
             }
         }
         else { // left is parcel type
-            if (isValueType(&rightArg)) {
+            if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue / rightArg.intValue;
             }
             else {
@@ -718,7 +815,6 @@ static ErrorCode executeOperator(OperatorType opType) {
                 err = Warn_ExpressionElement;
             }
         }
-        setRelativeAttributes(&leftArg, &rightArg);
         pushArg(&leftArg);
         break;
     default:
@@ -1150,6 +1246,10 @@ char *getNextToken(char *s, Token *token) {
             token->details.operator.type = Op_Literal;
             token->details.operator.precedence = PRECEDENCE_LITERAL;
             break;
+        case '(':
+            token->details.operator.type = Op_SubExpr;
+            token->details.operator.precedence = PRECEDENCE_SUB_EXPR;
+            break;
         default:
             token->type = TokenType_Error;
             token->details.error.code = registerError(Err_DataItem);
@@ -1216,8 +1316,8 @@ ErrorCode getRegisterNumber(Token *regster, int *number) {
         regExpr[regster->details.regster.len] = '\0';
         s = getNextValue(regExpr, &val, &err);
         if (err != Err_None) return err;
-        if (isParcelType(&val)
-            || isWordType(&val)
+        if (isParcelAddress(&val)
+            || isWordAddress(&val)
             || val.type != NumberType_Integer
             || val.intValue < 0
             || val.intValue >= limit) return Err_FieldWidth;
@@ -1231,10 +1331,6 @@ ErrorCode getRegisterNumber(Token *regster, int *number) {
 
 u16 getValueType(Value *value) {
     return value->attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-}
-
-static bool haveCompatibleSections(Value *val1, Value *val2) {
-    return (val1->section == val2->section || val1->section == NULL || val2->section == NULL);
 }
 
 static char *interpolateMicros(char *dst, int dstLen, char *src, int srcLen) {
@@ -1267,18 +1363,6 @@ static char *interpolateMicros(char *dst, int dstLen, char *src, int srcLen) {
     return dst;
 }
 
-bool isAbsoluteType(Value *val) {
-    return (val->attributes & (SYM_IMMOBILE|SYM_RELOCATABLE|SYM_EXTERNAL)) == 0;
-}
-
-bool isExternalType(Value *val) {
-    return (val->attributes & SYM_EXTERNAL) == 0;
-}
-
-bool isImmobileType(Value *val) {
-    return (val->attributes & SYM_IMMOBILE) != 0;
-}
-
 static bool isLocCtrDelimiter(char c) {
     int i;
 
@@ -1300,10 +1384,6 @@ bool isNameChar1(char c) {
         ||  c == '%';
 }
 
-bool isParcelType(Value *value) {
-    return (value->attributes & SYM_PARCEL_ADDRESS) != 0;
-}
-
 static bool isQualDelimiter(char c) {
     int i;
 
@@ -1311,10 +1391,6 @@ static bool isQualDelimiter(char c) {
         if (qualDelimiters[i] == c) return TRUE;
     }
     return FALSE;
-}
-
-bool isRelocatableType(Value *val) {
-    return (val->attributes & SYM_RELOCATABLE) != 0;
 }
 
 static bool isRegisterDesignator(char *s, int len, Token *token) {
@@ -1356,14 +1432,6 @@ static bool isRegisterDesignator(char *s, int len, Token *token) {
 
 bool isUnqualifiedName(Token *token) {
     return token->type == TokenType_Name && token->details.name.qualPtr == NULL;
-}
-
-bool isValueType(Value *value) {
-    return (value->attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
-}
-
-bool isWordType(Value *value) {
-    return (value->attributes & SYM_WORD_ADDRESS) != 0;
 }
 
 char *parseExpression(char *s, Token **expression) {
@@ -1757,7 +1825,7 @@ ErrorCode parseSourceLine(void) {
     resetErrorRegistrations();
     listSource();
     if (sourceLine[0] == '*' || sourceLine[0] == '\0') {
-        listFlush();
+        listFlush(currentSection);
         return err;
     }
     getFields();
@@ -1809,7 +1877,8 @@ ErrorCode parseSourceLine(void) {
                 if ((inst->attributes & INST_MACHINE) != 0) {
                     if (currentModule->id[0] != '\0' && isCodeSection(currentSection)) {
                         if (locationFieldToken != NULL) {
-                            err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr,
+                            err = registerError(addLocationSymbol(currentSection,
+                                                                  locationFieldToken->details.name.ptr,
                                                                   locationFieldToken->details.name.len,
                                                                   SYM_PARCEL_ADDRESS));
                         }
@@ -1835,7 +1904,7 @@ ErrorCode parseSourceLine(void) {
         }
     }
     listErrorIndications();
-    listFlush();
+    listFlush(currentSection);
     return err;
 }
 
@@ -2007,28 +2076,3 @@ static void resetLocationField(void) {
         locationFieldToken = NULL;
     }
 }
-
-static void setRelativeAttributes(Value *val1, Value *val2) {
-    int absoluteCount;
-    int externalCount;
-    int immobileCount;
-    int relocatableCount;
-
-    absoluteCount = externalCount = immobileCount = relocatableCount = 0;
-    if (isAbsoluteType(val1))    absoluteCount    += 1;
-    if (isAbsoluteType(val2))    absoluteCount    += 1;
-    if (isExternalType(val1))    externalCount    += 1;
-    if (isExternalType(val2))    externalCount    += 1;
-    if (isImmobileType(val1))    immobileCount    += 1;
-    if (isImmobileType(val2))    immobileCount    += 1;
-    if (isRelocatableType(val1)) relocatableCount += 1;
-    if (isRelocatableType(val2)) relocatableCount += 1;
-    if (absoluteCount == 2) return;
-    if (immobileCount == 1 && absoluteCount >= 0 && externalCount == 0 && relocatableCount == 0) {
-        val1->attributes |= SYM_IMMOBILE;
-    }
-    else if (relocatableCount == 1 && absoluteCount >= 0 && immobileCount == 0 && externalCount == 0) {
-        val1->attributes |= SYM_RELOCATABLE;
-    }
-}
-

@@ -28,10 +28,15 @@
 #define BASE_STACK_SIZE          100
 #define BLOCK_STACK_SIZE         100
 #define COLUMN_LIMIT             72
+#define EXTERN_TABLE_INCREMENT   100
 #define FALSE                    0
 #define IMAGE_INCREMENT          4096
 #define LIST_CONTROL_STACK_SIZE  100
 #define MACRO_STACK_SIZE         100
+#define MASK6                    077
+#define MASK9                    0777
+#define MASK22                   017777777
+#define MASK24                   077777777
 #define MAX_ERROR_INDICATIONS    7
 #define MAX_FILE_PATH_LENGTH     256
 #define MAX_SOURCE_LINE_LENGTH   90
@@ -39,6 +44,7 @@
 #define MAX_TITLE_LENGTH         64
 #define OP_STACK_SIZE            100
 #define QUALIFIER_STACK_SIZE     100
+#define RELOC_TABLE_INCREMENT    200
 #define SOURCE_FORMAT_STACK_SIZE 100
 #define TRUE                     1
 

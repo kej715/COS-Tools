@@ -166,6 +166,8 @@ typedef struct value {
     NumberType type;
     u16 attributes;
     struct section *section;
+    struct symbol *externalSymbol;
+    u32 coefficient;
     union {
         i64 intValue;
         f64 floatValue;
@@ -177,6 +179,7 @@ typedef struct symbol {
     struct symbol *right;
     struct symbol *next;
     char *id;
+    u16 externalIndex;
     Value value;
 } Symbol;
 
@@ -188,7 +191,7 @@ typedef struct qualifier {
 } Qualifier;
 
 /*
- *  Section definition
+ *  Section and object block definitions
  */
 typedef enum sectionType {
     SectionType_Mixed = 0,
@@ -208,20 +211,50 @@ typedef enum sectionLocation {
     SectionLocation_None
 } SectionLocation;
 
+typedef struct externalTableEntry {
+    u16 externalIndex;
+    u32 bitAddress;
+    u8 fieldLength;
+    bool isParcelRelocation;
+} ExternalTableEntry;
+
+typedef struct relocationTableEntry {
+    u16 blockIndex;
+    u32 offset;
+    bool isParcelRelocation;
+} RelocationTableEntry;
+
+typedef struct objectBlock {
+    struct objectBlock *next;
+    char *id;
+    u16 index;
+    SectionType type;
+    SectionLocation location;
+    u8 *image;
+    u32 imageSize;
+    RelocationTableEntry *relocationTable;
+    int relocationTableIndex;
+    int relocationTableSize;
+    ExternalTableEntry *externalTable;
+    int externalTableIndex;
+    int externalTableSize;
+} ObjectBlock;
+
 typedef struct section {
     struct section *next;
     char *id;
+    struct module *module;
     SectionType type;
     SectionLocation location;
     u32 originOffset;
     u32 size;
     u32 originCounter;
     u32 locationCounter;
-    u16 locationAttributes;
     u8  wordBitPosCounter;
     u8  parcelBitPosCounter;
     u32 relocationCoefficient;
     u32 immobileCoefficient;
+    ObjectBlock *objectBlock;
 } Section;
 
 /*
@@ -302,8 +335,7 @@ typedef enum operatorType {
     Op_Xor
 } OperatorType;
 
-#define PRECEDENCE_OPEN_PAREN      0
-#define PRECEDENCE_CLOSE_PAREN     0
+#define PRECEDENCE_SUB_EXPR        0
 #define PRECEDENCE_NEGATE          1
 #define PRECEDENCE_PLUS            1
 #define PRECEDENCE_COMPLEMENT      1
@@ -411,6 +443,7 @@ typedef struct module {
     bool isOriginSet;
     u32  origin;
     u32  size;
+    u32  stackSize;
     Name *duplicateds;
     Name *macros;
     Name *micros;
@@ -418,11 +451,12 @@ typedef struct module {
     Literal *literals;
     Symbol *start;
     Symbol *entryPoints;
-    Symbol *externals;
+    Symbol *firstExternal;
+    Symbol *lastExternal;
     Section *firstSection;
     Section *lastSection;
-    u8 *image;
-    u32 imageSize;
+    ObjectBlock *firstObjectBlock;
+    ObjectBlock *lastObjectBlock;
 } Module;
 
 #endif

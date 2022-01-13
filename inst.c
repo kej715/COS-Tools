@@ -32,10 +32,6 @@
 
 #define INT_22_LOWER (-010000000)
 #define INT_22_UPPER   007777777
-#define MASK6          077
-#define MASK9          0777
-#define MASK22         017777777
-#define MASK24         077777777
 #define MAX_INST_ARGS  4
 
 typedef ErrorCode (*InstructionHandler)(void);
@@ -74,22 +70,9 @@ static void addPattern(char *s, InstructionHandler handler);
 static NamedInstruction *allocInstruction(char *id, u8 attributes, InstructionHandler handler);
 static int compareStrings(char *s1, int s1Len, char *s2, int s2Len);
 static ErrorCode defineSymbol(u16 attributes);
-static void emit_g_h_i_jkm(u8 g, u8 h, u8 i, Value *jkm);
-static void emit_gh_i_j_k(u8 gh, u8 i, u8 j, u8 k);
-static void emit_gh_i_jk(u8 gh, u8 i, u8 jk);
-static void emit_gh_i_jkm(u8 gh, u8 i, Value *jkm);
-static void emit_gh_ijk(u8 gh, u16 ijk);
-static void emit_gh_ijkm(u8 gh, Value *ijkm);
-static void emitFieldBits(u64 bits, int len, u16 attributes, bool doListFlush);
-static void emitFieldEnd(u16 attributes);
-static void emitFieldStart(void);
-static void emitPassFill(void);
-static void emitString(char *s, int len, int count, JustifyType justification);
-static u64 extractSubfield(u64 word, int startingBitPos, int len);
 static MacroParam *findMacroParam(MacroDefn *defn, char *name, int len);
 static SectionLocation findSectionLocation(char *name, int len);
 static SectionType findSectionType(char *name, int len);
-static void forceDataWordBoundary(void);
 static void forceInstWordBoundary(void);
 static void freeInstruction(NamedInstruction *instruction);
 static void freeMacroDefn(MacroDefn *defn);
@@ -97,7 +80,6 @@ static Token *generateZero(void);
 static char *getDelimitedString(char *s, char **start, int *len);
 static char *getNextName(char *s, char **name, int *len);
 static char *getParamValue(char *s, char **value, int *valueLen);
-static u64 getWord(Module *module, u32 parcelAddress);
 static ErrorCode handleBranch(u16 opCode);
 static ErrorCode handleOp_i_j_k(u16 opCode);
 static ErrorCode handleOp_i_j_n(u16 opCode, u8 n);
@@ -122,13 +104,9 @@ static void parseError(char *s);
 static char *parseNextNode(char *s, PatternNode *node);
 static int popBase(void);
 static ErrorCode pushBase(int base);
-static void putHalfWord(Module *module, u32 parcelAddress, u32 halfWord);
-static void putParcel(Module *module, u32 parcelAddress, u16 parcel);
-static void putWord(Module *module, u32 parcelAddress, u64 word);
 static void restoreBase(void);
 static void setBase(void);
 static void skipLines(Token *locationFieldToken, int count);
-static u64 toCrayFloat(u64 ieee);
 
 static int instArgc;
 static Token *instArgv[MAX_INST_ARGS];
@@ -250,6 +228,8 @@ static ErrorCode BITW(void) {
 static ErrorCode BLOCK(void) {
     Section *section;
     ErrorCode err;
+    char *id;
+    int len;
     char *s;
     Token token;
 
@@ -264,33 +244,34 @@ static ErrorCode BLOCK(void) {
     s = getNextToken(operandField, &token);
     if (*s != '\0') return Err_OperandField;
     if (token.type == TokenType_None) {
-        if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
-        sectionStack[sectionStackPtr++] = currentSection;
-        currentSection = currentModule->firstSection;
+        id = "";
+        len = 0;
     }
     else if (isUnqualifiedName(&token)) {
-        if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
-        section = currentModule->firstSection;
-        while (section != NULL) {
-            if (strncmp(section->id, token.details.name.ptr, token.details.name.len) == 0
-                && section->id[token.details.name.len] == '\0') break;
-            section = section->next;
-        }
-        if (section == NULL) {
-            if (pass == 1) {
-                section = addSection(currentModule, token.details.name.ptr, token.details.name.len, SectionType_Mixed);
-            }
-            else {
-                fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
-                exit(1);
-            }
-        }
-        sectionStack[sectionStackPtr++] = currentSection;
-        currentSection = section;
+        id = token.details.name.ptr;
+        len = token.details.name.len;
     }
     else {
-        err = Err_OperandField;
+        return Err_OperandField;
     }
+    for (section = currentModule->firstSection; section != NULL; section = section->next) {
+        if (strncmp(section->id, id, len) == 0
+            && section->id[len] == '\0'
+            && section->type == SectionType_Mixed
+            && section->location == SectionLocation_CM) break;
+    }
+    if (section == NULL) {
+        if (pass == 1) {
+            section = addSection(currentModule, id, len, SectionType_Mixed, SectionLocation_CM);
+        }
+        else {
+            fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+            exit(1);
+        }
+    }
+    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+    sectionStack[sectionStackPtr++] = currentSection;
+    currentSection = section;
     return err;
 }
 
@@ -301,13 +282,14 @@ static ErrorCode BSS(void) {
 
     err = Err_None;
     forceInstWordBoundary();
-    listCodeLocation();
+    listCodeLocation(currentSection);
     if (locationFieldToken != NULL) {
-        err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
+        err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
+                                              locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
     }
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
-    if (*s != '\0' || isParcelType(&val) || isInteger(&val) == FALSE) return Err_OperandField;
+    if (*s != '\0' || isParcelAddress(&val) || isInteger(&val) == FALSE) return Err_OperandField;
     currentSection->originCounter   += val.intValue * 4;
     currentSection->locationCounter += val.intValue * 4;
     listValue(&val);
@@ -323,20 +305,21 @@ static ErrorCode BSSZ(void) {
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     err = Err_None;
     forceInstWordBoundary();
-    listCodeLocation();
+    listCodeLocation(currentSection);
     if (locationFieldToken != NULL) {
-        err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
+        err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
+                                              locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
     }
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
-    if (*s != '\0' || isParcelType(&val) || isInteger(&val) == FALSE) return Err_OperandField;
+    if (*s != '\0' || isParcelAddress(&val) || isInteger(&val) == FALSE) return Err_OperandField;
     listValue(&val);
     savedListControl = currentListControl;
     currentListControl = 0;
     while (val.intValue-- > 0) {
-        emitFieldStart();
-        emitFieldBits(0, 64, 0, FALSE);
-        emitFieldEnd(val.attributes);
+        emitFieldStart(currentSection);
+        emitFieldBits(currentSection, 0, 64, 0, FALSE);
+        emitFieldEnd(currentSection, val.attributes);
     }
     currentListControl = savedListControl;
     return Err_None;
@@ -364,21 +347,69 @@ static ErrorCode COMMENT(void) {
 }
 
 static ErrorCode COMMON(void) {
-    return Err_ResultField;
+    Section *section;
+    ErrorCode err;
+    char *id;
+    int len;
+    char *s;
+    Token token;
+
+    err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
+    if (currentModule->id[0] == '\0') return Err_InstructionPlacement;
+    if (strcmp(operandField, "*") == 0) {
+        if (sectionStackPtr > 0) {
+            currentSection = sectionStack[--sectionStackPtr];
+        }
+        return Err_None;
+    }
+    s = getNextToken(operandField, &token);
+    if (*s != '\0') return Err_OperandField;
+    if (token.type == TokenType_None) {
+        id = "";
+        len = 0;
+    }
+    else if (isUnqualifiedName(&token)) {
+        id = token.details.name.ptr;
+        len = token.details.name.len;
+    }
+    else {
+        return Err_OperandField;
+    }
+    for (section = currentModule->firstSection; section != NULL; section = section->next) {
+        if (strncmp(section->id, id, len) == 0 && section->id[len] == '\0') break;
+    }
+    if (section == NULL) {
+        if (pass == 1) {
+            section = addSection(currentModule, id, len, SectionType_Common, SectionLocation_CM);
+        }
+        else {
+            fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+            exit(1);
+        }
+    }
+    else if (section->type != SectionType_Common || section->location != SectionLocation_CM) {
+        return Err_DoubleDefinition;
+    }
+    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+    sectionStack[sectionStackPtr++] = currentSection;
+    currentSection = section;
+    return err;
 }
+
 
 static ErrorCode CON(void) {
     ErrorCode err;
     char *s;
     Value val;
 
-    if (operandField[0] == '\0') return Err_OperandField;
+    if (*operandField == '\0') return Err_OperandField;
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
-    forceDataWordBoundary();
+    forceWordBoundary(currentSection);
     if (locationFieldToken != NULL) {
-        err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
+        err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
+                                              locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
     }
-    listCodeLocation();
+    listCodeLocation(currentSection);
     s = operandField;
     while (*s != '\0') {
         if (*s == ',') {
@@ -391,12 +422,12 @@ static ErrorCode CON(void) {
             s = getNextValue(s, &val, &err);
             if (err != Err_None) (void)registerError(err);
         }
-        emitFieldStart();
-        emitFieldBits((val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
-        emitFieldEnd(val.attributes);
+        emitFieldStart(currentSection);
+        emitFieldBits(currentSection, (val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
+        emitFieldEnd(currentSection, val.attributes);
         if (*s == ',') {
-            listFlush();
-            listCodeLocation();
+            listFlush(currentSection);
+            listCodeLocation(currentSection);
             s += 1;
         }
     }
@@ -409,13 +440,14 @@ static ErrorCode DATA(void) {
     char *s;
     Value val;
 
-    if (operandField[0] == '\0') return Err_OperandField;
+    if (*operandField == '\0') return Err_OperandField;
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     if (locationFieldToken != NULL) {
-        forceDataWordBoundary();
-        err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
+        forceWordBoundary(currentSection);
+        err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
+                                              locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
     }
-    listCodeLocation();
+    listCodeLocation(currentSection);
     s = operandField;
     while (*s != '\0') {
         err = Err_None;
@@ -428,22 +460,22 @@ static ErrorCode DATA(void) {
             err = expression->details.error.code;
             break;
         case TokenType_String:
-            emitString(expression->details.string.ptr, expression->details.string.len,
+            emitString(currentSection, expression->details.string.ptr, expression->details.string.len,
                 expression->details.string.count, expression->details.string.justification);
             break;
         default:
             err = evaluateExpression(expression, &val);
-            emitFieldStart();
-            emitFieldBits((val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
-            emitFieldEnd(val.attributes);
+            emitFieldStart(currentSection);
+            emitFieldBits(currentSection, (val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
+            emitFieldEnd(currentSection, val.attributes);
             break;
         }
         freeToken(expression);
         if (*s == ',') {
             s += 1;
             if (currentSection->wordBitPosCounter == 0) {
-                listFlush();
-                listCodeLocation();
+                listFlush(currentSection);
+                listCodeLocation(currentSection);
             }
         }
         else if (*s != '\0') {
@@ -477,7 +509,7 @@ static ErrorCode EJECT(void) {
 
 static ErrorCode ELSE(void) {
     if (locationFieldToken == NULL) return Err_LocationField;
-    if (operandField[0] != '\0') return Err_OperandField;
+    if (*operandField != '\0') return Err_OperandField;
     skipLines(locationFieldToken, 0);
     return Err_None;
 }
@@ -489,7 +521,7 @@ static ErrorCode END(void) {
     ErrorCode err;
 
     err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
-    if (operandField[0] != '\0') err = registerError(Err_OperandField);
+    if (*operandField != '\0') err = registerError(Err_OperandField);
     if (currentModule->id[0] == '\0') err = Err_InstructionPlacement;
     return err;
 }
@@ -500,7 +532,7 @@ static ErrorCode ENDDUP(void) {
 
 static ErrorCode ENDIF(void) {
     if (locationFieldToken == NULL) return Err_LocationField;
-    if (operandField[0] != '\0') return Err_OperandField;
+    if (*operandField != '\0') return Err_OperandField;
     return Err_None;
 }
 
@@ -598,8 +630,15 @@ static ErrorCode EXT(void) {
                 symbol = addSymbol(token.details.name.ptr, token.details.name.len, qualifier, &val);
                 n += 1;
                 if (pass == 1 && symbol != NULL) {
-                    symbol->next = currentModule->externals;
-                    currentModule->externals = symbol;
+                    if (currentModule->lastExternal != NULL) {
+                        symbol->externalIndex = currentModule->lastExternal->externalIndex + 1;
+                        currentModule->lastExternal->next = symbol;
+                    }
+                    else {
+                        symbol->externalIndex = 0;
+                        currentModule->firstExternal = symbol;
+                    }
+                    currentModule->lastExternal = symbol;
                 }
             }
             else if ((symbol->value.attributes & SYM_EXTERNAL) == 0) {
@@ -992,11 +1031,11 @@ static ErrorCode LOC(void) {
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
     if (*s != '\0'
-        || isParcelType(&val)
+        || isParcelAddress(&val)
         || isInteger(&val) == FALSE
         || val.intValue < 0
         || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
-        || isAbsoluteType(&val) != currentModule->isAbsolute
+        || isAbsolute(&val) != currentModule->isAbsolute
         || (val.section != NULL && val.section != currentSection))
         return Err_OperandField;
     currentSection->locationCounter = val.intValue * 4;
@@ -1028,9 +1067,9 @@ static ErrorCode MACRO(void) {
     int valueLen;
 
     err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
-    if (operandField[0] != '\0') err = registerError(Err_OperandField);
+    if (*operandField != '\0') err = registerError(Err_OperandField);
     listErrorIndications();
-    listFlush();
+    listFlush(currentSection);
     //
     //  Read and process the prototype statement. Discard comments and empty lines
     //  until the prototype statement is found, then parse the location field
@@ -1042,7 +1081,7 @@ static ErrorCode MACRO(void) {
         readNextLine();
         listSource();
         if (sourceLine[0] != '*' || sourceLine[0] != '\0') break;
-        listFlush();
+        listFlush(currentSection);
     }
     s = sourceLine;
     while (*s == ' ') s += 1;
@@ -1118,14 +1157,14 @@ static ErrorCode MACRO(void) {
     //  Parse macro body
     //
     listErrorIndications();
-    listFlush();
+    listFlush(currentSection);
     while (TRUE) {
         if (isEof()) return Err_InstructionPlacement;
         readNextLine();
         listSource();
         if (sourceLine[0] == '*' || sourceLine[0] == '\0') {
             listErrorIndications();
-            listFlush();
+            listFlush(currentSection);
             continue;
         }
         s = sourceLine;
@@ -1167,7 +1206,7 @@ static ErrorCode MACRO(void) {
         }
         if (s > start)
             addMacroLineFragment(line, MacroFragType_Text, start, s - start);
-        listFlush();
+        listFlush(currentSection);
     }
 
     return Err_None;
@@ -1315,7 +1354,6 @@ static ErrorCode OPSYN(void) {
 static ErrorCode ORG(void) {
     ErrorCode err;
     bool isNominalSection;
-    bool isRelocatable;
     i64 originValue;
     char *s;
     Value val;
@@ -1336,20 +1374,19 @@ static ErrorCode ORG(void) {
         if (err != Err_None) return err;
     }
     if (*s != '\0'
-        || isParcelType(&val)
+        || isParcelAddress(&val)
         || isInteger(&val) == FALSE
         || val.intValue < 0
         || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
-        || isAbsoluteType(&val) != currentModule->isAbsolute
+        || isAbsolute(&val) != currentModule->isAbsolute
         || (val.section != NULL && val.section != currentSection))
         return Err_OperandField;
     originValue = val.intValue * 4;
     isNominalSection = currentSection == currentModule->firstSection;
-    isRelocatable = (val.attributes & SYM_RELOCATABLE) != 0;
-    if (isRelocatable == FALSE && (isNominalSection == FALSE || currentModule->isAbsolute == FALSE)) {
+    if (isRelocatable(&val) == FALSE && (isNominalSection == FALSE || currentModule->isAbsolute == FALSE)) {
         return Err_OperandField;
     }
-    else if (isRelocatable && isNominalSection && currentModule->isAbsolute) {
+    else if (isRelocatable(&val) && isNominalSection && currentModule->isAbsolute) {
         return Err_OperandField;
     }
     else if (originValue < currentSection->originCounter && (isNominalSection == FALSE || currentModule->isOriginSet)) {
@@ -1433,6 +1470,8 @@ static ErrorCode SECTION(void) {
     }
     s = operandField;
     for (i = 0; i < 2; i++) {
+        types[i] = SectionType_None;
+        locations[i] = SectionLocation_None;
         s = getNextToken(s, &token);
         if (isUnqualifiedName(&token)) {
             types[i] = findSectionType(token.details.name.ptr, token.details.name.len);
@@ -1475,22 +1514,19 @@ static ErrorCode SECTION(void) {
     else {
         location = SectionLocation_CM;
     }
-    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
     isCommon = type == SectionType_Common
             || type == SectionType_Dynamic
             || type == SectionType_TaskCom;
-    section = currentModule->firstSection;
-    while (section != NULL) {
+    for (section = currentModule->firstSection; section != NULL; section = section->next) {
         if (strncmp(section->id, id, len) == 0
             && section->id[len] == '\0'
             && ((section->type == type && section->location == location)
                 || isCommon || isCommonSection(section)))
             break;
-        section = section->next;
     }
     if (section == NULL) {
         if (pass == 1) {
-            section = addSection(currentModule, id, len, type);
+            section = addSection(currentModule, id, len, type, location);
         }
         else {
             fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
@@ -1498,7 +1534,7 @@ static ErrorCode SECTION(void) {
         }
     }
     else if ((isCommon || isCommonSection(section)) && (type != section->type || location != section->location)) {
-        return Err_OperandField;
+        return Err_DoubleDefinition;
     }
     if (type == SectionType_TaskCom) {
         if (len < 1) return Err_LocationField;
@@ -1527,6 +1563,7 @@ static ErrorCode SECTION(void) {
             return Err_DoubleDefinition;
         }
     }
+    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
     sectionStack[sectionStackPtr++] = currentSection;
     currentSection = section;
     return Err_None;
@@ -1541,7 +1578,7 @@ static ErrorCode SKIP(void) {
     ErrorCode err;
     char *s;
 
-    if (operandField[0] != '\0') {
+    if (*operandField != '\0') {
         setBase();
         s = getNextValue(operandField, &count, &err);
         restoreBase();
@@ -1569,12 +1606,34 @@ static ErrorCode SPACE(void) {
     if (isSimpleInteger(&val) && *s == '\0') {
         listControlMask = LIST_LIS;
         if (val.intValue > 0) {
-            listFlush();
+            listFlush(currentSection);
             resetErrorRegistrations();
             listControlMask = LIST_ON;
             listClearSource();
-            while (val.intValue-- > 0) listFlush();
+            while (val.intValue-- > 0) listFlush(currentSection);
         }
+    }
+    else {
+        err = Err_OperandField;
+    }
+    return err;
+}
+
+static ErrorCode STACK(void) {
+    ErrorCode err;
+    char *s;
+    Value val;
+
+    err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
+    if (*operandField == '\0') return err;
+    s = getNextValue(operandField, &val, &err);
+    if (err != Err_None) return err;
+    if (val.type == NumberType_Integer
+        && (val.attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_IMMOBILE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS)) == 0
+        && val.intValue >= 0
+        && *s == '\0') {
+        currentModule->stackSize += val.intValue;
+        listValue(&val);
     }
     else {
         err = Err_OperandField;
@@ -1663,14 +1722,15 @@ static ErrorCode VWD(void) {
     Token token;
     Value val;
 
-    if (operandField[0] == '\0') return Err_OperandField;
+    if (*operandField == '\0') return Err_OperandField;
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     if (locationFieldToken != NULL) {
-        forceDataWordBoundary();
-        err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
+        forceWordBoundary(currentSection);
+        err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
+                                              locationFieldToken->details.name.len, SYM_WORD_ADDRESS));
     }
-    emitFieldStart();
-    listCodeLocation();
+    emitFieldStart(currentSection);
+    listCodeLocation(currentSection);
     s = operandField;
     while (*s != '\0') {
         err = Err_None;
@@ -1706,18 +1766,18 @@ static ErrorCode VWD(void) {
         if (err != Err_None) break;
         s = getNextValue(s, &val, &err);
         if (err == Err_None) {
-            emitFieldBits((val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), fieldWidth, val.attributes, FALSE);
+            emitFieldBits(currentSection, (val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), fieldWidth, val.attributes, FALSE);
         }
         if (*s == ',') {
             s += 1;
-            if (currentSection->wordBitPosCounter == 0) listFlush();
+            if (currentSection->wordBitPosCounter == 0) listFlush(currentSection);
         }
         else if (*s != '\0') {
             err = Err_OperandField;
         }
         if (err != Err_None) break;
     }
-    emitFieldEnd(val.attributes);
+    emitFieldEnd(currentSection, val.attributes);
     return err;
 }
 
@@ -1763,7 +1823,7 @@ static ErrorCode Ai__Aj_add_1(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
     if (isOne(&val)) {
-        emit_gh_i_j_k(030, i, j, 0);
+        emit_gh_i_j_k(currentSection, 030, i, j, 0);
     }
     else {
         err = Err_OperandField;
@@ -1798,7 +1858,7 @@ static ErrorCode Ai__Aj_sub_1(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
     if (isOne(&val)) {
-        emit_gh_i_j_k(031, i, j, 0);
+        emit_gh_i_j_k(currentSection, 031, i, j, 0);
     }
     else {
         err = Err_OperandField;
@@ -1819,20 +1879,20 @@ static ErrorCode Ai__X(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER)) {
         if (isNegOne(&val)) { //  Ai -1
-            emit_gh_i_jk(031, i, 0);
+            emit_gh_i_jk(currentSection, 031, i, 0);
         }
         else if (isSimpleInteger(&val) == FALSE) {
-            emit_gh_i_jkm(020, i, &val);
+            emit_gh_i_jkm(currentSection, 020, i, &val);
         }
         else if (val.intValue >= 0 && val.intValue < 64) {
-            emit_gh_i_jk(022, i, val.intValue);
+            emit_gh_i_jk(currentSection, 022, i, val.intValue);
         }
         else if (val.intValue >= 0) {
-            emit_gh_i_jkm(020, i, &val);
+            emit_gh_i_jkm(currentSection, 020, i, &val);
         }
         else {
             val.intValue ^= MASK22;
-            emit_gh_i_jkm(021, i, &val);
+            emit_gh_i_jkm(currentSection, 021, i, &val);
         }
     }
     else {
@@ -1853,8 +1913,8 @@ static ErrorCode Ai__X_Ah(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     err = registerError(getRegisterNumber(instArgv[2], &h));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val) == FALSE) {
-        emit_g_h_i_jkm(010, h, i, &val);
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
+        emit_g_h_i_jkm(currentSection, 010, h, i, &val);
     }
     else {
         err = Err_OperandField;
@@ -1876,8 +1936,8 @@ static ErrorCode Ai__X_X(void) {
     err = registerError(evaluateExpression(instArgv[1], &val1));
     err = registerError(evaluateExpression(instArgv[2], &val2));
     if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val1) == FALSE) {
-        emit_gh_i_jkm(0100, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
+        emit_gh_i_jkm(currentSection, 0100, i, &val1);
     }
     else {
         err = Err_OperandField;
@@ -1902,7 +1962,7 @@ static ErrorCode Ai__CA_Aj(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(033, i, j, 0);
+    emit_gh_i_j_k(currentSection, 033, i, j, 0);
     return err;
 }
 
@@ -1916,7 +1976,7 @@ static ErrorCode Ai__CE_Aj(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(033, i, j, 1);
+    emit_gh_i_j_k(currentSection, 033, i, j, 1);
     return err;
 }
 
@@ -1979,7 +2039,7 @@ static ErrorCode Bjk__Ai(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &jk));
     err = registerError(getRegisterNumber(instArgv[1], &i));
-    emit_gh_i_jk(025, i, jk);
+    emit_gh_i_jk(currentSection, 025, i, jk);
     return err;
 }
 
@@ -1998,7 +2058,7 @@ static ErrorCode Bjk_Ai__X_A0(void) {
     err = registerError(evaluateExpression(instArgv[2], &val));
     err = registerError(getRegisterNumber(instArgv[3], &z));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(034, i, jk);
+        emit_gh_i_jk(currentSection, 034, i, jk);
     }
     else {
         err = Err_OperandField;
@@ -2016,7 +2076,7 @@ static ErrorCode CA_Aj__Ak(void) {
 
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = getRegisterNumber(instArgv[2], &k);
-    emit_gh_i_j_k(001, 0, j, k);
+    emit_gh_i_j_k(currentSection, 001, 0, j, k);
     return err;
 }
 
@@ -2028,7 +2088,7 @@ static ErrorCode CI_Aj(void) {
     int j;
 
     err = registerError(getRegisterNumber(instArgv[1], &j));
-    emit_gh_i_j_k(001, 2, j, 0);
+    emit_gh_i_j_k(currentSection, 001, 2, j, 0);
     return err;
 }
 
@@ -2042,7 +2102,7 @@ static ErrorCode CL_Aj__Ak(void) {
 
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = getRegisterNumber(instArgv[2], &k);
-    emit_gh_i_j_k(001, 1, j, k);
+    emit_gh_i_j_k(currentSection, 001, 1, j, k);
     return err;
 }
 
@@ -2050,16 +2110,16 @@ static ErrorCode CL_Aj__Ak(void) {
 **  CCI
 */
 static ErrorCode CCI(void) {
-    emit_gh_i_j_k(001, 4, 0, 5);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_j_k(currentSection, 001, 4, 0, 5);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  CIPI
 */
 static ErrorCode CIPI(void) {
-    emit_gh_ijk(001, 0402);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_ijk(currentSection, 001, 0402);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
@@ -2073,8 +2133,8 @@ static ErrorCode CLN(void) {
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
-    if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 5) && isValueType(&val)) {
-        emit_gh_i_j_k(001, 4, val.intValue, 3);
+    if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 5)) {
+        emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 3);
     }
     else {
         err = Err_OperandField;
@@ -2086,88 +2146,88 @@ static ErrorCode CLN(void) {
 **  CMR
 */
 static ErrorCode CMR(void) {
-    emit_gh_i_jk(002, 7, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_jk(currentSection, 002, 7, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  DBM
 */
 static ErrorCode DBM(void) {
-    emit_gh_i_jk(002, 5, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_jk(currentSection, 002, 5, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  DCI
 */
 static ErrorCode DCI(void) {
-    emit_gh_i_j_k(001, 4, 0, 7);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_j_k(currentSection, 001, 4, 0, 7);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  DFI
 */
 static ErrorCode DFI(void) {
-    emit_gh_i_jk(002, 2, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_jk(currentSection, 002, 2, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  DRI
 */
 static ErrorCode DRI(void) {
-    emit_gh_i_jk(002, 4, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_jk(currentSection, 002, 4, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  EBM
 */
 static ErrorCode EBM(void) {
-    emit_gh_i_jk(002, 6, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_jk(currentSection, 002, 6, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  ECI
 */
 static ErrorCode ECI(void) {
-    emit_gh_i_j_k(001, 4, 0, 6);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_j_k(currentSection, 001, 4, 0, 6);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  EFI
 */
 static ErrorCode EFI(void) {
-    emit_gh_i_jk(002, 1, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_jk(currentSection, 002, 1, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  ERI
 */
 static ErrorCode ERI(void) {
-    emit_gh_i_jk(002, 3, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_i_jk(currentSection, 002, 3, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  ERR
 */
 static ErrorCode ERR(void) {
-    emit_gh_ijk(000, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_ijk(currentSection, 000, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
 **  EX
 */
 static ErrorCode EX(void) {
-    emit_gh_ijk(004, 0);
-    return (operandField[0] == '\0') ? Err_None : Err_OperandField;
+    emit_gh_ijk(currentSection, 004, 0);
+    return (*operandField == '\0') ? Err_None : Err_OperandField;
 }
 
 /*
@@ -2183,7 +2243,7 @@ static ErrorCode IP(void) {
     if (*s != '\0') err = Err_OperandField;
     if (err != Err_None) (void)registerError(err);
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 1)) {
-        emit_gh_ijk(001, val.intValue == 0 ? 0402 : 0401);
+        emit_gh_ijk(currentSection, 001, val.intValue == 0 ? 0402 : 0401);
     }
     else {
         err = Err_OperandField;
@@ -2207,7 +2267,7 @@ static ErrorCode J(void) {
     s = parseExpression(operandField, &expr);
     if (expr->type == TokenType_Register && expr->details.regster.type == RegisterType_B) {
         err = (*s == '\0') ? getRegisterNumber(expr, &regNum) : Err_OperandField;
-        emit_gh_i_jk(005, 0, (err == Err_None) ? regNum : 0);
+        emit_gh_i_jk(currentSection, 005, 0, (err == Err_None) ? regNum : 0);
     }
     else {
         err = handleBranch(006);
@@ -2280,7 +2340,7 @@ static ErrorCode MC_Aj(void) {
     int j;
 
     err = registerError(getRegisterNumber(instArgv[1], &j));
-    emit_gh_i_j_k(001, 2, j, 1);
+    emit_gh_i_j_k(currentSection, 001, 2, j, 1);
     return err;
 }
 
@@ -2290,8 +2350,8 @@ static ErrorCode MC_Aj(void) {
 static ErrorCode PASS(void) {
     ErrorCode err;
 
-    err = (operandField[0] == '\0') ? Err_None : Err_OperandField;
-    emit_gh_ijk(001, 0);
+    err = (*operandField == '\0') ? Err_None : Err_OperandField;
+    emit_gh_ijk(currentSection, 001, 0);
     return err;
 }
 
@@ -2307,7 +2367,7 @@ static ErrorCode PCI(void) {
     s = getNextToken(operandField, &token);
     if (token.type != TokenType_Register || token.details.regster.type != RegisterType_S || *s != '\0') return Err_OperandField;
     err = registerError(getRegisterNumber(&token, &j));
-    emit_gh_i_j_k(001, 4, j, 4);
+    emit_gh_i_j_k(currentSection, 001, 4, j, 4);
     return err;
 }
 
@@ -2326,7 +2386,7 @@ static ErrorCode RT__Sj(void) {
     int j;
 
     err = registerError(getRegisterNumber(instArgv[1], &j));
-    emit_gh_i_j_k(001, 4, j, 0);
+    emit_gh_i_j_k(currentSection, 001, 4, j, 0);
     return err;
 }
 
@@ -2473,7 +2533,7 @@ static ErrorCode Si__SB_and_Sj(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(044, i, j, 0);
+    emit_gh_i_j_k(currentSection, 044, i, j, 0);
     return err;
 }
 
@@ -2489,7 +2549,7 @@ static ErrorCode Si__CmplSk_and_Sj(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &k));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(045, i, j, k);
+    emit_gh_i_j_k(currentSection, 045, i, j, k);
     return err;
 }
 
@@ -2503,7 +2563,7 @@ static ErrorCode Si__CmplSB_and_Sj(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(045, i, j, 0);
+    emit_gh_i_j_k(currentSection, 045, i, j, 0);
     return err;
 }
 
@@ -2531,7 +2591,7 @@ static ErrorCode Si__SB_or_Sj(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(051, i, j, 0);
+    emit_gh_i_j_k(currentSection, 051, i, j, 0);
     return err;
 }
 
@@ -2550,7 +2610,7 @@ static ErrorCode Si__Si_merge_Sj(void) {
     err = registerError(getRegisterNumber(instArgv[2], &i2));
     err = registerError(getRegisterNumber(instArgv[3], &k));
     if (i != i2) err = Err_OperandField;
-    emit_gh_i_j_k(050, i, j, k);
+    emit_gh_i_j_k(currentSection, 050, i, j, k);
     return err;
 }
 
@@ -2567,7 +2627,7 @@ static ErrorCode Si__Si_merge_SB(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(getRegisterNumber(instArgv[2], &i2));
     if (i != i2) err = Err_OperandField;
-    emit_gh_i_j_k(050, i, j, 0);
+    emit_gh_i_j_k(currentSection, 050, i, j, 0);
     return err;
 }
 
@@ -2595,7 +2655,7 @@ static ErrorCode Si__SB_xor_Sj(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(046, i, j, 0);
+    emit_gh_i_j_k(currentSection, 046, i, j, 0);
     return err;
 }
 
@@ -2612,7 +2672,7 @@ static ErrorCode Si__Si_left_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[1], &i2));
     err = registerError(getRegisterNumber(instArgv[2], &k));
     if (i == i2) {
-        emit_gh_i_j_k(056, i, 0, k);
+        emit_gh_i_j_k(currentSection, 056, i, 0, k);
     }
     else {
         err = Err_OperandField;
@@ -2635,7 +2695,7 @@ static ErrorCode Si__SiSj_left_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[2], &j));
     err = registerError(getRegisterNumber(instArgv[3], &k));
     if (i == i2) {
-        emit_gh_i_j_k(056, i, j, k);
+        emit_gh_i_j_k(currentSection, 056, i, j, k);
     }
     else {
         err = Err_OperandField;
@@ -2658,7 +2718,7 @@ static ErrorCode Si__SiSj_left_X(void) {
     err = registerError(getRegisterNumber(instArgv[2], &j));
     err = registerError(evaluateExpression(instArgv[3], &val));
     if (i == i2 && isOne(&val)) {
-        emit_gh_i_j_k(056, i, j, 0);
+        emit_gh_i_j_k(currentSection, 056, i, j, 0);
     }
     else {
         err = Err_OperandField;
@@ -2682,18 +2742,18 @@ static ErrorCode Si__Si_left_X(void) {
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (i == 0) {
             if (val.intValue == 64) {
-                emit_gh_ijk(053, 0);
+                emit_gh_ijk(currentSection, 053, 0);
             }
             else {
-                emit_gh_i_jk(052, i2, val.intValue);
+                emit_gh_i_jk(currentSection, 052, i2, val.intValue);
             }
         }
         else if (i == i2) {
             if (val.intValue == 64) {
-                emit_gh_i_jk(055, i, 0);
+                emit_gh_i_jk(currentSection, 055, i, 0);
             }
             else {
-                emit_gh_i_jk(054, i, val.intValue);
+                emit_gh_i_jk(currentSection, 054, i, val.intValue);
             }
         }
         else {
@@ -2719,7 +2779,7 @@ static ErrorCode Si__Si_right_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[1], &i2));
     err = registerError(getRegisterNumber(instArgv[2], &k));
     if (i == i2) {
-        emit_gh_i_j_k(057, i, 0, k);
+        emit_gh_i_j_k(currentSection, 057, i, 0, k);
     }
     else {
         err = Err_OperandField;
@@ -2742,7 +2802,7 @@ static ErrorCode Si__SjSi_right_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[2], &i2));
     err = registerError(getRegisterNumber(instArgv[3], &k));
     if (i == i2) {
-        emit_gh_i_j_k(057, i, j, k);
+        emit_gh_i_j_k(currentSection, 057, i, j, k);
     }
     else {
         err = Err_OperandField;
@@ -2765,7 +2825,7 @@ static ErrorCode Si__SjSi_right_X(void) {
     err = registerError(getRegisterNumber(instArgv[2], &i2));
     err = registerError(evaluateExpression(instArgv[3], &val));
     if (i == i2 && isOne(&val)) {
-        emit_gh_i_j_k(057, i, j, 0);
+        emit_gh_i_j_k(currentSection, 057, i, j, 0);
     }
     else {
         err = Err_OperandField;
@@ -2789,18 +2849,18 @@ static ErrorCode Si__Si_right_X(void) {
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (i == 0) {
             if (val.intValue == 0) {
-                emit_gh_ijk(052, 0);
+                emit_gh_ijk(currentSection, 052, 0);
             }
             else {
-                emit_gh_i_jk(053, i2, 64 - val.intValue);
+                emit_gh_i_jk(currentSection, 053, i2, 64 - val.intValue);
             }
         }
         else if (i == i2) {
             if (val.intValue == 0) {
-                emit_gh_i_jk(054, i, 0);
+                emit_gh_i_jk(currentSection, 054, i, 0);
             }
             else {
-                emit_gh_i_jk(055, i, 64 - val.intValue);
+                emit_gh_i_jk(currentSection, 055, i, 64 - val.intValue);
             }
         }
         else {
@@ -2837,7 +2897,7 @@ static ErrorCode Si__CmplSB_xor_Sj(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(047, i, j, 0);
+    emit_gh_i_j_k(currentSection, 047, i, j, 0);
     return err;
 }
 
@@ -2860,10 +2920,10 @@ static ErrorCode Si__CmplMaskLeft(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (val.intValue == 0) {
-            emit_gh_i_jk(042, i, 0);
+            emit_gh_i_jk(currentSection, 042, i, 0);
         }
         else {
-            emit_gh_i_jk(043, i, 64 - val.intValue);
+            emit_gh_i_jk(currentSection, 043, i, 64 - val.intValue);
         }
     }
     else {
@@ -2884,10 +2944,10 @@ static ErrorCode Si__CmplMaskRight(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (val.intValue == 64) {
-            emit_gh_i_jk(043, i, 0);
+            emit_gh_i_jk(currentSection, 043, i, 0);
         }
         else {
-            emit_gh_i_jk(042, i, val.intValue);
+            emit_gh_i_jk(currentSection, 042, i, val.intValue);
         }
     }
     else {
@@ -2915,10 +2975,10 @@ static ErrorCode Si__MaskLeft(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (val.intValue == 64) {
-            emit_gh_i_jk(042, i, 0);
+            emit_gh_i_jk(currentSection, 042, i, 0);
         }
         else {
-            emit_gh_i_jk(043, i, val.intValue);
+            emit_gh_i_jk(currentSection, 043, i, val.intValue);
         }
     }
     else {
@@ -2939,10 +2999,10 @@ static ErrorCode Si__MaskRight(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (val.intValue == 0) {
-            emit_gh_i_jk(043, i, 0);
+            emit_gh_i_jk(currentSection, 043, i, 0);
         }
         else {
-            emit_gh_i_jk(042, i, 64 - val.intValue);
+            emit_gh_i_jk(currentSection, 042, i, 64 - val.intValue);
         }
     }
     else {
@@ -3012,39 +3072,39 @@ static ErrorCode Si__X(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER)) {
         if (isSimpleInteger(&val) == FALSE) {
-            emit_gh_i_jkm(040, i, &val);
+            emit_gh_i_jkm(currentSection, 040, i, &val);
         }
         else if (isZero(&val)) {
-            emit_gh_i_jk(043, i, 0);
+            emit_gh_i_jk(currentSection, 043, i, 0);
         }
         else if (isOne(&val)) {
-            emit_gh_i_jk(042, i, 077);
+            emit_gh_i_jk(currentSection, 042, i, 077);
         }
         else if (isNegOne(&val)) {
-            emit_gh_i_jk(042, i, 0);
+            emit_gh_i_jk(currentSection, 042, i, 0);
         }
         else if (val.intValue >= 0) {
-            emit_gh_i_jkm(040, i, &val);
+            emit_gh_i_jkm(currentSection, 040, i, &val);
         }
         else {
             val.intValue ^= MASK22;
-            emit_gh_i_jkm(041, i, &val);
+            emit_gh_i_jkm(currentSection, 041, i, &val);
         }
     }
     else if (isFloatOne(&val)) {
-        emit_gh_i_jk(071, i, 050);
+        emit_gh_i_jk(currentSection, 071, i, 050);
     }
     else if (isFloatTwo(&val)) {
-        emit_gh_i_jk(071, i, 060);
+        emit_gh_i_jk(currentSection, 071, i, 060);
     }
     else if (isFloatFour(&val)) {
-        emit_gh_i_jk(071, i, 070);
+        emit_gh_i_jk(currentSection, 071, i, 070);
     }
     else if (isFloatFourEighths(&val)) {
-        emit_gh_i_jk(071, i, 040);
+        emit_gh_i_jk(currentSection, 071, i, 040);
     }
     else if (isFloatSixEighths(&val)) {
-        emit_gh_i_jk(071, i, 030);
+        emit_gh_i_jk(currentSection, 071, i, 030);
     }
     else {
         err = Err_OperandField;
@@ -3064,8 +3124,8 @@ static ErrorCode Si__X_Ah(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     err = registerError(getRegisterNumber(instArgv[2], &h));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val) == FALSE) {
-        emit_g_h_i_jkm(012, h, i, &val);
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
+        emit_g_h_i_jkm(currentSection, 012, h, i, &val);
     }
     else {
         err = Err_OperandField;
@@ -3087,8 +3147,8 @@ static ErrorCode Si__X_X(void) {
     err = registerError(evaluateExpression(instArgv[1], &val1));
     err = registerError(evaluateExpression(instArgv[2], &val2));
     if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val1) == FALSE) {
-        emit_gh_i_jkm(0120, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
+        emit_gh_i_jkm(currentSection, 0120, i, &val1);
     }
     else {
         err = Err_OperandField;
@@ -3106,7 +3166,7 @@ static ErrorCode SBj__Ai(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &j));
     err = registerError(getRegisterNumber(instArgv[1], &i));
-    emit_gh_i_j_k(027, i, j, 7);
+    emit_gh_i_j_k(currentSection, 027, i, j, 7);
     return err;
 }
 
@@ -3118,15 +3178,15 @@ static ErrorCode SIPI(void) {
     char *s;
     Value val;
 
-    if (operandField[0] == '\0') {
-        emit_gh_i_j_k(001, 4, 0, 1);
+    if (*operandField == '\0') {
+        emit_gh_i_j_k(currentSection, 001, 4, 0, 1);
         return Err_None;
     }
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 3)) {
-        emit_gh_i_j_k(001, 4, val.intValue, 1);
+        emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 1);
     }
     else {
         err = Err_OperandField;
@@ -3142,7 +3202,7 @@ static ErrorCode SM__Si(void) {
     int i;
 
     err = registerError(getRegisterNumber(instArgv[1], &i));
-    emit_gh_i_jk(073, i, 2);
+    emit_gh_i_jk(currentSection, 073, i, 2);
     return err;
 }
 
@@ -3157,10 +3217,10 @@ static ErrorCode SMjk__X(void) {
     err = registerError(getRegisterNumber(instArgv[0], &jk));
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isZero(&val)) {
-        emit_gh_i_jk(003, 6, jk);
+        emit_gh_i_jk(currentSection, 003, 6, jk);
     }
     else if (isOne(&val)) {
-        emit_gh_i_jk(003, 7, jk);
+        emit_gh_i_jk(currentSection, 003, 7, jk);
     }
     else {
         err = Err_OperandField;
@@ -3184,7 +3244,7 @@ static ErrorCode SMjk__X_X(void) {
         if (arg2->type == TokenType_Name
             && arg2->details.name.len == 2
             && strncasecmp(arg2->details.name.ptr, "TS", 2) == 0) {
-            emit_gh_i_jk(003, 4, jk);
+            emit_gh_i_jk(currentSection, 003, 4, jk);
         }
         else {
             err = Err_OperandField;
@@ -3206,7 +3266,7 @@ static ErrorCode STj__Si(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &j));
     err = registerError(getRegisterNumber(instArgv[1], &i));
-    emit_gh_i_j_k(073, i, j, 3);
+    emit_gh_i_j_k(currentSection, 073, i, j, 3);
     return err;
 }
 
@@ -3220,7 +3280,7 @@ static ErrorCode Tjk__Si(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &jk));
     err = registerError(getRegisterNumber(instArgv[1], &i));
-    emit_gh_i_jk(075, i, jk);
+    emit_gh_i_jk(currentSection, 075, i, jk);
     return err;
 }
 
@@ -3239,7 +3299,7 @@ static ErrorCode Tjk_Ai__X_A0(void) {
     err = registerError(evaluateExpression(instArgv[2], &val));
     err = registerError(getRegisterNumber(instArgv[3], &z));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(036, i, jk);
+        emit_gh_i_jk(currentSection, 036, i, jk);
     }
     else {
         err = Err_OperandField;
@@ -3355,7 +3415,7 @@ static ErrorCode Vi__0_merge_Vk(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[2], &k));
-    emit_gh_i_j_k(0146, i, 0, k);
+    emit_gh_i_j_k(currentSection, 0146, i, 0, k);
     return err;
 }
 
@@ -3379,7 +3439,7 @@ static ErrorCode Vi__Vj_left_1(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
     if (isOne(&val)) {
-        emit_gh_i_j_k(0150, i, j, 0);
+        emit_gh_i_j_k(currentSection, 0150, i, j, 0);
     }
     else {
         err = Err_OperandField;
@@ -3407,7 +3467,7 @@ static ErrorCode Vi__Vj_right_1(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
     if (isOne(&val)) {
-        emit_gh_i_j_k(0151, i, j, 0);
+        emit_gh_i_j_k(currentSection, 0151, i, j, 0);
     }
     else {
         err = Err_OperandField;
@@ -3430,7 +3490,7 @@ static ErrorCode Vi__VjVj_left_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(getRegisterNumber(instArgv[3], &k));
     if (j1 == j2) {
-        emit_gh_i_j_k(0152, i, j1, k);
+        emit_gh_i_j_k(currentSection, 0152, i, j1, k);
     }
     else {
         err = Err_OperandField;
@@ -3453,7 +3513,7 @@ static ErrorCode Vi__VjVj_left_1(void) {
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(evaluateExpression(instArgv[3], &val));
     if (j1 == j2 && isOne(&val)) {
-        emit_gh_i_j_k(0152, i, j1, 0);
+        emit_gh_i_j_k(currentSection, 0152, i, j1, 0);
     }
     else {
         err = Err_OperandField;
@@ -3476,7 +3536,7 @@ static ErrorCode Vi__VjVj_right_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(getRegisterNumber(instArgv[3], &k));
     if (j1 == j2) {
-        emit_gh_i_j_k(0153, i, j1, k);
+        emit_gh_i_j_k(currentSection, 0153, i, j1, k);
     }
     else {
         err = Err_OperandField;
@@ -3499,7 +3559,7 @@ static ErrorCode Vi__VjVj_right_1(void) {
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(evaluateExpression(instArgv[3], &val));
     if (j1 == j2 && isOne(&val)) {
-        emit_gh_i_j_k(0153, i, j1, 0);
+        emit_gh_i_j_k(currentSection, 0153, i, j1, 0);
     }
     else {
         err = Err_OperandField;
@@ -3637,7 +3697,7 @@ static ErrorCode Vi__0(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isZero(&val)) {
-        emit_gh_i_j_k(0145, i, i, i);
+        emit_gh_i_j_k(currentSection, 0145, i, i, i);
     }
     else {
         err = Err_OperandField;
@@ -3660,7 +3720,7 @@ static ErrorCode Vi__0_A0_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[2], &z));
     err = registerError(getRegisterNumber(instArgv[3], &k));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(0176, i, 0, k);
+        emit_gh_i_j_k(currentSection, 0176, i, 0, k);
     }
     else {
         err = Err_OperandField;
@@ -3683,7 +3743,7 @@ static ErrorCode Vi__0_A0_Vk(void) {
     err = registerError(getRegisterNumber(instArgv[2], &z));
     err = registerError(getRegisterNumber(instArgv[3], &k));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(0176, i, 1, k);
+        emit_gh_i_j_k(currentSection, 0176, i, 1, k);
     }
     else {
         err = Err_OperandField;
@@ -3706,7 +3766,7 @@ static ErrorCode Vi__0_A0_1(void) {
     err = registerError(getRegisterNumber(instArgv[2], &z));
     err = registerError(evaluateExpression(instArgv[3], &val2));
     if (z == 0 && isZero(&val1) && isOne(&val2)) {
-        emit_gh_i_jk(0176, i, 0);
+        emit_gh_i_jk(currentSection, 0176, i, 0);
     }
     else {
         err = Err_OperandField;
@@ -3726,7 +3786,7 @@ static ErrorCode Vi_Ak__Sj(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &k));
     err = registerError(getRegisterNumber(instArgv[2], &j));
-    emit_gh_i_j_k(077, i, j, k);
+    emit_gh_i_j_k(currentSection, 077, i, j, k);
     return err;
 }
 
@@ -3743,7 +3803,7 @@ static ErrorCode Vi_Ak__X(void) {
     err = registerError(getRegisterNumber(instArgv[1], &k));
     err = registerError(evaluateExpression(instArgv[2], &val));
     if (isZero(&val)) {
-        emit_gh_i_j_k(077, i, 0, k);
+        emit_gh_i_j_k(currentSection, 077, i, 0, k);
     }
     else {
         err = Err_OperandField;
@@ -3769,16 +3829,16 @@ static ErrorCode Vi_VM__Vj_ID(void) {
     if (arg3->type == TokenType_Name && arg3->details.name.len == 1) {
         switch (*arg3->details.name.ptr) {
         case 'Z':
-            emit_gh_i_j_k(0175, i, j, 4);
+            emit_gh_i_j_k(currentSection, 0175, i, j, 4);
             break;
         case 'N':
-            emit_gh_i_j_k(0175, i, j, 5);
+            emit_gh_i_j_k(currentSection, 0175, i, j, 5);
             break;
         case 'P':
-            emit_gh_i_j_k(0175, i, j, 6);
+            emit_gh_i_j_k(currentSection, 0175, i, j, 6);
             break;
         case 'M':
-            emit_gh_i_j_k(0175, i, j, 7);
+            emit_gh_i_j_k(currentSection, 0175, i, j, 7);
             break;
         default:
             err = Err_OperandField;
@@ -3799,7 +3859,7 @@ static ErrorCode VL__Ak(void) {
     int k;
 
     err = registerError(getRegisterNumber(instArgv[1], &k));
-    emit_gh_i_j_k(002, 0, 0, k);
+    emit_gh_i_j_k(currentSection, 002, 0, 0, k);
     return err;
 }
 
@@ -3812,7 +3872,7 @@ static ErrorCode VL__X(void) {
 
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isOne(&val)) {
-        emit_gh_ijk(002, 0);
+        emit_gh_ijk(currentSection, 002, 0);
     }
     else {
         err = Err_OperandField;
@@ -3828,7 +3888,7 @@ static ErrorCode VM__Sj(void) {
     int j;
 
     err = registerError(getRegisterNumber(instArgv[1], &j));
-    emit_gh_i_j_k(003, 0, j, 0);
+    emit_gh_i_j_k(currentSection, 003, 0, j, 0);
     return err;
 }
 
@@ -3841,7 +3901,7 @@ static ErrorCode VM__X(void) {
 
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isZero(&val)) {
-        emit_gh_ijk(003, 0);
+        emit_gh_ijk(currentSection, 003, 0);
     }
     else {
         err = Err_OperandField;
@@ -3865,16 +3925,16 @@ static ErrorCode VM__Vj_ID(void) {
     if (arg2->type == TokenType_Name && arg2->details.name.len == 1) {
         switch (*arg2->details.name.ptr) {
         case 'Z':
-            emit_gh_i_j_k(0175, 0, j, 0);
+            emit_gh_i_j_k(currentSection, 0175, 0, j, 0);
             break;
         case 'N':
-            emit_gh_i_j_k(0175, 0, j, 1);
+            emit_gh_i_j_k(currentSection, 0175, 0, j, 1);
             break;
         case 'P':
-            emit_gh_i_j_k(0175, 0, j, 2);
+            emit_gh_i_j_k(currentSection, 0175, 0, j, 2);
             break;
         case 'M':
-            emit_gh_i_j_k(0175, 0, j, 3);
+            emit_gh_i_j_k(currentSection, 0175, 0, j, 3);
             break;
         default:
             err = Err_OperandField;
@@ -3895,7 +3955,7 @@ static ErrorCode XA__Aj(void) {
     int j;
 
     err = registerError(getRegisterNumber(instArgv[1], &j));
-    emit_gh_i_j_k(001, 3, j, 0);
+    emit_gh_i_j_k(currentSection, 001, 3, j, 0);
     return err;
 }
 
@@ -3914,7 +3974,7 @@ static ErrorCode X_Ah__Bjk_Ai(void) {
     err = registerError(getRegisterNumber(instArgv[2], &jk));
     err = registerError(getRegisterNumber(instArgv[3], &i));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(035, i, jk);
+        emit_gh_i_jk(currentSection, 035, i, jk);
     }
     else {
         err = Err_OperandField;
@@ -3937,7 +3997,7 @@ static ErrorCode X_Ah__Tjk_Ai(void) {
     err = registerError(getRegisterNumber(instArgv[2], &jk));
     err = registerError(getRegisterNumber(instArgv[3], &i));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(037, i, jk);
+        emit_gh_i_jk(currentSection, 037, i, jk);
     }
     else {
         err = Err_OperandField;
@@ -3958,8 +4018,8 @@ static ErrorCode X_Ah__Ai(void) {
     err = registerError(evaluateExpression(instArgv[0], &val));
     err = registerError(getRegisterNumber(instArgv[1], &h));
     err = registerError(getRegisterNumber(instArgv[2], &i));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val) == FALSE) {
-        emit_g_h_i_jkm(011, h, i, &val);
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
+        emit_g_h_i_jkm(currentSection, 011, h, i, &val);
     }
     else {
         err = Err_OperandField;
@@ -3981,8 +4041,8 @@ static ErrorCode X_X__Ai(void) {
     err = registerError(evaluateExpression(instArgv[1], &val2));
     err = registerError(getRegisterNumber(instArgv[2], &i));
     if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val1) == FALSE) {
-        emit_gh_i_jkm(0110, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
+        emit_gh_i_jkm(currentSection, 0110, i, &val1);
     }
     else {
         err = Err_OperandField;
@@ -4003,8 +4063,8 @@ static ErrorCode X_Ah__Si(void) {
     err = registerError(evaluateExpression(instArgv[0], &val));
     err = registerError(getRegisterNumber(instArgv[1], &h));
     err = registerError(getRegisterNumber(instArgv[2], &i));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val) == FALSE) {
-        emit_g_h_i_jkm(013, h, i, &val);
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
+        emit_g_h_i_jkm(currentSection, 013, h, i, &val);
     }
     else {
         err = Err_OperandField;
@@ -4026,8 +4086,8 @@ static ErrorCode X_X__Si(void) {
     err = registerError(evaluateExpression(instArgv[1], &val2));
     err = registerError(getRegisterNumber(instArgv[2], &i));
     if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelType(&val1) == FALSE) {
-        emit_gh_i_jkm(0130, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
+        emit_gh_i_jkm(currentSection, 0130, i, &val1);
     }
     else {
         err = Err_OperandField;
@@ -4050,7 +4110,7 @@ static ErrorCode X_A0_Ak__Vj(void) {
     err = registerError(getRegisterNumber(instArgv[2], &k));
     err = registerError(getRegisterNumber(instArgv[3], &j));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(0177, 0, j, k);
+        emit_gh_i_j_k(currentSection, 0177, 0, j, k);
     }
     else {
         err = Err_OperandField;
@@ -4073,7 +4133,7 @@ static ErrorCode X_A0_Vk__Vj(void) {
     err = registerError(getRegisterNumber(instArgv[2], &k));
     err = registerError(getRegisterNumber(instArgv[3], &j));
     if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(0177, 1, j, k);
+        emit_gh_i_j_k(currentSection, 0177, 1, j, k);
     }
     else {
         err = Err_OperandField;
@@ -4096,7 +4156,7 @@ static ErrorCode X_A0_1__Vj(void) {
     err = registerError(evaluateExpression(instArgv[2], &val2));
     err = registerError(getRegisterNumber(instArgv[3], &j));
     if (z == 0 && isZero(&val1) && isOne(&val2)) {
-        emit_gh_i_j_k(0177, 0, j, 0);
+        emit_gh_i_j_k(currentSection, 0177, 0, j, 0);
     }
     else {
         err = Err_OperandField;
@@ -4281,22 +4341,6 @@ static void addPattern(char *s, InstructionHandler handler) {
 }
 
 /*
- *  advanceBitPosition - advance to the next bit position at which to emit code
- */
-void advanceBitPosition(int count) {
-    currentSection->parcelBitPosCounter += count;
-    while (currentSection->parcelBitPosCounter > 15) {
-        currentSection->originCounter += 1;
-        currentSection->locationCounter += 1;
-        currentSection->parcelBitPosCounter -= 16;
-    }
-    currentSection->wordBitPosCounter = ((currentSection->locationCounter & 0x03) * 16) + currentSection->parcelBitPosCounter;
-    if (pass == 1 && currentSection->originCounter > currentSection->size) {
-        currentSection->size = currentSection->originCounter;
-    }
-}
-
-/*
 **  allocInstruction - allocate an instance of a named Instruction structure
 */
 static NamedInstruction *allocInstruction(char *id, u8 attributes, InstructionHandler handler) {
@@ -4431,16 +4475,16 @@ static ErrorCode defineSymbol(u16 attributes) {
         if (token.type == TokenType_Name && token.details.name.len == 1) {
             switch (*token.details.name.ptr) {
             case 'P':
-                if (isWordType(&val)) val.intValue *= 4;
+                if (isWordAddress(&val)) val.intValue *= 4;
                 val.attributes = SYM_PARCEL_ADDRESS;
                 break;
             case 'V':
-                if (isRelocatableType(&val)) err = registerError(Err_OperandField);
+                if (isRelocatable(&val)) err = registerError(Err_OperandField);
                 val.attributes = 0;
                 val.section = NULL;
                 break;
             case 'W':
-                if (isParcelType(&val)) val.intValue /= 4;
+                if (isParcelAddress(&val)) val.intValue /= 4;
                 val.attributes = SYM_WORD_ADDRESS;
                 break;
             default:
@@ -4473,260 +4517,6 @@ static ErrorCode defineSymbol(u16 attributes) {
     if (err == Err_None || err >= Warn_Programmer) listValue(&val);
 
     return err;
-}
-
-/*
- *  emit_g_h_i_jkm - emit an instruction with 4-bit op code, 3-bit index register, 3-bit source or result register,
- *  and 22-bit address or displacement
- */
-static void emit_g_h_i_jkm(u8 g, u8 h, u8 i, Value *jkm) {
-    u32 instr;
-
-    instr = (g << 28) | (h << 25) | (i << 22) | (jkm->intValue & MASK22);
-    putHalfWord(currentModule, currentSection->originCounter, instr);
-    listCodeLocation();
-    listCode10_22(instr, jkm->attributes);
-    advanceBitPosition(32);
-}
-
-/*
- *  emit_gh_i_j_k - emit an instruction with 7-bit op code and 3 3-bit register designators
- */
-static void emit_gh_i_j_k(u8 gh, u8 i, u8 j, u8 k) {
-    u16 instr;
-
-    instr = (gh << 9) | (i << 6) | (j << 3) | k;
-    putParcel(currentModule, currentSection->originCounter, instr);
-    listCodeLocation();
-    listCode16(instr);
-    advanceBitPosition(16);
-}
-
-/*
- *  emit_gh_i_jk - emit an instruction with 7-bit op code, 3-bit result register, and 6-bit constant or register designator
- */
-static void emit_gh_i_jk(u8 gh, u8 i, u8 jk) {
-    u16 instr;
-
-    instr = (gh << 9) | (i << 6) | (jk & MASK6);
-    putParcel(currentModule, currentSection->originCounter, instr);
-    listCodeLocation();
-    listCode16(instr);
-    advanceBitPosition(16);
-}
-
-/*
- *  emit_gh_ijk - emit an instruction with 7-bit op code and 9-bit constant
- */
-static void emit_gh_ijk(u8 gh, u16 ijk) {
-    u16 instr;
-
-    instr = (gh << 9) | (ijk & MASK9);
-    putParcel(currentModule, currentSection->originCounter, instr);
-    listCodeLocation();
-    listCode16(instr);
-    advanceBitPosition(16);
-}
-
-/*
- *  emit_gh_i_jkm - emit an instruction with 7-bit op code, 3-bit result register, and 22-bit constant
- */
-static void emit_gh_i_jkm(u8 gh, u8 i, Value *jkm) {
-    u32 instr;
-
-    instr = (gh << 25) | (i << 22) | (jkm->intValue & MASK22);
-    putHalfWord(currentModule, currentSection->originCounter, instr);
-    listCodeLocation();
-    listCode10_22(instr, jkm->attributes);
-    advanceBitPosition(32);
-}
-
-/*
- *  emit_gh_ijkm - emit an instruction with 7-bit op code, and 24-bit parcel address
- */
-static void emit_gh_ijkm(u8 gh, Value *ijkm) {
-    u32 instr;
-
-    instr = (gh << 25) | (ijkm->intValue & MASK24);
-    putHalfWord(currentModule, currentSection->originCounter, instr);
-    listCodeLocation();
-    listCode7_24(instr, ijkm->attributes);
-    advanceBitPosition(32);
-}
-
-/*
- *  emitFieldBits - emit a field of bits
- */
-static int startingBitPos = 0;
-
-static void emitFieldBits(u64 bits, int len, u16 attributes, bool doListFlush) {
-    u64 currentWord;
-    int emptyBitCount;
-    int shiftCount;
-    u64 subfield;
-    int subfieldLen;
-
-    currentWord = getWord(currentModule, currentSection->originCounter);
-    emptyBitCount = 64 - currentSection->wordBitPosCounter;
-    while (len > emptyBitCount) {
-        shiftCount = len - emptyBitCount;
-        currentWord |= bits >> shiftCount;
-        putWord(currentModule, currentSection->originCounter, currentWord);
-        subfieldLen = 64 - startingBitPos;
-        subfield = extractSubfield(currentWord, startingBitPos, subfieldLen);
-        listField(subfield, subfieldLen, attributes, 21);
-        listFlush();
-        listCodeLocation();
-        len = shiftCount;
-        bits = extractSubfield(bits, 64 - len, len);
-        advanceBitPosition(emptyBitCount);
-        currentWord = getWord(currentModule, currentSection->originCounter);
-        startingBitPos = 0;
-        emptyBitCount = 64 - currentSection->wordBitPosCounter;
-    }
-    if (len > 0) {
-        shiftCount = 64 - (currentSection->wordBitPosCounter + len);
-        currentWord |= bits << shiftCount;
-        putWord(currentModule, currentSection->originCounter, currentWord);
-        advanceBitPosition(len);
-        if (currentSection->wordBitPosCounter == 0) {
-            subfieldLen = 64 - startingBitPos;
-            subfield = extractSubfield(currentWord, startingBitPos, subfieldLen);
-            listField(subfield, subfieldLen, attributes, 21);
-            if (doListFlush) {
-                listFlush();
-                listCodeLocation();
-            }
-            startingBitPos = 0;
-        }
-    }
-}
-
-/*
- *  emitFieldEnd - complete the emission of a field of bits
- */
-static void emitFieldEnd(u16 attributes) {
-    int lastBitPos;
-    int lastCol;
-    int len;
-    int shiftCount;
-    u64 subfield;
-
-    len = currentSection->wordBitPosCounter - startingBitPos;
-    if (len > 0) {
-        lastCol = (currentSection->wordBitPosCounter + 1) / 3;
-        subfield = extractSubfield(getWord(currentModule, currentSection->originCounter), startingBitPos, len);
-        lastBitPos = (currentSection->wordBitPosCounter - 1) % 3;
-        if (lastBitPos > 0) {
-            shiftCount = 3 - lastBitPos;
-            subfield <<= shiftCount;
-            len += shiftCount;
-        }
-        listField(subfield, len, attributes, lastCol);
-    }
-}
-
-/*
- *  emitFieldStart - begin the emission of a field of bits
- */
-static void emitFieldStart(void) {
-    startingBitPos = currentSection->wordBitPosCounter;
-}
-
-/*
- *  emitLiterals - emit literals into the literals section
- */
-void emitLiterals(void) {
-    Literal *literal;
-    Section *savedSection;
-    u16 savedListControl;
-    Token *str;
-    Value val;
-
-    savedSection = currentSection;
-    savedListControl = currentListControl;
-    currentSection = currentModule->firstSection->next; // Literals section is always 2nd in module
-    currentListControl = 0; // suppress listing completely
-    literal = currentModule->literals;
-    while (literal != NULL) {
-        forceDataWordBoundary();
-        literal->offset = currentSection->locationCounter;
-        if (literal->expression->type == TokenType_String) {
-            emitString(literal->expression->details.string.ptr, literal->expression->details.string.len,
-                       literal->expression->details.string.count, literal->expression->details.string.justification);
-        }
-        else {
-            (void)evaluateExpression(literal->expression, &val);
-            emitFieldStart();
-            emitFieldBits((val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
-            emitFieldEnd(val.attributes);
-        }
-        literal = literal->next;
-    }
-    currentSection = savedSection;
-    currentListControl = savedListControl;
-}
-
-/*
- *  emitPassFill - emit a PASS instruction to fill a word
- */
-static void emitPassFill(void) {
-    u16 instr;
-
-    instr = 001000;
-    putParcel(currentModule, currentSection->originCounter, instr);
-    listClearSource();
-    listCodeLocation();
-    listCode16(instr);
-    listFlush();
-    listSource();
-    advanceBitPosition(16);
-}
-
-/*
- *  emitString - emit a string of text
- */
-static void emitString(char *s, int len, int count, JustifyType justification) {
-    int fillCount;
-
-    if (len > count) len = count;
-    fillCount = count - len;
-
-    emitFieldStart();
-    switch (justification) {
-    case Justify_LeftBlankFill:
-        while (len-- > 0) emitFieldBits(*s++, 8, 0, len > 0 || fillCount > 0);
-        while (fillCount-- > 0) emitFieldBits(0x20, 8, 0, fillCount > 0);
-        break;
-    case Justify_LeftZeroFill:
-        while (len-- > 0) emitFieldBits(*s++, 8, 0, len > 0 || fillCount > 0);
-        while (fillCount-- > 0) emitFieldBits(0, 8, 0, fillCount > 0);
-        break;
-    case Justify_RightZeroFill:
-        while (fillCount-- > 0) emitFieldBits(0, 8, 0, TRUE);
-        while (len-- > 0) emitFieldBits(*s++, 8, 0, len > 0);
-        break;
-    case Justify_LeftZeroEnd:
-        if (len >= count) len -= 1;
-        while (len-- > 0) emitFieldBits(*s++, 8, 0, TRUE);
-        emitFieldBits(0, 8, 0, fillCount > 0);
-        while (fillCount-- > 0) emitFieldBits(0, 8, 0, fillCount > 0);
-        break;
-    }
-    emitFieldEnd(0);
-}
-
-/*
- *  extractSubfield - extract a subfield of bits from a word
- */
-static u64 extractSubfield(u64 word, int startingBitPos, int len) {
-    u64 mask;
-    int shiftCount;
-
-    if (len >= 64) return word;
-    mask = ~((~(u64)0 >> len) << len);
-    shiftCount = 64 - (startingBitPos + len);
-    return (word >> shiftCount) & mask;
 }
 
 /*
@@ -4782,7 +4572,7 @@ typedef struct sectionLocationTableEntry {
 static SectionLocationTableEntry sectionLocationTable[] = {
     {"CM", 2, SectionLocation_CM},
     {"EM", 2, SectionLocation_EM},
-    {"LM", 2, SectionLocation_LM},
+/*  {"LM", 2, SectionLocation_LM}, */
     {NULL, 0, 0}
 };
 
@@ -4827,17 +4617,6 @@ static SectionType findSectionType(char *name, int len) {
 }
 
 /*
- *  forceDataWordBoundary - advance location and origin counters to next word boundary, if necessary
- */
-static void forceDataWordBoundary(void) {
-    if (currentSection->parcelBitPosCounter > 0)
-        advanceBitPosition(16 - currentSection->parcelBitPosCounter);
-    while ((currentSection->locationCounter & 0x03) != 0) {
-        advanceBitPosition(16);
-    }
-}
-
-/*
  *  forceInstWordBoundary - advance location and origin counters to next instruction word boundary, if necessary
  */
 static void forceInstWordBoundary(void) {
@@ -4846,7 +4625,7 @@ static void forceInstWordBoundary(void) {
     savedListControl = currentListControl;
     currentListControl = 0;
     while ((currentSection->locationCounter & 0x03) != 0) {
-        emitPassFill();
+        emit_gh_ijk(currentSection, 001, 0);
     }
     currentListControl = savedListControl;
 }
@@ -5020,28 +4799,6 @@ static char *getParamValue(char *s, char **value, int *valueLen) {
     return s;
 }
 
-/*
- *  getWord - get the word from a module image referenced by a parcel address
- */
-static u64 getWord(Module *module, u32 parcelAddress) {
-    u32 addr;
-    u32 limit;
-    u64 word;
-
-    addr = (parcelAddress & 0xfffffc) * 2;
-    limit = addr + 7;
-    while (limit >= module->imageSize) {
-        module->image = (u8 *)reallocate(module->image, module->imageSize, module->imageSize + IMAGE_INCREMENT);
-        module->imageSize += IMAGE_INCREMENT;
-    }
-    word = 0;
-    while (addr <= limit) {
-        word = (word << 8) | module->image[addr++];
-    }
-
-    return word;
-}
-
 static ErrorCode handleBranch(u16 opCode) {
     ErrorCode err;
     char *s;
@@ -5049,11 +4806,11 @@ static ErrorCode handleBranch(u16 opCode) {
 
     s = getNextValue(operandField, &val, &err);
     if (*s != '\0') err = Err_OperandField;
-    if (isWordType(&val)) {
+    if (isWordAddress(&val)) {
         val.intValue <<= 2;
         val.attributes = (val.attributes & ~SYM_WORD_ADDRESS) | SYM_PARCEL_ADDRESS;
     }
-    emit_gh_ijkm(opCode, &val);
+    emit_gh_ijkm(currentSection, opCode, &val);
     return err;
 }
 
@@ -5066,7 +4823,7 @@ static ErrorCode handleOp_i_j_k(u16 opCode) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(getRegisterNumber(instArgv[2], &k));
-    emit_gh_i_j_k(opCode, i, j, k);
+    emit_gh_i_j_k(currentSection, opCode, i, j, k);
     return err;
 }
 
@@ -5077,7 +4834,7 @@ static ErrorCode handleOp_i_j_n(u16 opCode, u8 n) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &j));
-    emit_gh_i_j_k(opCode, i, j, n);
+    emit_gh_i_j_k(currentSection, opCode, i, j, n);
     return err;
 }
 
@@ -5088,7 +4845,7 @@ static ErrorCode handleOp_i_jk(u16 opCode) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &jk));
-    emit_gh_i_jk(opCode, i, jk);
+    emit_gh_i_jk(currentSection, opCode, i, jk);
     return err;
 }
 
@@ -5097,7 +4854,7 @@ static ErrorCode handleOp_i_n(u16 opCode, u16 n) {
     int i;
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
-    emit_gh_i_jk(opCode, i, n);
+    emit_gh_i_jk(currentSection, opCode, i, n);
     return err;
 }
 
@@ -5108,7 +4865,7 @@ static ErrorCode handleOp_i_n_k(u16 opCode, u8 n) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &k));
-    emit_gh_i_j_k(opCode, i, n, k);
+    emit_gh_i_j_k(currentSection, opCode, i, n, k);
     return err;
 }
 
@@ -5330,6 +5087,7 @@ void instInit(void) {
     addInstruction("DUP",     0, DUP);
     addInstruction("SUBTITLE",0, SUBTITLE);
     addInstruction("SKIP",    0, SKIP);
+    addInstruction("STACK",   0, STACK);
     addInstruction("IFA",     0, IFA);
     addInstruction("OPDEF",   0, OPDEF);
     addInstruction("MICRO",   0, MICRO);
@@ -5374,21 +5132,6 @@ void instInit(void) {
     addInstruction("ECI",     INST_MACHINE, ECI);
 }
 
-bool isCodeSection(Section *section) {
-    return section != NULL && (section->type == SectionType_Mixed || section->type == SectionType_Code);
-}
-
-bool isCommonSection(Section *section) {
-    return section != NULL
-        && (section->type == SectionType_Common
-            || section->type == SectionType_Dynamic
-            || section->type == SectionType_TaskCom);
-}
-
-bool isDataSection(Section *section) {
-    return section != NULL && (section->type == SectionType_Mixed || section->type == SectionType_Data);
-}
-
 static bool isEquivNode(PatternNode *node1, PatternNode *node2) {
     if (node1->type == node2->type) {
         switch (node1->type) {
@@ -5431,33 +5174,21 @@ static bool isIntegerRange(Value *val, int lowerBound, int upperBound) {
     return (isInteger(val) && val->intValue >= lowerBound && val->intValue <= upperBound);
 }
 
-bool isNamedCommonSection(Section *section) {
-    return section != NULL && section->type == SectionType_Common && *section->id != '\0';
-}
-
 static bool isNegOne(Value *val) {
-    return val->type == NumberType_Integer
-        && val->intValue == -1
-        && isValueType(val)
-        && (val->attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
+    return isSimpleInteger(val) && val->intValue == -1;
 }
 
 static bool isOne(Value *val) {
-    return val->type == NumberType_Integer
-        && val->intValue == 1
-        && isValueType(val)
-        && (val->attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
+    return isSimpleInteger(val) && val->intValue == 1;
 }
 
 static bool isSimpleInteger(Value *val) {
     return val->type == NumberType_Integer
-        && (val->attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
+        && (val->attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_IMMOBILE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
 }
 
 static bool isZero(Value *val) {
-    return val->type == NumberType_Integer
-        && val->intValue == 0
-        && (val->attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
+    return isSimpleInteger(val) && val->intValue == 0;
 }
 
 static InstructionHandler matchInstruction(bool *didMatchResultField) {
@@ -5578,7 +5309,7 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
         }
         node = node->next;
         if (*s == '\0') {
-            if (i < 2 && operandField[0] != '\0') {
+            if (i < 2 && *operandField != '\0') {
                 s = fields[i++];
                 delimiter = NodeType_FieldDelimiter;
             }
@@ -6002,7 +5733,8 @@ ErrorCode processMachineInstruction() {
 
     err = Err_None;
     if (locationFieldToken != NULL) {
-        err = registerError(addLocationSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, SYM_PARCEL_ADDRESS));
+        err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
+                                              locationFieldToken->details.name.len, SYM_PARCEL_ADDRESS));
     }
     handler = matchInstruction(&didMatchResultField);
     if (handler != NULL) {
@@ -6028,53 +5760,6 @@ static ErrorCode pushBase(int base) {
     return err;
 }
 
-/*
- *  putHalfWord - put two parcels into a module image referenced by a parcel address
- */
-static void putHalfWord(Module *module, u32 parcelAddress, u32 halfWord) {
-    putParcel(module, parcelAddress, halfWord >> 16);
-    putParcel(module, parcelAddress + 1, halfWord & 0xffff);
-}
-
-/*
- *  putParcel - put a parcel into a module image referenced by a parcel address
- */
-static void putParcel(Module *module, u32 parcelAddress, u16 parcel) {
-    u32 addr;
-
-    if (pass == 1) return;
- 
-    addr = parcelAddress * 2;
-    while (addr + 1 >= module->imageSize) {
-        module->image = (u8 *)reallocate(module->image, module->imageSize, module->imageSize + IMAGE_INCREMENT);
-        module->imageSize += IMAGE_INCREMENT;
-    }
-    module->image[addr] = parcel >> 8;
-    module->image[addr + 1] = parcel & 0xff;
-}
-
-/*
- *  putWord - put a word into a module image referenced by a parcel address
- */
-static void putWord(Module *module, u32 parcelAddress, u64 word) {
-    u32 addr;
-    u32 limit;
-    int shiftCount;
-
-    if (pass == 1) return;
-    addr = (parcelAddress & 0xfffffc) * 2;
-    limit = addr + 7;
-    while (limit >= module->imageSize) {
-        module->image = (u8 *)reallocate(module->image, module->imageSize, module->imageSize + IMAGE_INCREMENT);
-        module->imageSize += IMAGE_INCREMENT;
-    }
-    shiftCount = 56;
-    while (addr <= limit) {
-        module->image[addr++] = (word >> shiftCount) & 0xff;
-        shiftCount -= 8;
-    }
-}
-
 static int savedBase;
 
 static void restoreBase(void) {
@@ -6094,7 +5779,7 @@ static void skipLines(Token *locationFieldToken, int count) {
     listErrorIndications();
     if (locationFieldToken == NULL) {
         while (count > 0 && isEof() == FALSE) {
-            listFlush();
+            listFlush(currentSection);
             readNextLine();
             listSource();
             if (sourceLine[0] != '*') count -= 1;
@@ -6103,7 +5788,7 @@ static void skipLines(Token *locationFieldToken, int count) {
     else {
         condToken = copyToken(locationFieldToken);
         while (isEof() == FALSE) {
-            listFlush();
+            listFlush(currentSection);
             readNextLine();
             listSource();
             s = sourceLine;
@@ -6119,25 +5804,4 @@ static void skipLines(Token *locationFieldToken, int count) {
         }
         freeToken(condToken);
     }
-}
-
-/*
- *  toCrayFloat - map IEEE 754 floating point format to Cray format
- */
-static u64 toCrayFloat(u64 ieee) {
-    u64 cray_f;
-    long exponent;
-    u64 fraction;
-    u64 sign;
-
-    if (ieee == 0) return 0;
-    sign = ieee & 0x8000000000000000;
-    exponent = ((ieee >> 52) & 0x7ff) - 1023; // unbias the 11-bit exponent
-    fraction = ieee & 0xfffffffffffff;        // 1 implied to left of binary point
-    //
-    //  Normalized value has 1 in most significant bit of fraction, so shift a 1 into the IEEE
-    //  fraction, adjust the exponent accordingly, then add Cray bias to produce 15-bit exponent.
-    //
-    cray_f = sign | ((((exponent + 1) + 040000) & 0x7fff) << 48) | ((fraction >> 5) | 0x800000000000);
-    return cray_f;
 }

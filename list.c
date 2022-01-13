@@ -25,12 +25,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include "proto.h"
 #include "types.h"
 
 static bool isListSuppressed(void);
-static void listPageHeader(void);
+static void listPageHeader(Section *section);
 static void listQualifiers(Qualifier *qualifier);
 static void listSymbols(Symbol *symbol);
 static void resetHeaderLine(void);
@@ -54,6 +53,7 @@ static void resetListingLine(void);
 #define COL_TITLE           1
 
 static char *cpuType = "Cray X-MP";
+static Section dummySection;
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = 0;
 static char listingLine[LISTING_LINE_LENGTH+2];
@@ -137,8 +137,8 @@ void listCode7_24(u32 bits, u16 attributes) {
     }
 }
 
-void listCodeLocation(void) {
-    listLocation(currentSection->originCounter);
+void listCodeLocation(Section *section) {
+    listLocation(section->originCounter);
 }
 
 void listEject(void) {
@@ -169,18 +169,18 @@ void listErrorSummary(void) {
     strcpy(subtitle, "ERROR SUMMARY");
     if (errorCount > 0) {
         sprintf(listingLine, " %d ERROR%s\n", errorCount, (errorCount > 1) ? "S" : "");
-        listFlush();
+        listFlush(&dummySection);
     }
     if (warningCount > 0) {
         sprintf(listingLine, " %d WARNING%s\n", warningCount, (warningCount > 1) ? "S" : "");
-        listFlush();
+        listFlush(&dummySection);
     }
     if (errorCount + warningCount > 0) {
-        listSpace(1);
+        listFlush(&dummySection);
         for (code = Err_DataItem; code <= Warn_RedefinedMacro; code++) {
             if ((errorUnion & (1 << code)) != 0) {
                 sprintf(listingLine, " %-2s %s\n", getErrorIndicator(code), getErrorMessage(code));
-                listFlush();
+                listFlush(&dummySection);
             }
         }
     }
@@ -190,24 +190,18 @@ void listField(u64 bits, int len, u16 attributes, int colOffset) {
     listCode(bits, len, COL_CODE + colOffset);
 }
 
-void listFlush(void) {
+void listFlush(Section *section) {
     if (isListSuppressed()) return;
-    if ((lineNumber % LINES_PER_PAGE) == 0) listPageHeader();
+    if ((lineNumber % LINES_PER_PAGE) == 0) listPageHeader(section);
     fputs(listingLine, listingFile);
     lineNumber += 1;
     resetListingLine();
+fflush(listingFile);
 }
 
 void listInit(void) {
-    time_t clock;
-    struct tm *tmp;
-
-    clock = time(NULL);
-    tmp = localtime(&clock);
-    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_year - 100);
-    sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
-    sprintf(currentJDate, "%02d/%03d", tmp->tm_year - 100, tmp->tm_yday + 1);
-
+    memset(&dummySection, 0, sizeof(Section));
+    dummySection.id = "";
     resetListingLine();
 }
 
@@ -228,7 +222,7 @@ void listLocation(u32 location) {
     }
 }
 
-static void listPageHeader(void) {
+static void listPageHeader(Section *section) {
     char buf[20];
     char *cp;
     char *hp;
@@ -278,7 +272,7 @@ static void listPageHeader(void) {
             cp = subtitle;
             while (*cp != '\0' && hp < limit) *hp++ = *cp++;
         }
-        sprintf(buf, "SECTION: %s", currentSection->id);
+        sprintf(buf, "SECTION: %s", section->id);
         hp = &headerLine[COL_SECTION];
         limit = &headerLine[COL_QUALIFIER-2];
         cp = buf;
@@ -318,13 +312,6 @@ void listSource(void) {
     while (*sp != '\0' && cp < limit) *cp++ = *sp++;
 }
 
-void listSpace(int lines) {
-    if (isListSuppressed()) return;
-    while (lines-- > 0) {
-        listFlush();
-    }
-}
-
 static void listSymbols(Symbol *symbol) {
     int col;
 
@@ -333,6 +320,13 @@ static void listSymbols(Symbol *symbol) {
         if ((symbol->value.attributes & SYM_COUNTER) == 0) {
             sprintf(listingLine, " %-8s ", symbol->id);
             col = 10;
+            if (symbol->value.section != NULL) {
+                sprintf(&listingLine[col], " %-8s ", symbol->value.section->id);
+            }
+            else {
+                memset(&listingLine[col], ' ', 10);
+            }
+            col += 10;
             listingLine[col++] = ((symbol->value.attributes & SYM_REDEFINABLE) != 0) ? 'R' : ' ';
             if ((symbol->value.attributes & SYM_WORD_ADDRESS) != 0)
                 listingLine[col++] = 'W';
@@ -344,6 +338,8 @@ static void listSymbols(Symbol *symbol) {
                 listingLine[col++] = 'X';
             else if ((symbol->value.attributes & SYM_RELOCATABLE) != 0)
                 listingLine[col++] = '+';
+            else if ((symbol->value.attributes & SYM_IMMOBILE) != 0)
+                listingLine[col++] = 'I';
             else
                 listingLine[col++] = ' ';
             listingLine[col++] = isCommonSection(symbol->value.section) ? 'C' : ' ';
@@ -352,7 +348,7 @@ static void listSymbols(Symbol *symbol) {
                 sprintf(&listingLine[col], "%lo%c\n", symbol->value.intValue >> 2, parcelIndicator[symbol->value.intValue & 0x03]);
             else
                 sprintf(&listingLine[col], "%lo\n", symbol->value.intValue);
-            listFlush();
+            listFlush(&dummySection);
         }
         listSymbols(symbol->right);
     }
