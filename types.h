@@ -232,6 +232,8 @@ typedef struct objectBlock {
     SectionLocation location;
     u8 *image;
     u32 imageSize;
+    u32 lowestParcelAddress;
+    u32 highestParcelAddress;
     RelocationTableEntry *relocationTable;
     int relocationTableIndex;
     int relocationTableSize;
@@ -440,9 +442,6 @@ typedef struct module {
     char *id;
     char *comment;
     bool isAbsolute;
-    bool isOriginSet;
-    u32  origin;
-    u32  size;
     u32  stackSize;
     Name *duplicateds;
     Name *macros;

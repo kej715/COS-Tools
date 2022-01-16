@@ -51,7 +51,6 @@ int main(int argc, char *argv[]) {
     firstModule = lastModule = NULL;
     runPass(1);
     for (module = firstModule; module != NULL; module = module->next) {
-        module->isOriginSet = FALSE;
         emitLiterals(module);
         createObjectBlocks(module);
         adjustSymbolValues(module);
@@ -224,8 +223,9 @@ static void writeModuleImages(void) {
     if (objectFile == NULL) return;
 
     for (module = firstModule; module != NULL; module = module->next) {
-        writeObjectFile(module, objectFile);
+        writeObjectRecord(module, objectFile);
     }
+    cosDsWriteEOF(objectFile);
     cosDsWriteEOD(objectFile);
     cosDsClose(objectFile);
 }

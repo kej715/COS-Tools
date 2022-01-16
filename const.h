@@ -39,6 +39,7 @@
 #define MASK24                   077777777
 #define MAX_ERROR_INDICATIONS    7
 #define MAX_FILE_PATH_LENGTH     256
+#define MAX_NAME_LENGTH          8
 #define MAX_SOURCE_LINE_LENGTH   90
 #define MAX_RESULT_FIELD_EXPRS   3
 #define MAX_TITLE_LENGTH         64

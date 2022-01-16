@@ -1055,11 +1055,17 @@ char *getNextToken(char *s, Token *token) {
                     break;
                 }
             }
-            token->type = TokenType_Name;
-            token->details.name.ptr = start;
-            token->details.name.len = len;
-            token->details.name.qualPtr = NULL;
-            token->details.name.qualLen = 0;
+            if (len <= MAX_NAME_LENGTH) {
+                token->type = TokenType_Name;
+                token->details.name.ptr = start;
+                token->details.name.len = len;
+                token->details.name.qualPtr = NULL;
+                token->details.name.qualLen = 0;
+            }
+            else {
+                token->type = TokenType_Error;
+                token->details.error.code = Err_Syntax;
+            }
         }
     }
     //
@@ -1213,6 +1219,11 @@ char *getNextToken(char *s, Token *token) {
                     token->details.name.ptr = s++;
                     while (isNameChar(*s)) s += 1;
                     token->details.name.len = s - token->details.name.ptr;
+                    if (token->details.name.qualLen > MAX_NAME_LENGTH
+                        || token->details.name.len  > MAX_NAME_LENGTH) {
+                        token->type = TokenType_Error;
+                        token->details.error.code = Err_Syntax;
+                    }
                     return s;
                 }
                 //
@@ -1252,7 +1263,7 @@ char *getNextToken(char *s, Token *token) {
             break;
         default:
             token->type = TokenType_Error;
-            token->details.error.code = registerError(Err_DataItem);
+            token->details.error.code = registerError(Err_Syntax);
             break;
         }
         s += 1;
@@ -1585,6 +1596,9 @@ char *parseExpression(char *s, Token **expression) {
             *expression = copyToken(&token);
             break;
         }
+        break;
+    case TokenType_Error:
+        *expression = copyToken(&token);
         break;
     default:
         token.type = TokenType_Error;
@@ -1937,25 +1951,31 @@ static char *parseString(char *s, Token *token) {
         else if (*s == '*') {
             token->details.string.count = n;
             s += 1;
+            if (*s == 'Z' || *s == 'z') token->details.string.count += 1;
         }
         else {
+            if (*s == 'Z' || *s == 'z') n += 1;
             token->details.string.count = (n + 7) & ~7;
         }
         switch (*s) {
         case 'H':
+        case 'h':
             s += 1;
         default:
             token->details.string.justification = Justify_LeftBlankFill;
             break;
         case 'L':
+        case 'l':
             token->details.string.justification = Justify_LeftZeroFill;
             s += 1;
             break;
         case 'R':
+        case 'r':
             token->details.string.justification = Justify_RightZeroFill;
             s += 1;
             break;
         case 'Z':
+        case 'z':
             token->details.string.justification = Justify_LeftZeroEnd;
             s += 1;
             break;
@@ -1963,7 +1983,7 @@ static char *parseString(char *s, Token *token) {
     }
     else {
         token->type = TokenType_Error;
-        token->details.error.code = registerError(Err_DataItem);
+        token->details.error.code = registerError(Err_Syntax);
     }
     return s;
 }

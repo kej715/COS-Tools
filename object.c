@@ -31,6 +31,7 @@
 
 static void addExternalEntry(Section *section, Value *val, bool isParcelRelocation, u32 bitAddress, u8 fieldLength);
 static void addRelocationEntry(Section *section, Value *val, bool isParcelRelocation);
+static int countBlocks(Module *module);
 static int countEntries(Module *module);
 static int countExternals(Module *module);
 static u64 extractSubfield(u64 word, int startingBitPos, int len);
@@ -38,14 +39,17 @@ static u64 getWord(Section *section, u32 parcelAddress);
 static void putHalfWord(Section *section, u32 parcelAddress, u32 halfWord);
 static void putParcel(Section *section, u32 parcelAddress, u16 parcel);
 static void putWord(Section *section, u32 parcelAddress, u64 word);
+static int writeBRT(ObjectBlock *block, Dataset *ds);
+static int writeCommonBlockEntry(ObjectBlock *block, Dataset *ds);
 static int writeEntryEntries(Module *module, Dataset *ds);
 static int writeExternalEntries(Module *module, Dataset *ds);
-static int writeName(Module *module, Dataset *ds, char *name);
+static int writeName(char *name, Dataset *ds);
 static int writePDT(Module *module, Dataset *ds);
 static int writeProgramEntry(Module *module, Dataset *ds);
 static int writeString(Module *module, Dataset *ds, char *s);
 static int writeTrailer(Module *module, Dataset *ds);
-static int writeTXT(Module *module, Dataset *ds);
+static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds);
+static int writeXRT(Module *module, Dataset *ds);
 
 /*
  *  addExternalEntry - add a relocation table entry to a referenced object block
@@ -104,6 +108,14 @@ void advanceBitPosition(Section *section, int count) {
     if (pass == 1 && section->originCounter > section->size) {
         section->size = section->originCounter;
     }
+}
+
+static int countBlocks(Module *module) {
+    ObjectBlock *block;
+    int count;
+
+    for (count = 0, block = module->firstObjectBlock; block != NULL; block = block->next) count += 1;
+    return count;
 }
 
 static int countEntries(Module *module) {
@@ -332,30 +344,47 @@ void emitLiterals(Module *module) {
  *  emitString - emit a string of text
  */
 void emitString(Section *section, char *s, int len, int count, JustifyType justification) {
+    char *cp;
     int fillCount;
+    char *limit;
+    int n;
 
-    if (len > count) len = count;
-    fillCount = count - len;
+    n = 0;
+    limit = s + len;
+    for (cp = s; cp < limit; cp++) {
+         if (*cp == '\'') cp += 1;
+         n += 1;
+    }
+    if (n > count) n = count;
+    fillCount = count - n;
 
     emitFieldStart(section);
     switch (justification) {
     case Justify_LeftBlankFill:
-        while (len-- > 0) emitFieldBits(section, *s++, 8, 0, len > 0 || fillCount > 0);
+        while (n-- > 0) {
+            if (*s == '\'') s += 1;
+            emitFieldBits(section, *s++, 8, 0, n > 0 || fillCount > 0);
+        }
         while (fillCount-- > 0) emitFieldBits(section, 0x20, 8, 0, fillCount > 0);
         break;
+    case Justify_LeftZeroEnd:
+        if (fillCount < 1) {
+            fillCount = 1;
+            n -= 1;
+        }
     case Justify_LeftZeroFill:
-        while (len-- > 0) emitFieldBits(section, *s++, 8, 0, len > 0 || fillCount > 0);
+        while (n-- > 0) {
+            if (*s == '\'') s += 1;
+            emitFieldBits(section, *s++, 8, 0, n > 0 || fillCount > 0);
+        }
         while (fillCount-- > 0) emitFieldBits(section, 0, 8, 0, fillCount > 0);
         break;
     case Justify_RightZeroFill:
         while (fillCount-- > 0) emitFieldBits(section, 0, 8, 0, TRUE);
-        while (len-- > 0) emitFieldBits(section, *s++, 8, 0, len > 0);
-        break;
-    case Justify_LeftZeroEnd:
-        if (len >= count) len -= 1;
-        while (len-- > 0) emitFieldBits(section, *s++, 8, 0, TRUE);
-        emitFieldBits(section, 0, 8, 0, fillCount > 0);
-        while (fillCount-- > 0) emitFieldBits(section, 0, 8, 0, fillCount > 0);
+        while (n-- > 0) {
+            if (*s == '\'') s += 1;
+            emitFieldBits(section, *s++, 8, 0, n > 0 || n > 0);
+        }
         break;
     }
     emitFieldEnd(section, 0);
@@ -389,6 +418,7 @@ void forceWordBoundary(Section *section) {
  *  getWord - get the word from a module image referenced by a parcel address
  */
 static u64 getWord(Section *section, u32 parcelAddress) {
+    ObjectBlock *block;
     u32 addr;
     u32 limit;
     u64 word;
@@ -396,14 +426,14 @@ static u64 getWord(Section *section, u32 parcelAddress) {
     if (pass == 1) return 0;
     addr = (parcelAddress & 0xfffffc) * 2;
     limit = addr + 7;
-    while (limit >= section->objectBlock->imageSize) {
-        section->objectBlock->image = (u8 *)reallocate(section->objectBlock->image, section->objectBlock->imageSize,
-                                                       section->objectBlock->imageSize + IMAGE_INCREMENT);
-        section->objectBlock->imageSize += IMAGE_INCREMENT;
+    block = section->objectBlock;
+    while (limit >= block->imageSize) {
+        block->image = (u8 *)reallocate(block->image, block->imageSize, block->imageSize + IMAGE_INCREMENT);
+        block->imageSize += IMAGE_INCREMENT;
     }
     word = 0;
     while (addr <= limit) {
-        word = (word << 8) | section->objectBlock->image[addr++];
+        word = (word << 8) | block->image[addr++];
     }
 
     return word;
@@ -422,38 +452,33 @@ static void putHalfWord(Section *section, u32 parcelAddress, u32 halfWord) {
  */
 static void putParcel(Section *section, u32 parcelAddress, u16 parcel) {
     u32 addr;
+    ObjectBlock *block;
 
     if (pass == 1) return;
     addr = parcelAddress * 2;
-    while (addr + 1 >= section->objectBlock->imageSize) {
-        section->objectBlock->image = (u8 *)reallocate(section->objectBlock->image, section->objectBlock->imageSize,
-                                                       section->objectBlock->imageSize + IMAGE_INCREMENT);
-        section->objectBlock->imageSize += IMAGE_INCREMENT;
+    block = section->objectBlock;
+    while (addr + 1 >= block->imageSize) {
+        if (block->image == NULL) block->lowestParcelAddress = parcelAddress;
+        block->image = (u8 *)reallocate(block->image, block->imageSize, block->imageSize + IMAGE_INCREMENT);
+        block->imageSize += IMAGE_INCREMENT;
     }
-    section->objectBlock->image[addr] = parcel >> 8;
-    section->objectBlock->image[addr + 1] = parcel & 0xff;
+    block->image[addr] = parcel >> 8;
+    block->image[addr + 1] = parcel & 0xff;
+    if (parcelAddress < block->lowestParcelAddress) block->lowestParcelAddress = parcelAddress;
+    if (parcelAddress > block->highestParcelAddress) block->highestParcelAddress = parcelAddress;
 }
 
 /*
  *  putWord - put a word into a module image referenced by a parcel address
  */
 static void putWord(Section *section, u32 parcelAddress, u64 word) {
-    u32 addr;
-    u32 limit;
     int shiftCount;
 
-    if (pass == 1) return;
-    addr = (parcelAddress & 0xfffffc) * 2;
-    limit = addr + 7;
-    while (limit >= section->objectBlock->imageSize) {
-        section->objectBlock->image = (u8 *)reallocate(section->objectBlock->image, section->objectBlock->imageSize,
-                                                       section->objectBlock->imageSize + IMAGE_INCREMENT);
-        section->objectBlock->imageSize += IMAGE_INCREMENT;
-    }
-    shiftCount = 56;
-    while (addr <= limit) {
-        section->objectBlock->image[addr++] = (word >> shiftCount) & 0xff;
-        shiftCount -= 8;
+    if (pass == 2) {
+        parcelAddress &= 0xfffffc;
+        for (shiftCount = 48; shiftCount >= 0; shiftCount -= 16) {
+            putParcel(section, parcelAddress++, (word >> shiftCount) & 0xffff);
+        }
     }
 }
 
@@ -483,7 +508,7 @@ static int writeEntryEntries(Module *module, Dataset *ds) {
     u64 word;
 
     for (symbol = module->entryPoints; symbol != NULL; symbol = symbol->next) {
-        if (writeName(module, ds, symbol->id) == -1) return -1;
+        if (writeName(symbol->id, ds) == -1) return -1;
         word = 1; // relocation mode
         if (symbol == module->start) word |= 0x100; // primary entry point
         if (cosDsWriteWord(ds, word) == -1) return -1;
@@ -493,16 +518,57 @@ static int writeEntryEntries(Module *module, Dataset *ds) {
     return 0;
 }
 
-static int writeExternalEntries(Module *module, Dataset *ds) {
-    Symbol *symbol;
+static int writeBRT(ObjectBlock *block, Dataset *ds) {
+    RelocationTableEntry *entry;
+    int i;
+    u64 word;
 
-    for (symbol = module->firstExternal; symbol != NULL; symbol = symbol->next) {
-        if (writeName(module, ds, symbol->id) == -1) return -1;
+    word = ((u64)LDR_TT_BRT << 60) | (((block->relocationTableIndex + 1) / 2) + 1) | ((u64)block->index << 25);
+    if (cosDsWriteWord(ds, word) == -1) return -1;
+    i = 0;
+    while (i < block->relocationTableIndex) {
+        entry = &block->relocationTable[i++];
+        word = (u64)entry->blockIndex << 25;
+        if (entry->isParcelRelocation) word |= (u64)1 << 24;
+        word |= entry->offset;
+        word <<= 32;
+        if (i < block->relocationTableIndex) {
+            entry = &block->relocationTable[i++];
+            word |= (u64)entry->blockIndex << 25;
+            if (entry->isParcelRelocation) word |= (u64)1 << 24;
+            word |= entry->offset;
+        }
+        if (cosDsWriteWord(ds, word) == -1) return -1;
     }
     return 0;
 }
 
-static int writeName(Module *module, Dataset *ds, char *name) {
+static int writeCommonBlockEntry(ObjectBlock *block, Dataset *ds) {
+    u64 blockOrigin;
+    u64 blockSize;
+    u64 word;
+
+    if (writeName(block->id, ds) == -1) return -1;
+    word = 0;
+    if (block->location == SectionLocation_EM)
+        word |= (u64)2 << 48;
+    blockOrigin = block->lowestParcelAddress & 0xfffffc;
+    blockSize = (((block->highestParcelAddress + 4) & 0xfffffc) - blockOrigin) >> 2;
+    word |= blockSize;
+    if (cosDsWriteWord(ds, word) == -1) return -1;
+    return 0;
+}
+
+static int writeExternalEntries(Module *module, Dataset *ds) {
+    Symbol *symbol;
+
+    for (symbol = module->firstExternal; symbol != NULL; symbol = symbol->next) {
+        if (writeName(symbol->id, ds) == -1) return -1;
+    }
+    return 0;
+}
+
+static int writeName(char *name, Dataset *ds) {
     int i;
     int shiftCount;
     u64 word;
@@ -520,15 +586,39 @@ static int writeName(Module *module, Dataset *ds, char *name) {
     return 0;
 }
 
-int writeObjectFile(Module *module, Dataset *ds) {
+int writeObjectRecord(Module *module, Dataset *ds) {
+    ObjectBlock *block;
+
+    /*
+     *  Write the Program Description Table (PDT)
+     */
     if (writePDT(module, ds) == -1) return -1;
-    if (writeTXT(module, ds) == -1) return -1;
+    /*
+     *  Write a Text Table (TXT) for each object block
+     */
+    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
+         if (writeTXT(block, block->type == SectionType_Mixed && module->isAbsolute, ds) == -1)
+             return -1;
+    }
+    /*
+     *  Write a Block Relocation Table (BRT) for each object block that
+     *  has relocation entries.
+     */
+    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
+         if (block->relocationTableIndex > 0
+             && writeBRT(block, ds) == -1)
+             return -1;
+    }
+    /*
+     *  Write the External Reference Table (XRT)
+     */
+    if (writeXRT(module, ds) == -1) return -1;
     cosDsWriteEOR(ds);
-    cosDsWriteEOF(ds);
     return 0;
 }
 
 static int writePDT(Module *module, Dataset *ds) {
+    ObjectBlock *block;
     u64 blockCount;
     u64 entryCount;
     u64 externalCount;
@@ -536,14 +626,20 @@ static int writePDT(Module *module, Dataset *ds) {
     static u8 machineType[] = {
         'C','R','A','Y','-','X','M','P'
     };
+    u32 moduleHLM;
     u64 pdtLen;
     u64 word;
 
     if (ds == NULL) return 0;
 
-    blockCount = 1;
+    blockCount = countBlocks(module);
     entryCount = countEntries(module);
     externalCount = countExternals(module);
+    moduleHLM = 0;
+    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
+        moduleHLM += (block->highestParcelAddress + 4) & 0xfffffc;
+    }
+    if (module->isAbsolute == FALSE) moduleHLM += 0200;
 
     pdtLen = 1                 // header word
            + 20                // header entry
@@ -572,7 +668,7 @@ static int writePDT(Module *module, Dataset *ds) {
     for (i = 0; i < 10; i++) {
         if (cosDsWriteWord(ds, 0) == -1) return -1;
     }
-    if (cosDsWriteWord(ds, (u64)(module->size - module->origin)) == -1) return -1; // HLM for binary (program length)
+    if (cosDsWriteWord(ds, (u64)(moduleHLM >> 2)) == -1) return -1; // HLM for binary
     for (i = 0; i < 4; i++) {
         if (cosDsWriteWord(ds, 0) == -1) return -1;
     }
@@ -582,6 +678,11 @@ static int writePDT(Module *module, Dataset *ds) {
     if (cosDsWriteWord(ds, 0) == -1) return -1; // machine characteristics flags
 
     if (writeProgramEntry(module, ds) == -1) return -1;
+
+    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
+         if (block->type != SectionType_Mixed
+             && writeCommonBlockEntry(block, ds) == -1) return -1;
+    }
 
     if (writeEntryEntries(module, ds) == -1) return -1;
 
@@ -593,14 +694,29 @@ static int writePDT(Module *module, Dataset *ds) {
 }
 
 static int writeProgramEntry(Module *module, Dataset *ds) {
+    ObjectBlock *block;
+    u64 programOrigin;
+    u64 programSize;
     u64 word;
 
-    if (writeName(module, ds, module->id) == -1) return -1;
+    if (writeName(module->id, ds) == -1) return -1;
+    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
+         if (block->type == SectionType_Mixed) break;
+    }
+    if (block == NULL) return -1;
     word = 0;
-    if (module->isAbsolute)  word |= (u64)1 << 63;
+    if (module->isAbsolute) {
+        word |= (u64)1 << 63;
+        programOrigin = block->lowestParcelAddress >> 2;
+        programSize = ((block->highestParcelAddress + 4) >> 2) - programOrigin;
+    }
+    else {
+        programOrigin = 0;
+        programSize = (block->highestParcelAddress + 4) >> 2;
+    }
     if (getErrorCount() > 0) word |= (u64)1 << 62;
-    word |= (u64)module->origin << 24;
-    word |= (u64)(module->size - module->origin);
+    word |= programOrigin << 24;
+    word |= programSize;
     if (cosDsWriteWord(ds, word) == -1) return -1;
     return 0;
 }
@@ -631,13 +747,13 @@ static int writeTrailer(Module *module, Dataset *ds) {
     int i;
     u64 word;
 
-    if (writeName(module, ds, currentDate) == -1) return -1;
-    if (writeName(module, ds, currentTime) == -1) return -1;
-    if (writeName(module, ds, osName) == -1) return -1;
-    if (writeName(module, ds, osDate) == -1) return -1;
+    if (writeName(currentDate, ds) == -1) return -1;
+    if (writeName(currentTime, ds) == -1) return -1;
+    if (writeName(osName, ds) == -1) return -1;
+    if (writeName(osDate, ds) == -1) return -1;
     if (cosDsWriteWord(ds, 0) == -1) return -1; // reserved
-    if (writeName(module, ds, calName) == -1) return -1;
-    if (writeName(module, ds, calVersion) == -1) return -1;
+    if (writeName(calName, ds) == -1) return -1;
+    if (writeName(calVersion, ds) == -1) return -1;
     for (i = 0; i < 4; i++) { // reserved
         if (cosDsWriteWord(ds, 0) == -1) return -1; // reserved
     }
@@ -645,16 +761,52 @@ static int writeTrailer(Module *module, Dataset *ds) {
     return 0;
 }
 
-static int writeTXT(Module *module, Dataset *ds) {
+static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds) {
+    u32 firstParcelAddress;
+    u32 loadAddress;
+    u64 parcelCount;
     u64 word;
+    u64 wordCount;
     u64 imageLength;
 
     //
     //  Write headser word
     //
-    imageLength = module->size - module->origin;
-    word = ((u64)LDR_TT_TXT << 60) | ((imageLength + 1) << 36) | module->origin;
+    firstParcelAddress = block->lowestParcelAddress & 0xfffffc;
+    parcelCount = ((block->highestParcelAddress + 4) & 0xfffffc) - firstParcelAddress;
+    loadAddress = isAbsolute ? firstParcelAddress : 0;
+    word = ((u64)LDR_TT_TXT << 60) | (((parcelCount >> 2) + 1) << 36) | (loadAddress >> 2);
     if (cosDsWriteWord(ds, word) == -1) return -1;
-    cosDsWrite(ds, module->firstObjectBlock->image + (module->origin * 8), imageLength * 8);
+    cosDsWrite(ds, block->image + (firstParcelAddress * 2), parcelCount * 2);
+    return 0;
+}
+
+static int writeXRT(Module *module, Dataset *ds) {
+    ObjectBlock *block;
+    ExternalTableEntry *entry;
+    u64 entryCount;
+    int i;
+    u64 word;
+
+    entryCount = 0;
+    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
+        entryCount += block->externalTableIndex;
+    }
+    if (entryCount < 1) return 0;
+
+    word = ((u64)LDR_TT_XRT << 60) | ((entryCount + 1) << 36);
+    if (cosDsWriteWord(ds, word) == -1) return -1;
+    
+    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
+        for (i = 0; i < block->externalTableIndex; i++) {
+            entry = &block->externalTable[i++];
+            word = (u64)block->index << 51;
+            if (entry->isParcelRelocation) word |= (u64)1 << 50;
+            word |= (u64)entry->externalIndex << 36;
+            word |= (u64)entry->fieldLength << 30;
+            word |= (u64)entry->bitAddress;
+            if (cosDsWriteWord(ds, word) == -1) return -1;
+        }
+    }
     return 0;
 }

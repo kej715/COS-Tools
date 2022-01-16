@@ -376,8 +376,6 @@ void createObjectBlocks(Module *module) {
                 localObjectBlock->index = index++;
                 localObjectBlock->type = SectionType_Mixed;
                 localObjectBlock->location = section->location;
-                localObjectBlock->image = (u8 *)allocate(IMAGE_INCREMENT);
-                localObjectBlock->imageSize = IMAGE_INCREMENT;
                 if (module->lastObjectBlock != NULL) {
                     module->lastObjectBlock->next = localObjectBlock;
                 }
@@ -396,8 +394,6 @@ void createObjectBlocks(Module *module) {
             objectBlock->index = index++;
             objectBlock->type = section->type;
             objectBlock->location = section->location;
-            objectBlock->image = (u8 *)allocate(IMAGE_INCREMENT);
-            objectBlock->imageSize = IMAGE_INCREMENT;
             if (module->lastObjectBlock != NULL) {
                 module->lastObjectBlock->next = objectBlock;
             }
@@ -416,7 +412,6 @@ void createObjectBlocks(Module *module) {
             exit(1);
         }
     }
-    module->size = (offset + 3) >> 2; // program block size in words
 }
 
 Module *findModule(char *id, int len) {

@@ -1389,14 +1389,10 @@ static ErrorCode ORG(void) {
     else if (isRelocatable(&val) && isNominalSection && currentModule->isAbsolute) {
         return Err_OperandField;
     }
-    else if (originValue < currentSection->originCounter && (isNominalSection == FALSE || currentModule->isOriginSet)) {
+    else if (originValue < currentSection->originCounter) {
         return Err_OperandField;
     }
     currentSection->originCounter = currentSection->locationCounter = originValue;
-    if (isNominalSection && currentModule->isOriginSet == FALSE) {
-        currentModule->origin = val.intValue;
-        currentModule->isOriginSet = TRUE;
-    }
     return err;
 }
 
