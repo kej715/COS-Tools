@@ -699,11 +699,13 @@ static int writeProgramEntry(Module *module, Dataset *ds) {
     u64 programSize;
     u64 word;
 
-    if (writeName(module->id, ds) == -1) return -1;
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
          if (block->type == SectionType_Mixed) break;
     }
-    if (block == NULL) return -1;
+    if (block == NULL) {
+        return (writeName(" ", ds) == -1 || cosDsWriteWord(ds, 0) == -1) ? -1 : 0;
+    }
+    if (writeName(module->id, ds) == -1) return -1;
     word = 0;
     if (module->isAbsolute) {
         word |= (u64)1 << 63;

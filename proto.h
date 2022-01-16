@@ -43,6 +43,7 @@ extern Module *currentModule;
 extern Qualifier *currentQualifier;
 extern SourceFormatType currentSourceFormat;
 extern char currentTime[];
+extern Module *defaultModule;
 extern SourceFormatType defaultSourceFormat;
 extern Name *duplicateds;
 extern u32 errorCount;

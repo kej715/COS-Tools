@@ -30,55 +30,115 @@
 #include "proto.h"
 #include "types.h"
 
-static void parseArgs(int argc, char *argv[]);
+static void openNextSource(int argi, char *argv[]);
+static int parseOptions(int argc, char *argv[]);
 static void resetDefaultModule(void);
 static void resetQualifierStack(void);
 static int  runPass(int passNo);
 static void timeInit(void);
 static void usage(void);
-static void writeModuleImages(void);
+static void writeObjectCode(void);
 
 static u16 defaultListControl = LIST_ON|LIST_XRF|LIST_XNS|LIST_WEM|LIST_WMR;
+static char *lFile = NULL;
+static char *oFile = NULL;
 
 int main(int argc, char *argv[]) {
     Module *module;
+    int srcIndex;
 
-    parseArgs(argc, argv);
-    timeInit();
+    srcIndex = parseOptions(argc, argv);
     instInit();
-    listInit();
-    (void)addModule("", 0);
-    firstModule = lastModule = NULL;
-    runPass(1);
-    for (module = firstModule; module != NULL; module = module->next) {
-        emitLiterals(module);
-        createObjectBlocks(module);
-        adjustSymbolValues(module);
+    defaultModule = addModule("", 0);
+    while (srcIndex < argc) {
+        openNextSource(srcIndex, argv);
+        timeInit();
+        listInit();
+        firstModule = lastModule = NULL;
+        runPass(1);
+        for (module = firstModule; module != NULL; module = module->next) {
+            emitLiterals(module);
+            createObjectBlocks(module);
+            adjustSymbolValues(module);
+        }
+        runPass(2);
+        for (module = firstModule; module != NULL; module = module->next) {
+            emitLiterals(module);
+        }
+        listErrorSummary();
+        listSymbolTable();
+        writeObjectCode();
+        fclose(sourceFile);
+        if (lFile == NULL) fclose(listingFile);
+        if (oFile == NULL) {
+            cosDsWriteEOF(objectFile);
+            cosDsWriteEOD(objectFile);
+            cosDsClose(objectFile);
+        }
+        srcIndex += 1;
     }
-    runPass(2);
-    for (module = firstModule; module != NULL; module = module->next) {
-        emitLiterals(module);
+    if (lFile != NULL) fclose(listingFile);
+    if (oFile != NULL) {
+        cosDsWriteEOF(objectFile);
+        cosDsWriteEOD(objectFile);
+        cosDsClose(objectFile);
     }
-    listErrorSummary();
-    listSymbolTable();
-    writeModuleImages();
-    if (listingFile != NULL) fclose(listingFile);
 }
 
-static void parseArgs(int argc, char *argv[]) {
+static void openNextSource(int argi, char *argv[]) {
     char *cp;
-    char filePath[MAX_FILE_PATH_LENGTH+1];
-    int i;
-    int len;
-    char *lfile;
-    char *ofile;
-    char *sfile;
+    char *dp;
+    char filePath[MAX_FILE_PATH_LENGTH+5];
+    char *fp;
+    char *limit;
 
-    if (argc < 2) {
-        usage();
+    fp = filePath;
+    limit = fp + MAX_FILE_PATH_LENGTH;
+    dp = NULL;
+    for (cp = argv[argi]; *cp != '\0'; cp++) {
+         if (*cp == '/' || *cp == '\\')
+             dp = NULL;
+         else if (*cp == '.')
+             dp = cp;
+         if (fp >= limit) {
+             fprintf(stderr, "Path too long: %s\n", argv[argi]);
+             exit(1);
+         }
+         *fp++ = *cp;
+    }
+    *fp = '\0';
+    if (dp == NULL) {
+        dp = fp;
+        strcpy(dp, ".cal");
+    }
+    sourceFile = fopen(filePath, "r");
+    if (sourceFile == NULL) {
+        perror(filePath);
         exit(1);
     }
-    lfile = ofile = sfile = NULL;
+    if (lFile == NULL) {
+        strcpy(dp, ".lst");
+        listingFile = fopen(filePath, "w");
+        if (listingFile == NULL) {
+            perror(filePath);
+            exit(1);
+        }
+    }
+    if (oFile == NULL) {
+        strcpy(dp, ".obj");
+        objectFile = cosDsCreate(filePath);
+        if (objectFile == NULL) {
+            perror(filePath);
+            exit(1);
+        }
+    }
+}
+
+static int parseOptions(int argc, char *argv[]) {
+    int i;
+    int firstSrcIndex;
+
+    firstSrcIndex = argc;
     i = 1;
     while (i < argc) {
         if (strcmp(argv[i], "-l") == 0) {
@@ -87,7 +147,17 @@ static void parseArgs(int argc, char *argv[]) {
                 usage();
                 exit(1);
             }
-            lfile = argv[i];
+            lFile = argv[i];
+            if (strcmp(lFile, "-") == 0) {
+                listingFile = stdout;
+            }
+            else {
+                listingFile = fopen(lFile, "w");
+                if (listingFile == NULL) {
+                    perror(lFile);
+                    exit(1);
+                }
+            }
         }
         else if (strcmp(argv[i], "-o") == 0) {
             i += 1;
@@ -95,65 +165,35 @@ static void parseArgs(int argc, char *argv[]) {
                 usage();
                 exit(1);
             }
-            lfile = argv[i];
+            oFile = argv[i];
+            objectFile = cosDsCreate(oFile);
+            if (objectFile == NULL) {
+                perror(oFile);
+                exit(1);
+            }
         }
         else if (*argv[i] == '-') {
             usage();
             exit(1);
         }
         else {
-            sfile = argv[i];
+            firstSrcIndex = i++;
+            break;
         }
         i += 1;
     }
-    if (sfile == NULL) {
+    while (i < argc) {
+        if (*argv[i] == '-') {
+            usage();
+            exit(1);
+        }
+        i += 1;
+    }
+    if (firstSrcIndex >= argc) {
         usage();
         exit(1);
     }
-    sourceFile = fopen(sfile, "r");
-    if (sourceFile == NULL) {
-        perror(argv[i]);
-        exit(1);
-    }
-    if (lfile == NULL) {
-        cp = rindex(sfile, '.');
-        if (cp == NULL)
-            cp = sfile + strlen(sfile);
-        len = cp - sfile;
-        if (len + 4 > MAX_FILE_PATH_LENGTH) {
-            fprintf(stderr, "%s: file path too long\n", sfile);
-            exit(1);
-        }
-        sprintf(filePath, "%.*s.lst", len, sfile);
-        lfile = filePath;
-    }
-    if (strcmp(lfile, "-") == 0) {
-        listingFile = stdout;
-    }
-    else {
-        listingFile = fopen(lfile, "w");
-        if (listingFile == NULL) {
-            perror(lfile);
-            exit(1);
-        }
-    }
-    if (ofile == NULL) {
-        cp = rindex(sfile, '.');
-        if (cp == NULL)
-            cp = sfile + strlen(sfile);
-        len = cp - sfile;
-        if (len + 4 > MAX_FILE_PATH_LENGTH) {
-            fprintf(stderr, "%s: file path too long\n", sfile);
-            exit(1);
-        }
-        sprintf(filePath, "%.*s.obj", len, sfile);
-        ofile = filePath;
-    }
-    objectFile = cosDsCreate(ofile);
-    if (objectFile == NULL) {
-        perror(ofile);
-        exit(1);
-    }
+    return firstSrcIndex;
 }
 
 void resetBase(void) {
@@ -162,7 +202,7 @@ void resetBase(void) {
 }
 
 static void resetDefaultModule(void) {
-    currentModule = findModule("", 0);
+    currentModule = defaultModule;
     resetModule(currentModule);
     currentSection = currentModule->firstSection;
 }
@@ -187,7 +227,6 @@ static int runPass(int passNo) {
         exit(1);
     }
     while (isEof() == FALSE) {
-        listControlMask = LIST_ON;
         readNextLine();
         err = parseSourceLine();
         if (err == Info_ModuleEnd) {
@@ -217,7 +256,7 @@ static void usage(void) {
     fputs("  sfile - source file\n", stderr);
 }
 
-static void writeModuleImages(void) {
+static void writeObjectCode(void) {
     Module *module;
 
     if (objectFile == NULL) return;
@@ -225,7 +264,4 @@ static void writeModuleImages(void) {
     for (module = firstModule; module != NULL; module = module->next) {
         writeObjectRecord(module, objectFile);
     }
-    cosDsWriteEOF(objectFile);
-    cosDsWriteEOD(objectFile);
-    cosDsClose(objectFile);
 }

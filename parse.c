@@ -427,6 +427,7 @@ static char *evaluateMicro(char *s, int len) {
     Name *name;
 
     name = findName(currentModule->micros, s, len);
+    if (name == NULL) name = findName(defaultModule->micros, s, len);
     if (name != NULL) return name->value;
     if (len == 4) {
         if (strncasecmp("$APP", s, len) == 0) {
@@ -827,6 +828,7 @@ static MacroDefn *findMacroDefn(char *id, int len) {
     Name *name;
 
     name = findName(currentModule->macros, id, len);
+    if (name == NULL) name = findName(defaultModule->macros, id, len);
     return (name != NULL) ? (MacroDefn *)name->value : NULL;
 }
 
@@ -1837,6 +1839,7 @@ ErrorCode parseSourceLine(void) {
     err = Err_None;
     resetLocationField();
     resetErrorRegistrations();
+    listControlMask = LIST_ON;
     listSource();
     if (sourceLine[0] == '*' || sourceLine[0] == '\0') {
         listFlush(currentSection);

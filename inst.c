@@ -727,6 +727,7 @@ static ErrorCode IDENT(void) {
     macroStackPtr = 0;
     qualifierStackPtr = 0;
     resetBase();
+    listEject();
 
     return err;
 }

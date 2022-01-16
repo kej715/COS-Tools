@@ -160,14 +160,16 @@ void printErrorSummary(FILE *file) {
 ErrorCode registerError(ErrorCode code) {
     u64 mask;
 
-    mask = 1 << code;
-    if ((errorRegistrations & mask) == 0) {
-        errorRegistrations |= mask;
-        errorUnion |= mask;
-        if (code >= Err_DataItem && code <= Err_Expression)
-            errorCount += 1;
-        else if (code >= Warn_Programmer && code <= Warn_RedefinedMacro)
-            warningCount += 1;
+    if (code != Err_None) {
+        mask = 1 << code;
+        if ((errorRegistrations & mask) == 0) {
+            errorRegistrations |= mask;
+            errorUnion |= mask;
+            if (code >= Err_DataItem && code <= Err_Expression)
+                errorCount += 1;
+            else if (code >= Warn_Programmer && code <= Warn_RedefinedMacro)
+                warningCount += 1;
+        }
     }
     return code;
 }

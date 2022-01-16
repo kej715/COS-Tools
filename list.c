@@ -191,17 +191,19 @@ void listField(u64 bits, int len, u16 attributes, int colOffset) {
 }
 
 void listFlush(Section *section) {
-    if (isListSuppressed()) return;
-    if ((lineNumber % LINES_PER_PAGE) == 0) listPageHeader(section);
-    fputs(listingLine, listingFile);
-    lineNumber += 1;
+    if (pass == 1) return;
+    if (isListSuppressed() == FALSE) {
+        if ((lineNumber % LINES_PER_PAGE) == 0) listPageHeader(section);
+        fputs(listingLine, listingFile);
+        lineNumber += 1;
+    }
     resetListingLine();
-fflush(listingFile);
 }
 
 void listInit(void) {
     memset(&dummySection, 0, sizeof(Section));
     dummySection.id = "";
+    title[0] = subtitle[0] = '\0';
     resetListingLine();
 }
 

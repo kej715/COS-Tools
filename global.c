@@ -40,6 +40,7 @@ Module *currentModule = NULL;
 Qualifier *currentQualifier = NULL;
 SourceFormatType currentSourceFormat = SourceFormat_New;
 char currentTime[9];
+Module *defaultModule = NULL;
 SourceFormatType defaultSourceFormat = SourceFormat_New;
 u32 errorCount = 0;
 u64 errorUnion = 0;
