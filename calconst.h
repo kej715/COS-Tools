@@ -41,7 +41,6 @@
 #define MAX_FILE_PATH_LENGTH     256
 #define MAX_NAME_LENGTH          8
 #define MAX_SOURCE_LINE_LENGTH   90
-#define MAX_RESULT_FIELD_EXPRS   3
 #define MAX_TITLE_LENGTH         64
 #define OP_STACK_SIZE            100
 #define QUALIFIER_STACK_SIZE     100
