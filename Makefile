@@ -43,15 +43,23 @@ CALOBJS = cal.o          \
           services.o     \
           trees.o
 
+LDROBJS = ldr.o          \
+          cosdataset.o
+
+all: cal ldr
+
 cal: $(CALOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+
 
-all: clean cal
+ldr: $(LDROBJS)
+	$(CC) $(LDFLAGS) -o $@ $+
 
 clean:
 	rm -f *.o
 
 cal.o:  cal.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+cosdataset.o: cosdataset.c cosdataset.h
 	$(CC) $(CFLAGS) -c $<
 error.o: error.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<

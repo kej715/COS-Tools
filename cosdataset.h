@@ -72,12 +72,12 @@ typedef struct dataset {
     bool isWritable;
     int cursor;
     int limit;
-    int currentBlock;
-    int lastCtrlWordIndex;
-    int lastFileBlock;
-    int lastRecordBlock;
     int nextCtrlWordIndex;
     int bytesRead;
+    int currentBlock;
+    int lastFileBlock;
+    int lastRecordBlock;
+    int lastCtrlWordIndex;
     int bytesWritten;
     u8 buffer[COS_BLOCK_SIZE];
 } Dataset;

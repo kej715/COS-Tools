@@ -172,25 +172,22 @@ u64 cosDsReadCW(Dataset *ds) {
     int cursor;
     u64 cw;
     u64 fwi;
-    int i;
     int n;
 
     if (ds == NULL || ds->isWritable || ds->bytesRead != ds->nextCtrlWordIndex) return 0;
-    cw = 0;
-    for (int i = 0; i < 8; i++) {
-        while (ds->limit - ds->cursor < 8) {
-            cursor = 0;
-            while (ds->cursor < ds->limit)
-                ds->buffer[cursor++] = ds->buffer[ds->cursor++];
-            ds->limit = cursor;
-            ds->cursor = 0;
-            n = read(ds->fd, &ds->buffer[ds->limit], COS_BLOCK_SIZE - ds->limit);
-            if (n < 1) return 0;
-            ds->limit += n;
-        }
-        cw = (cw << 8) | ds->buffer[ds->cursor++];
-        ds->bytesRead += 1;
+    while (ds->limit - ds->cursor < 8) {
+        cursor = 0;
+        while (ds->cursor < ds->limit)
+            ds->buffer[cursor++] = ds->buffer[ds->cursor++];
+        ds->limit = cursor;
+        ds->cursor = 0;
+        n = read(ds->fd, &ds->buffer[ds->limit], COS_BLOCK_SIZE - ds->limit);
+        if (n < 1) return 0;
+        ds->limit += n;
     }
+    cw = getWord(ds);
+    ds->cursor += 8;
+    ds->bytesRead += 8;
     fwi = cw & COS_BCW_FWI_MASK;
     ds->nextCtrlWordIndex = ds->bytesRead + (fwi * 8);
     return cw;
