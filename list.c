@@ -25,8 +25,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "proto.h"
-#include "types.h"
+#include "calproto.h"
+#include "caltypes.h"
 
 static bool isListSuppressed(void);
 static void listPageHeader(Section *section);

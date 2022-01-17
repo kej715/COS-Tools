@@ -1,10 +1,10 @@
-#ifndef PROTO_H
-#define PROTO_H
+#ifndef CALPROTO_H
+#define CALPROTO_H
 /*--------------------------------------------------------------------------
 **
 **  Copyright 2021 Kevin E. Jordan
 **
-**  Name: proto.h
+**  Name: calproto.h
 **
 **  Description:
 **      This file defines function and variable prototypes.
@@ -25,9 +25,9 @@
 */
 
 #include <stdio.h>
-#include "const.h"
+#include "calconst.h"
+#include "caltypes.h"
 #include "cosdataset.h"
-#include "types.h"
 
 extern int baseStack[];
 extern int baseStackPtr;
@@ -173,4 +173,10 @@ void resetModule(Module *module);
 void resetErrorRegistrations(void);
 u64 toCrayFloat(u64 ieee);
 int writeObjectRecord(Module *module, Dataset *ds);
+
+#if defined(_WIN32)
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#endif
+
 #endif

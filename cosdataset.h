@@ -69,13 +69,17 @@
 #define COS_BLOCK_SIZE 4096
 typedef struct dataset {
     int fd;
-    u8 buffer[COS_BLOCK_SIZE];
+    bool isWritable;
+    int cursor;
+    int limit;
     int currentBlock;
     int lastCtrlWordIndex;
     int lastFileBlock;
     int lastRecordBlock;
+    int nextCtrlWordIndex;
+    int bytesRead;
     int bytesWritten;
-    int cursor;
+    u8 buffer[COS_BLOCK_SIZE];
 } Dataset;
 
 /*
@@ -83,6 +87,14 @@ typedef struct dataset {
  */
 int cosDsClose(Dataset *ds);
 Dataset *cosDsCreate(char *pathname);
+bool cosDsIsBCW(u64 cw);
+bool cosDsIsEOD(u64 cw);
+bool cosDsIsEOF(u64 cw);
+bool cosDsIsEOR(u64 cw);
+Dataset *cosDsOpen(char *pathname);
+int cosDsRead(Dataset *ds, u8 *buffer, int len);
+u64 cosDsReadCW(Dataset *ds);
+int cosDsRewind(Dataset *ds);
 int cosDsWrite(Dataset *ds, u8 *buffer, int len);
 int cosDsWriteEOD(Dataset *ds);
 int cosDsWriteEOF(Dataset *ds);

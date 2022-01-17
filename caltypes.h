@@ -1,10 +1,10 @@
-#ifndef TYPES_H
-#define TYPES_H
+#ifndef CALTYPES_H
+#define CALTYPES_H
 /*--------------------------------------------------------------------------
 **
 **  Copyright 2021 Kevin E. Jordan
 **
-**  Name: types.h
+**  Name: caltypes.h
 **
 **  Description:
 **      This file defines constants, types, and macros.

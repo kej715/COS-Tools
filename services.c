@@ -25,8 +25,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "proto.h"
-#include "types.h"
 
 void *allocate(int size) {
     void *new;

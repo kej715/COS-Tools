@@ -1,10 +1,10 @@
-#ifndef CONST_H
-#define CONST_H
+#ifndef CALCONST_H
+#define CALCONST_H
 /*--------------------------------------------------------------------------
 **
 **  Copyright 2021 Kevin E. Jordan
 **
-**  Name: const.h
+**  Name: calconst.h
 **
 **  Description:
 **      This file defines constants used by the assembler.

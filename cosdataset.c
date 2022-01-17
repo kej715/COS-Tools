@@ -31,6 +31,7 @@
 
 static int appendCW(Dataset *ds, u64 cw);
 static int flushBuffer(Dataset *ds);
+static u64 getWord(Dataset *ds);
 static void setFWI(Dataset *ds);
 
 static int appendCW(Dataset *ds, u64 cw) {
@@ -52,8 +53,10 @@ int cosDsClose(Dataset *ds) {
     int n;
 
     if (ds == NULL) return 0;
-    n = write(ds->fd, ds->buffer, ds->cursor);
-    if (n != ds->cursor) return -1;
+    if (ds->isWritable && ds->cursor > 0) {
+        n = write(ds->fd, ds->buffer, ds->cursor);
+        if (n != ds->cursor) return -1;
+    }
     close(ds->fd);
     free(ds);
     return 0;
@@ -74,7 +77,145 @@ Dataset *cosDsCreate(char *pathname) {
         return NULL;
     }
     ds->cursor = 8;
+    ds->isWritable = 1;
     return ds;
+}
+
+/*
+ *  cosDsIsBCW - test a control word for block control word indication
+ */
+bool cosDsIsBCW(u64 cw) {
+    return (cw >> 60) == COS_CW_BCW;
+}
+
+/*
+ *  cosDsIsEOD - test a control word for end of data indication
+ */
+bool cosDsIsEOD(u64 cw) {
+    return (cw >> 60) == COS_CW_EOD;
+}
+
+/*
+ *  cosDsIsEOF - test a control word for end of file indication
+ */
+bool cosDsIsEOF(u64 cw) {
+    return (cw >> 60) == COS_CW_EOF;
+}
+
+/*
+ *  cosDsIsEOR - test a control word for end of record indication
+ */
+bool cosDsIsEOR(u64 cw) {
+    return (cw >> 60) == COS_CW_EOR;
+}
+
+/*
+ *  cosDsOpen - open a dataset
+ */
+Dataset *cosDsOpen(char *pathname) {
+    u64 cw;
+    Dataset *ds;
+    u64 fwi;
+    int n;
+
+    ds = (Dataset *)malloc(sizeof(Dataset));
+    if (ds == NULL) return NULL;
+    memset(ds, 0, sizeof(Dataset));
+    ds->fd = open(pathname, O_RDONLY, 0644);
+    if (ds->fd == -1) {
+        free(ds);
+        return NULL;
+    }
+    ds->limit = read(ds->fd, ds->buffer, COS_BLOCK_SIZE);
+    if (ds->limit < 8) {
+        free(ds);
+        return NULL;
+    }
+    cw = getWord(ds);
+    fwi = cw & COS_BCW_FWI_MASK;
+    if (cosDsIsBCW(cw)) {
+        ds->cursor = 8;
+        ds->bytesRead = 8;
+        ds->nextCtrlWordIndex = (fwi + 1) * 8;
+    }
+    ds->isWritable = 0;
+    return ds;
+}
+
+/*
+ *  cosDsRead - read a sequence of bytes from a dataset
+ */
+int cosDsRead(Dataset *ds, u8 *buffer, int len) {
+    int n;
+
+    if (ds == NULL || ds->isWritable) return -1;
+    n = 0;
+    while (n < len && ds->bytesRead < ds->nextCtrlWordIndex) {
+        if (ds->cursor >= ds->limit) {
+            ds->cursor = 0;
+            ds->limit = read(ds->fd, ds->buffer, COS_BLOCK_SIZE);
+            if (ds->limit == -1)
+                return -1;
+            else if (ds->limit == 0)
+                return n;
+        }
+        buffer[n++] = ds->buffer[ds->cursor++];
+        ds->bytesRead += 1;
+    }
+    return n;
+}
+
+/*
+ *  cosDsReadCW - read a control word from a dataset
+ */
+u64 cosDsReadCW(Dataset *ds) {
+    int cursor;
+    u64 cw;
+    u64 fwi;
+    int i;
+    int n;
+
+    if (ds == NULL || ds->isWritable || ds->bytesRead != ds->nextCtrlWordIndex) return 0;
+    cw = 0;
+    for (int i = 0; i < 8; i++) {
+        while (ds->limit - ds->cursor < 8) {
+            cursor = 0;
+            while (ds->cursor < ds->limit)
+                ds->buffer[cursor++] = ds->buffer[ds->cursor++];
+            ds->limit = cursor;
+            ds->cursor = 0;
+            n = read(ds->fd, &ds->buffer[ds->limit], COS_BLOCK_SIZE - ds->limit);
+            if (n < 1) return 0;
+            ds->limit += n;
+        }
+        cw = (cw << 8) | ds->buffer[ds->cursor++];
+        ds->bytesRead += 1;
+    }
+    fwi = cw & COS_BCW_FWI_MASK;
+    ds->nextCtrlWordIndex = ds->bytesRead + (fwi * 8);
+    return cw;
+}
+
+/*
+ *  cosDsRewind - rewind a dataset
+ */
+int cosDsRewind(Dataset *ds) {
+    u64 cw;
+    u64 fwi;
+
+    if (ds == NULL || ds->isWritable) return -1;
+    if (lseek(ds->fd, 0, SEEK_SET) == -1) return -1;
+    ds->cursor = ds->bytesRead = ds->nextCtrlWordIndex = 0;
+    ds->limit = read(ds->fd, ds->buffer, COS_BLOCK_SIZE);
+    if (ds->limit < 8) return -1;
+    cw = getWord(ds);
+    fwi = cw & COS_BCW_FWI_MASK;
+    if (cosDsIsBCW(cw)) {
+        ds->cursor = 8;
+        ds->bytesRead = 8;
+        ds->nextCtrlWordIndex = (fwi + 1) * 8;
+    }
+    return 0;
 }
 
 /*
@@ -84,7 +225,7 @@ int cosDsWrite(Dataset *ds, u8 *buffer, int len) {
     int residue;
     int written;
 
-    if (ds == NULL) return -1;
+    if (ds == NULL || ds->isWritable == 0) return -1;
     residue = COS_BLOCK_SIZE - ds->cursor;
     written = 0;
     while (len >= residue) {
@@ -194,6 +335,16 @@ static int flushBuffer(Dataset *ds) {
     }
     ds->cursor = 8;
     return 0;
+}
+
+static u64 getWord(Dataset *ds) {
+    int i;
+    u64 word;
+
+    for (word = 0, i = 0; i < 8; i++) {
+        word = (word << 8) | ds->buffer[ds->cursor + i];
+    }
+    return word;
 }
 
 static void setFWI(Dataset *ds) {

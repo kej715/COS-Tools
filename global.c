@@ -23,9 +23,9 @@
 */
 
 #include <stdio.h>
-#include "const.h"
+#include "calconst.h"
+#include "caltypes.h"
 #include "cosdataset.h"
-#include "types.h"
 
 int baseStack[BASE_STACK_SIZE];
 int baseStackPtr = 0;

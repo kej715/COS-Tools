@@ -24,26 +24,26 @@
 CFLAGS  = -O3 -std=gnu99 $(INCL) $(EXTRACFLAGS)
 #CFLAGS  = -O0 -g -std=gnu99 $(INCL) $(EXTRACFLAGS)
 
-HDRS = basetypes.h    \
-       const.h        \
-       cosdataset.h   \
-       cosldr.h       \
-       proto.h        \
-       types.h
+CALHDRS = basetypes.h    \
+          calconst.h     \
+          calproto.h     \
+          caltypes.h     \
+          cosdataset.h   \
+          cosldr.h
 
-OBJS = cosdataset.o   \
-       error.o        \
-       global.o       \
-       inst.o         \
-       io.o           \
-       list.o         \
-       main.o         \
-       object.o       \
-       parse.o        \
-       services.o     \
-       trees.o
+CALOBJS = cal.o          \
+          cosdataset.o   \
+          error.o        \
+          global.o       \
+          inst.o         \
+          io.o           \
+          list.o         \
+          object.o       \
+          parse.o        \
+          services.o     \
+          trees.o
 
-cal: $(OBJS)
+cal: $(CALOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+
 
 all: clean cal
@@ -51,7 +51,25 @@ all: clean cal
 clean:
 	rm -f *.o
 
-%.o : %.c $(HDRS)
+cal.o:  cal.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+error.o: error.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+global.o: global.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+inst.o: inst.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+io.o:   io.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+list.o: list.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+object.o: object.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+parse.o: parse.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+services.o: services.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+trees.o: trees.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
 
 #---------------------------  End Of File  --------------------------------

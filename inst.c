@@ -26,9 +26,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "const.h"
-#include "proto.h"
-#include "types.h"
+#include "calconst.h"
+#include "calproto.h"
+#include "caltypes.h"
 
 #define INT_22_LOWER (-010000000)
 #define INT_22_UPPER   007777777

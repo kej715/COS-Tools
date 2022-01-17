@@ -25,9 +25,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "const.h"
-#include "proto.h"
-#include "types.h"
+#include "calconst.h"
+#include "calproto.h"
+#include "caltypes.h"
 
 typedef struct opStackEntry {
     OperatorType type;

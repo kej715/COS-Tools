@@ -26,12 +26,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "calproto.h"
+#include "caltypes.h"
 #include "cosdataset.h"
-#include "proto.h"
-#include "types.h"
 
 static void openNextSource(int argi, char *argv[]);
-static int parseOptions(int argc, char *argv[]);
+static int  parseOptions(int argc, char *argv[]);
 static void resetDefaultModule(void);
 static void resetQualifierStack(void);
 static int  runPass(int passNo);

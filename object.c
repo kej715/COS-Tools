@@ -23,11 +23,11 @@
 */
 
 #include <string.h>
-#include "const.h"
+#include "calconst.h"
+#include "calproto.h"
+#include "caltypes.h"
 #include "cosdataset.h"
 #include "cosldr.h"
-#include "proto.h"
-#include "types.h"
 
 static void addExternalEntry(Section *section, Value *val, bool isParcelRelocation, u32 bitAddress, u8 fieldLength);
 static void addRelocationEntry(Section *section, Value *val, bool isParcelRelocation);
