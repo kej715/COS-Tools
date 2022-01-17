@@ -2,7 +2,7 @@
 **
 **  Copyright 2021 Kevin E. Jordan
 **
-**  Name: main.c
+**  Name: cal.c
 **
 **  Description:
 **      This file is the main module of the CAL assembler.
