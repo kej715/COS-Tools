@@ -1,13 +1,13 @@
-#ifndef LDRCONST_H
-#define LDRCONST_H
+#ifndef SERVICES_H
+#define SERVICES_H
 /*--------------------------------------------------------------------------
 **
 **  Copyright 2021 Kevin E. Jordan
 **
-**  Name: ldrconst.h
+**  Name: services.c
 **
 **  Description:
-**      This file defines constants used by the loader.
+**      This file provides host-independent system services.
 **
 **  Licensed under the Apache License, Version 2.0 (the "License");
 **  you may not use this file except in compliance with the License.
@@ -24,13 +24,7 @@
 **--------------------------------------------------------------------------
 */
 
-#define EXTERN_TABLE_INCREMENT   100
-#define FALSE                    0
-#define IMAGE_INCREMENT          4096
-#define MAX_FILE_PATH_LENGTH     256
-#define RELOC_TABLE_INCREMENT    200
-#define TRUE                     1
-
-#define isSet(word, bitnum) (((word) >> ((63-(bitnum)))) & 1)
+void *allocate(int size);
+void *reallocate(void *old, int oldSize, int newSize);
 
 #endif

@@ -28,6 +28,7 @@
 #include "caltypes.h"
 #include "cosdataset.h"
 #include "cosldr.h"
+#include "services.h"
 
 static void addExternalEntry(Section *section, Value *val, bool isParcelRelocation, u32 bitAddress, u8 fieldLength);
 static void addRelocationEntry(Section *section, Value *val, bool isParcelRelocation);
@@ -46,7 +47,7 @@ static int writeExternalEntries(Module *module, Dataset *ds);
 static int writeName(char *name, Dataset *ds);
 static int writePDT(Module *module, Dataset *ds);
 static int writeProgramEntry(Module *module, Dataset *ds);
-static int writeString(Module *module, Dataset *ds, char *s);
+static int writeString(char *s, Dataset *ds);
 static int writeTrailer(Module *module, Dataset *ds);
 static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds);
 static int writeXRT(Module *module, Dataset *ds);
@@ -65,6 +66,7 @@ static void addExternalEntry(Section *section, Value *val, bool isParcelRelocati
         block->externalTable = (ExternalTableEntry *)reallocate(block->externalTable,
             block->externalTableSize * sizeof(ExternalTableEntry),
             (block->externalTableSize + EXTERN_TABLE_INCREMENT) * sizeof(ExternalTableEntry));
+        block->externalTableSize += EXTERN_TABLE_INCREMENT;
     }
     entry = &block->externalTable[block->externalTableIndex++];
     entry->externalIndex = val->externalSymbol->externalIndex;
@@ -87,6 +89,7 @@ static void addRelocationEntry(Section *section, Value *val, bool isParcelReloca
         baseBlock->relocationTable = (RelocationTableEntry *)reallocate(baseBlock->relocationTable,
             baseBlock->relocationTableSize * sizeof(RelocationTableEntry),
             (baseBlock->relocationTableSize + RELOC_TABLE_INCREMENT) * sizeof(RelocationTableEntry));
+        baseBlock->relocationTableSize += RELOC_TABLE_INCREMENT;
     }
     entry = &baseBlock->relocationTable[baseBlock->relocationTableIndex++];
     entry->blockIndex = section->objectBlock->index;
@@ -98,12 +101,15 @@ static void addRelocationEntry(Section *section, Value *val, bool isParcelReloca
  *  advanceBitPosition - advance to the next bit position at which to emit code
  */
 void advanceBitPosition(Section *section, int count) {
-    section->parcelBitPosCounter += count;
-    while (section->parcelBitPosCounter > 15) {
+    int bitPosCtr;
+
+    bitPosCtr = (int)section->parcelBitPosCounter + count;
+    while (bitPosCtr > 15) {
         section->originCounter += 1;
         section->locationCounter += 1;
-        section->parcelBitPosCounter -= 16;
+        bitPosCtr -= 16;
     }
+    section->parcelBitPosCounter = (u8)bitPosCtr;
     section->wordBitPosCounter = ((section->locationCounter & 0x03) * 16) + section->parcelBitPosCounter;
     if (pass == 1 && section->originCounter > section->size) {
         section->size = section->originCounter;
@@ -483,6 +489,28 @@ static void putWord(Section *section, u32 parcelAddress, u64 word) {
 }
 
 /*
+ *  reserveStorage - ensure that highest parcel address is not less than the origin counter
+ */
+void reserveStorage(Section *section, u32 firstAddress, u32 count) {
+    u32 addr;
+    ObjectBlock *block;
+    u32 lastAddress;
+
+    if (pass == 1) return;
+    lastAddress = firstAddress + count - 1;
+    addr = lastAddress * 2;
+    block = section->objectBlock;
+    while (addr + 1 >= block->imageSize) {
+        if (block->image == NULL) block->lowestParcelAddress = firstAddress;
+        block->image = (u8 *)reallocate(block->image, block->imageSize, block->imageSize + IMAGE_INCREMENT);
+        block->imageSize += IMAGE_INCREMENT;
+    }
+    if (firstAddress < block->lowestParcelAddress) block->lowestParcelAddress = firstAddress;
+    if (lastAddress > block->highestParcelAddress) block->highestParcelAddress = lastAddress;
+}
+
+
+/*
  *  toCrayFloat - map IEEE 754 floating point format to Cray format
  */
 u64 toCrayFloat(u64 ieee) {
@@ -509,10 +537,11 @@ static int writeEntryEntries(Module *module, Dataset *ds) {
 
     for (symbol = module->entryPoints; symbol != NULL; symbol = symbol->next) {
         if (writeName(symbol->id, ds) == -1) return -1;
-        word = 1; // relocation mode
+        word = (symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0 ? 1 : 0; // relocation mode
+        word |= symbol->value.section->objectBlock->index << 1;
         if (symbol == module->start) word |= 0x100; // primary entry point
         if (cosDsWriteWord(ds, word) == -1) return -1;
-        word = (symbol->value.attributes & SYM_WORD_ADDRESS) == 0 ? symbol->value.intValue : symbol->value.intValue << 2;
+        word = symbol->value.intValue;
         if (cosDsWriteWord(ds, word) == -1) return -1;
     }
     return 0;
@@ -523,7 +552,7 @@ static int writeBRT(ObjectBlock *block, Dataset *ds) {
     int i;
     u64 word;
 
-    word = ((u64)LDR_TT_BRT << 60) | (((block->relocationTableIndex + 1) / 2) + 1) | ((u64)block->index << 25);
+    word = ((u64)LDR_TT_BRT << 60) | (((((u64)block->relocationTableIndex + 1) / 2) + 1) << 36) | ((u64)block->index << 25);
     if (cosDsWriteWord(ds, word) == -1) return -1;
     i = 0;
     while (i < block->relocationTableIndex) {
@@ -537,6 +566,9 @@ static int writeBRT(ObjectBlock *block, Dataset *ds) {
             word |= (u64)entry->blockIndex << 25;
             if (entry->isParcelRelocation) word |= (u64)1 << 24;
             word |= entry->offset;
+        }
+        else {
+            word |= (u64)0xffffffff;
         }
         if (cosDsWriteWord(ds, word) == -1) return -1;
     }
@@ -613,7 +645,7 @@ int writeObjectRecord(Module *module, Dataset *ds) {
      *  Write the External Reference Table (XRT)
      */
     if (writeXRT(module, ds) == -1) return -1;
-    cosDsWriteEOR(ds);
+    if (cosDsWriteEOR(ds) == -1) return -1;
     return 0;
 }
 
@@ -723,7 +755,7 @@ static int writeProgramEntry(Module *module, Dataset *ds) {
     return 0;
 }
 
-static int writeString(Module *module, Dataset *ds, char *s) {
+static int writeString(char *s, Dataset *ds) {
     int i;
     int shiftCount;
     u64 word;
@@ -759,11 +791,12 @@ static int writeTrailer(Module *module, Dataset *ds) {
     for (i = 0; i < 4; i++) { // reserved
         if (cosDsWriteWord(ds, 0) == -1) return -1; // reserved
     }
-    if (writeString(module, ds, module->comment) == -1) return -1;
+    if (writeString(module->comment, ds) == -1) return -1;
     return 0;
 }
 
 static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds) {
+    int byteCount;
     u32 firstParcelAddress;
     u32 loadAddress;
     u64 parcelCount;
@@ -774,13 +807,22 @@ static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds) {
     //
     //  Write headser word
     //
-    firstParcelAddress = block->lowestParcelAddress & 0xfffffc;
-    parcelCount = ((block->highestParcelAddress + 4) & 0xfffffc) - firstParcelAddress;
-    loadAddress = isAbsolute ? firstParcelAddress : 0;
-    word = ((u64)LDR_TT_TXT << 60) | (((parcelCount >> 2) + 1) << 36) | (loadAddress >> 2);
+    if (block->lowestParcelAddress != block->highestParcelAddress) { // block not empty
+        firstParcelAddress = block->lowestParcelAddress & 0xfffffc;
+        parcelCount = ((block->highestParcelAddress + 4) & 0xfffffc) - firstParcelAddress;
+        loadAddress = isAbsolute ? firstParcelAddress : 0;
+        word = ((u64)LDR_TT_TXT << 60) | (((parcelCount >> 2) + 1) << 36) | (loadAddress >> 2);
+    }
+    else {
+        word = ((u64)LDR_TT_TXT << 60) | ((u64)1 << 36);
+    }
     if (cosDsWriteWord(ds, word) == -1) return -1;
-    cosDsWrite(ds, block->image + (firstParcelAddress * 2), parcelCount * 2);
-    return 0;
+    byteCount = parcelCount * 2;
+    if (block->image == NULL
+        || cosDsWrite(ds, block->image + (firstParcelAddress * 2), byteCount) == byteCount)
+        return 0;
+    else
+        return -1;
 }
 
 static int writeXRT(Module *module, Dataset *ds) {
@@ -801,7 +843,7 @@ static int writeXRT(Module *module, Dataset *ds) {
     
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
         for (i = 0; i < block->externalTableIndex; i++) {
-            entry = &block->externalTable[i++];
+            entry = &block->externalTable[i];
             word = (u64)block->index << 51;
             if (entry->isParcelRelocation) word |= (u64)1 << 50;
             word |= (u64)entry->externalIndex << 36;

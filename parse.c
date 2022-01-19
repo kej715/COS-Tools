@@ -28,6 +28,7 @@
 #include "calconst.h"
 #include "calproto.h"
 #include "caltypes.h"
+#include "services.h"
 
 typedef struct opStackEntry {
     OperatorType type;

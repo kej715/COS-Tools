@@ -25,4 +25,38 @@
 */
 #include "basetypes.h"
 
+typedef struct block {
+    struct block *next;
+    struct module *module;
+    char *id;
+    int index;
+    u32 baseAddress;
+    u32 length;
+    bool isExtMem;
+} Block;
+
+typedef struct module {
+    struct module *next;
+    char *id;
+    bool hasMachineTypeExt;
+    bool hasCallingSeq;
+    bool isAbsolute;
+    u32 origin;
+    u32 length;
+    Block *firstBlock;
+    Block *lastBlock;
+    int externalRefCount;
+    char *externalRefTable;
+    char *comment;
+} Module;
+
+typedef struct symbol {
+    struct symbol *left;
+    struct symbol *right;
+    char *id;
+    Block *block;
+    bool isParcelRelocation;
+    u64 value;
+} Symbol;
+
 #endif

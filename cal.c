@@ -71,17 +71,23 @@ int main(int argc, char *argv[]) {
         fclose(sourceFile);
         if (lFile == NULL) fclose(listingFile);
         if (oFile == NULL) {
-            cosDsWriteEOF(objectFile);
-            cosDsWriteEOD(objectFile);
-            cosDsClose(objectFile);
+            if (cosDsWriteEOF(objectFile) == -1
+                || cosDsWriteEOD(objectFile) == -1
+                || cosDsClose(objectFile) == -1) {
+                fprintf(stderr, "Failed to write object file for %s\n", argv[srcIndex]);
+                exit(1);
+            }
         }
         srcIndex += 1;
     }
     if (lFile != NULL) fclose(listingFile);
     if (oFile != NULL) {
-        cosDsWriteEOF(objectFile);
-        cosDsWriteEOD(objectFile);
-        cosDsClose(objectFile);
+        if (cosDsWriteEOF(objectFile) == -1
+            || cosDsWriteEOD(objectFile) == -1
+            || cosDsClose(objectFile) == -1) {
+            fputs("Failed to write object file\n", stdout);
+            exit(1);
+        }
     }
 }
 
@@ -99,7 +105,7 @@ static void openNextSource(int argi, char *argv[]) {
          if (*cp == '/' || *cp == '\\')
              dp = NULL;
          else if (*cp == '.')
-             dp = cp;
+             dp = fp;
          if (fp >= limit) {
              fprintf(stderr, "Path too long: %s\n", argv[argi]);
              exit(1);
@@ -145,7 +151,6 @@ static int parseOptions(int argc, char *argv[]) {
             i += 1;
             if (i >= argc) {
                 usage();
-                exit(1);
             }
             lFile = argv[i];
             if (strcmp(lFile, "-") == 0) {
@@ -163,7 +168,6 @@ static int parseOptions(int argc, char *argv[]) {
             i += 1;
             if (i >= argc) {
                 usage();
-                exit(1);
             }
             oFile = argv[i];
             objectFile = cosDsCreate(oFile);
@@ -174,7 +178,6 @@ static int parseOptions(int argc, char *argv[]) {
         }
         else if (*argv[i] == '-') {
             usage();
-            exit(1);
         }
         else {
             firstSrcIndex = i++;
@@ -185,13 +188,11 @@ static int parseOptions(int argc, char *argv[]) {
     while (i < argc) {
         if (*argv[i] == '-') {
             usage();
-            exit(1);
         }
         i += 1;
     }
     if (firstSrcIndex >= argc) {
         usage();
-        exit(1);
     }
     return firstSrcIndex;
 }
@@ -254,6 +255,7 @@ static void usage(void) {
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - object file\n", stderr);
     fputs("  sfile - source file\n", stderr);
+    exit(1);
 }
 
 static void writeObjectCode(void) {

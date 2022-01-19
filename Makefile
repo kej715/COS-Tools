@@ -29,7 +29,8 @@ CALHDRS = basetypes.h    \
           calproto.h     \
           caltypes.h     \
           cosdataset.h   \
-          cosldr.h
+          cosldr.h       \
+          services.h
 
 CALOBJS = cal.o          \
           cosdataset.o   \
@@ -43,8 +44,17 @@ CALOBJS = cal.o          \
           services.o     \
           trees.o
 
+LDRHDRS = basetypes.h    \
+          cosdataset.h   \
+          cosldr.h       \
+          ldrconst.h     \
+          ldrproto.h     \
+          ldrtypes.h     \
+          services.h
+
 LDROBJS = ldr.o          \
-          cosdataset.o
+          cosdataset.o   \
+          services.o
 
 all: cal ldr
 
@@ -68,6 +78,8 @@ global.o: global.c $(CALHDRS)
 inst.o: inst.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
 io.o:   io.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+ldr.o:  ldr.c $(LDRHDRS)
 	$(CC) $(CFLAGS) -c $<
 list.o: list.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<

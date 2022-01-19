@@ -28,6 +28,7 @@
 #include "calconst.h"
 #include "calproto.h"
 #include "caltypes.h"
+#include "services.h"
 
 static void adjustSymValsForQuals(Qualifier *qualifier);
 static void adjustSymValsForSyms(Symbol *symbol);

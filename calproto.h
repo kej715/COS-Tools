@@ -86,7 +86,6 @@ Section *addSection(Module *module, char *id, int len, SectionType type, Section
 Symbol *addSymbol(char *id, int len, Qualifier *qualifier, Value *value);
 void adjustSymbolValues(Module *module);
 void advanceBitPosition(Section *section, int count);
-void *allocate(int size);
 ErrorCode callMacro(MacroDefn *defn, Token *locationFieldToken);
 void clearErrorIndications(void);
 Token *copyToken(Token *token);
@@ -166,8 +165,8 @@ ErrorCode parseSourceLine(void);
 void printToken(FILE *file, Token *token);
 ErrorCode processMachineInstruction(void);
 void readNextLine(void);
-void *reallocate(void *old, int oldSize, int newSize);
 ErrorCode registerError(ErrorCode code);
+void reserveStorage(Section *section, u32 firstAddress, u32 count);
 void resetBase(void);
 void resetModule(Module *module);
 void resetErrorRegistrations(void);

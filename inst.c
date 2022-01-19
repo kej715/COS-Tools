@@ -29,6 +29,7 @@
 #include "calconst.h"
 #include "calproto.h"
 #include "caltypes.h"
+#include "services.h"
 
 #define INT_22_LOWER (-010000000)
 #define INT_22_UPPER   007777777
@@ -277,6 +278,8 @@ static ErrorCode BLOCK(void) {
 
 static ErrorCode BSS(void) {
     ErrorCode err;
+    u32 firstAddress;
+    u32 limitAddress;
     char *s;
     Value val;
 
@@ -289,10 +292,13 @@ static ErrorCode BSS(void) {
     }
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
-    if (*s != '\0' || isParcelAddress(&val) || isInteger(&val) == FALSE) return Err_OperandField;
-    currentSection->originCounter   += val.intValue * 4;
-    currentSection->locationCounter += val.intValue * 4;
+    if (*s != '\0' || isInteger(&val) == FALSE || isParcelAddress(&val)) return Err_OperandField;
     listValue(&val);
+    firstAddress = currentSection->originCounter;
+    advanceBitPosition(currentSection, val.intValue * 64);
+    limitAddress = currentSection->originCounter;
+    if (isCodeSection(currentSection) || isDataSection(currentSection))
+        reserveStorage(currentSection, firstAddress, limitAddress - firstAddress);
     return err;
 }
 
