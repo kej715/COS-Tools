@@ -1,0 +1,14 @@
+         TITLE     'LOG'
+         SUBTITLE  'Issue a log message'
+         IDENT     LOG
+         COMMENT   'LOG - Issue a log message'
+         ENTRY     LOG
+**
+*  Entry S1 - address of message
+*        S2 - log options
+*
+LOG      S0        O'004          ; F$MSG - Enter message in log file
+         EX
+         J         B0
+
+         END
