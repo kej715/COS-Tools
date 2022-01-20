@@ -773,16 +773,18 @@ static void writeModuleSummary(Module *module) {
     fputs("  --------  --------  ---------\n", loadMap);
     writeSymbols(module, symbolTable);
     fputs("\n", loadMap);
-    fputs("  External  Module    Address\n", loadMap);
-    fputs("  --------  --------  ---------\n", loadMap);
-    for (i = 0; i < module->externalRefCount; i++) {
-        id = module->externalRefTable + (i * 8);
-        symbol = findSymbol(id);
-        if (symbol != NULL) {
-            writeSymbol(symbol, 1);
-        }
-        else {
-            fprintf(loadMap, "  %.8s  *UNSATISFIED*\n", id);
+    if (module->externalRefCount > 0) {
+        fputs("  External  Module    Address\n", loadMap);
+        fputs("  --------  --------  ---------\n", loadMap);
+        for (i = 0; i < module->externalRefCount; i++) {
+            id = module->externalRefTable + (i * 8);
+            symbol = findSymbol(id);
+            if (symbol != NULL) {
+                writeSymbol(symbol, 1);
+            }
+            else {
+                fprintf(loadMap, "  %.8s  *UNSATISFIED*\n", id);
+            }
         }
     }
 }
