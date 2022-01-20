@@ -36,6 +36,8 @@
 
 static Symbol *addSymbol(char *id, Block *block, u64 value, bool isParcelRelocation);
 static void adjustEntryPoints(Symbol *symbol);
+static char currentDate[9];
+static char currentTime[9];
 static Block *findBlock(Module *module, int blockIndex);
 static Symbol *findSymbol(char *id);
 static u64 getWord(u8 *bytes);
@@ -80,11 +82,18 @@ static Symbol  *startSymbol = NULL;
 static Symbol  *symbolTable = NULL;
 
 int main(int argc, char *argv[]) {
+    time_t clock;
     u64 cw;
     int firstFileIndex;
     int fileIndex;
     int pass;
     int status;
+    struct tm *tmp;
+
+    clock = time(NULL);
+    tmp = localtime(&clock);
+    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_year - 100);
+    sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
     firstFileIndex = parseOptions(argc, argv);
 
@@ -747,10 +756,14 @@ static int writeExecutable(void) {
 static void writeLoadMap(void) {
     Module *module;
 
-    fprintf(loadMap, "      Program: %s\n", firstModule->id);
-    fprintf(loadMap, "       Length: %d words\n", blockLimit - 0200);
-    fprintf(loadMap, "          HLM: %o (octal)\n", blockLimit);
-    fputs(           "Start address: ", loadMap);
+    fprintf(loadMap,
+        "1Load Map                                                         Cray X-MP %s %s            %s %s\n",
+        ldrName, ldrVersion, currentDate, currentTime);
+    fputs(" \n", loadMap);
+    fprintf(loadMap, "       Program: %s\n", firstModule->id);
+    fprintf(loadMap, "        Length: %d words\n", blockLimit - 0200);
+    fprintf(loadMap, "           HLM: %o (octal)\n", blockLimit);
+    fputs(           " Start address: ", loadMap);
     if (startSymbol != NULL) {
         writeAddress(startSymbol->value, startSymbol->isParcelRelocation);
     }
@@ -768,14 +781,14 @@ static void writeModuleSummary(Module *module) {
     char *id;
     Symbol *symbol;
 
-    fprintf(loadMap, "\nModule: %s\n", module->id);
-    fputs("  Entry     Section   Address\n", loadMap);
-    fputs("  --------  --------  ---------\n", loadMap);
+    fprintf(loadMap, " \n Module: %s\n", module->id);
+    fputs("   Entry     Section   Address\n", loadMap);
+    fputs("   --------  --------  ---------\n", loadMap);
     writeSymbols(module, symbolTable);
     fputs("\n", loadMap);
     if (module->externalRefCount > 0) {
-        fputs("  External  Module    Address\n", loadMap);
-        fputs("  --------  --------  ---------\n", loadMap);
+        fputs("   External  Module    Address\n", loadMap);
+        fputs("   --------  --------  ---------\n", loadMap);
         for (i = 0; i < module->externalRefCount; i++) {
             id = module->externalRefTable + (i * 8);
             symbol = findSymbol(id);
@@ -783,7 +796,7 @@ static void writeModuleSummary(Module *module) {
                 writeSymbol(symbol, 1);
             }
             else {
-                fprintf(loadMap, "  %.8s  *UNSATISFIED*\n", id);
+                fprintf(loadMap, "   %.8s  *UNSATISFIED*\n", id);
             }
         }
     }
@@ -808,9 +821,6 @@ static int writeName(char *name, Dataset *ds) {
 }
 
 static int writePDT(Dataset *ds) {
-    time_t clock;
-    char currentDate[9];
-    char currentTime[9];
     int entryCount;
     int i;
     char *id;
@@ -819,14 +829,8 @@ static int writePDT(Dataset *ds) {
         'C','R','A','Y','-','X','M','P'
     };
     u64 pdtLen;
-    struct tm *tmp;
     u32 transferAddress;
     u64 word;
-
-    clock = time(NULL);
-    tmp = localtime(&clock);
-    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_year - 100);
-    sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
     entryCount = (startSymbol != NULL) ? 1 : 0;
     if (entryCount == 0) {
@@ -934,7 +938,7 @@ static int writeString(char *s, Dataset *ds) {
 }
 
 static void writeSymbol(Symbol *symbol, bool doDisplayModule) {
-    fprintf(loadMap, "  %s  %s  ", symbol->id, doDisplayModule ? symbol->block->module->id : symbol->block->id);
+    fprintf(loadMap, "   %s  %s  ", symbol->id, doDisplayModule ? symbol->block->module->id : symbol->block->id);
     writeAddress(symbol->value, symbol->isParcelRelocation);
     fputs("\n", loadMap);
 }
