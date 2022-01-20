@@ -66,6 +66,7 @@ static u32     blockLimit = 0200;
 static Module  *currentModule = NULL;
 static int     errorCount = 0;
 static Module  *firstModule = NULL;
+static bool    hasErrorFlag = 0;
 static u8      *image = NULL;
 static int     imageSize = 0;
 static Module  *lastModule = NULL;
@@ -135,6 +136,13 @@ int main(int argc, char *argv[]) {
     if (loadMap != NULL) {
         writeLoadMap();
         fclose(loadMap);
+    }
+    if (hasErrorFlag || errorCount > 0) {
+        if (hasErrorFlag)
+            fputs("One or more source modules have error flags set\n", stderr);
+        if (errorCount > 0)
+            fprintf(stderr, "%d linkage errors detected\n", errorCount);
+        exit(1);
     }
 }
 
@@ -504,6 +512,11 @@ static int processPDT(Dataset *ds, u64 hdr, int tableLength) {
         word = getWord(table + offset);
         offset += 8;
         module->isAbsolute = isSet(word, 0);
+        module->hasErrorFlag = isSet(word, 1);
+        if (module->hasErrorFlag) {
+            fprintf(stderr, "Warning: Module %s has error flag set\n", module->id);
+            hasErrorFlag = 1;
+        }
         module->origin = (word >> 24) & 0xffffff;
         module->length = word & 0xffffff;
         block = (Block *)allocate(sizeof(Block));
@@ -781,8 +794,10 @@ static void writeModuleSummary(Module *module) {
     char *id;
     Symbol *symbol;
 
-    fprintf(loadMap, " \n Module: %s\n", module->id);
-    fputs("   Entry     Section   Address\n", loadMap);
+    fprintf(loadMap, " \n Module: %s", module->id);
+    if (module->hasErrorFlag)
+        fputs(" (Warning: error flag set)", loadMap);
+    fputs("\n   Entry     Section   Address\n", loadMap);
     fputs("   --------  --------  ---------\n", loadMap);
     writeSymbols(module, symbolTable);
     fputs("\n", loadMap);
@@ -875,7 +890,7 @@ static int writePDT(Dataset *ds) {
     //
     if (writeName(firstModule->id, ds) == -1) return -1;
     word = (u64)1 << 63; // absolute flag
-    if (errorCount > 0) word |= (u64)1 << 62;
+    if (hasErrorFlag || errorCount > 0) word |= (u64)1 << 62;
     word |= (u64)0200 << 24;        // program origin
     word |= blockLimit - 0200; // program size
     if (cosDsWriteWord(ds, word) == -1) return -1;

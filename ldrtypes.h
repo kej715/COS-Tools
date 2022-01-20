@@ -41,6 +41,7 @@ typedef struct module {
     bool hasMachineTypeExt;
     bool hasCallingSeq;
     bool isAbsolute;
+    bool hasErrorFlag;
     u32 origin;
     u32 length;
     Block *firstBlock;

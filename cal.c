@@ -44,12 +44,14 @@ static char *lFile = NULL;
 static char *oFile = NULL;
 
 int main(int argc, char *argv[]) {
+    int errCount;
     Module *module;
     int srcIndex;
 
     srcIndex = parseOptions(argc, argv);
     instInit();
     defaultModule = addModule("", 0);
+    errCount = 0;
     while (srcIndex < argc) {
         openNextSource(srcIndex, argv);
         timeInit();
@@ -65,6 +67,7 @@ int main(int argc, char *argv[]) {
         for (module = firstModule; module != NULL; module = module->next) {
             emitLiterals(module);
         }
+        errCount += getErrorCount();
         listErrorSummary();
         listSymbolTable();
         writeObjectCode();
@@ -88,6 +91,10 @@ int main(int argc, char *argv[]) {
             fputs("Failed to write object file\n", stdout);
             exit(1);
         }
+    }
+    if (errCount > 0) {
+        fprintf(stderr, "%d errors detected\n", errCount);
+        exit(1);
     }
 }
 
