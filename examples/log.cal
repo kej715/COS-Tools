@@ -7,7 +7,7 @@
 *  Entry S1 - address of message
 *        S2 - log options
 *
-LOG      S0        O'004          ; F$MSG - Enter message in log file
+LOG      S0        F$MSG          ; Enter message in log file
          EX
          J         B0
 

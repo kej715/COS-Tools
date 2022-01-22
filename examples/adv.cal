@@ -4,7 +4,7 @@
          COMMENT   'ADV - Advance to next job step'
          ENTRY     ADV
 
-ADV      S0        O'000          ; F$ADV - Advance job
+ADV      S0        F$ADV          ; Advance job
          EX
          J         B0             ; should not return here
 

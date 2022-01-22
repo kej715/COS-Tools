@@ -1,0 +1,381 @@
+**
+*  System Action Request Numbers
+*
+F$ADV    =         O'000          ; Advance job
+F$ABT    =         O'001          ; Abort 
+F$DAT    =         O'002          ; Get current date
+F$TIM    =         O'003          ; Get current time
+F$MSG    =         O'004          ; Enter message in log file
+F$RCL    =         O'005          ; Dataset recall
+F$TRM    =         O'006          ; Terminate job
+F$SSW    =         O'007          ; Set pseudo-sense switch
+F$OPN    =         O'010          ; Open dataset
+F$MEM    =         O'011          ; Request memory
+F$LBN    =         O'012          ; Return last block number
+F$CLS    =         O'013          ; Close dataset
+F$DNT    =         O'014          ; Create/modify local dataset
+F$MDE    =         O'015          ; Set exchange package mode
+F$GNS    =         O'016          ; Get next control statement
+F$RLS    =         O'020          ; Release dataset
+F$PDM    =         O'021          ; Permanent dataset managment request
+F$RDC    =         O'022          ; Read device circular
+F$WDC    =         O'023          ; Write device circular
+F$GRN    =         O'024          ; Get system revision numbers
+F$DIS    =         O'025          ; Dispose dataset
+F$JDA    =         O'026          ; Get current Julian date
+F$JTI    =         O'027          ; Return accumulated CPU time
+F$ACT    =         O'030          ; Return accounting information
+F$SPS    =         O'031          ; Set P register and suspend user
+F$CSW    =         O'032          ; Clear sense switch
+F$TSW    =         O'033          ; Test sense switch
+F$BIO    =         O'034          ; Buffered I/O request
+F$DLY    =         O'035          ; Delay job
+F$AQR    =         O'036          ; Acquire dataset from frontend
+F$NRN    =         O'037          ; Enable/disable not rerunnable checks
+F$RRN    =         O'040          ; Enable/disable job rerun
+F$IOA    =         O'041          ; Set/clear IOA bits
+F$LFT    =         O'042          ; Delete/change/create LFT
+F$INV    =         O'043          ; Invoke a job class structure
+F$DJA    =         O'044          ; Dump job area
+F$RPV    =         O'045          ; Enable/disable reprieve processing
+F$BGN    =         O'046          ; Begin user code execution
+F$RCS    =         O'047          ; Rewind current control statement file
+F$PRC    =         O'050          ; Procedure dataset invocation
+F$RTN    =         O'051          ; Procedure return
+F$LIB    =         O'052          ; Library searchlist maintenance
+F$INS    =         O'053          ; Jump to installation-defined function
+F$UROLL  =         O'054          ; User-requested rollout
+F$ASD    =         O'055          ; Access system dataset
+F$SYM    =         O'056          ; JCL symbol manipulation
+F$CSB    =         O'057          ; Conditiona control statement maintenance
+F$ISB    =         O'060          ; Interative control statement maintenance
+F$EKO    =         O'061          ; Alter user's ECHO status
+F$OPT    =         O'062          ; Change user-specifiable options
+F$POS    =         O'063          ; Tape dataset position request
+F$SPM    =         O'064          ; Ready system performance monitor
+F$FCH    =         O'065          ; Fetch dataset from frontend
+F$TDT    =         O'066          ; Convert timestamp to ASCII
+F$DTT    =         O'067          ; Convert ASCII to timestamp
+F$MTT    =         O'070          ; Convert machine time to timestamp
+F$TMT    =         O'071          ; Convert timestamp to machine time
+F$SPY    =         O'072          ; Enable/disable user execution profile
+F$MEMORY =         O'073          ; Request memory
+F$PRV    =         O'074          ; Process user security requests
+F$DSD    =         O'075          ; Define secure dataset
+F$ENC    =         O'076          ; Encrypt password
+F$TASK   =         O'077          ; Create/manipulate tasks
+F$CRASH  =         O'100          ; Halt COS
+F$SYNCH  =         O'101          ; Synchronize tape dataset
+F$TPOS   =         O'102          ; Get tape position information
+F$TBL    =         O'103          ; Return copy of system table
+
+**
+*  Job Communication Block Offsets
+*
+JCCCI    =         O'005          ; Control statement image
+JCCPR    =         O'020          ; Control statement parameters, 2 words each
+JCJN     =         O'100          ; Job name (bits 0-55)
+JCLPP    =         O'101          ; Lines per page (bits 0-7)
+JCRMSG   =         O'101          ; RFL message sent (bit 11)
+JCU      =         O'101          ; User mode indicator (bits 14-15)
+JCUL     =         O'101          ;   Local  (bit 14)
+JCUG     =         O'101          ;   Global (bit 15)
+JCHLM    =         O'101          ; High limit of user code (bits 16-39)
+JCFL     =         O'101          ; Current field length (bits 40-63)
+JCNPF    =         O'102          ; Number of buffers and datasets (bits 0-15)
+JCBFB    =         O'102          ; Base address of I/O buffers (bits 16-39)
+JCDSP    =         O'102          ; Base address of DSP area (40-63)
+JCNLE    =         O'103          ; Number of entries in LFT (bits 0-15)
+JCMFL    =         O'103          ; Maximum field length allowed (bits 16-39)
+JCLFT    =         O'103          ; Base of LFT (bits 40-63)
+JCDCS    =         O'104          ; CSP dynamic control statement flag (bit 0)
+JCCSDB   =         O'104          ; CSP debug flag (bit 1)
+JCBP     =         O'104          ; Job statement breakpoint flag (bit 2)
+JCNTB    =         O'104          ; CSP traceback suppression flag (bit 3)
+JCIOAC   =         O'104          ; I/O area current status flag (bit 4)
+                                  ;   0 User's I/O area is unlocked
+                                  ;   1 User's I/O area is locked
+JCIOAP   =         O'104          ; I/O area previous status flag (bit 5)
+                                  ;   0 User's I/O area is unlocked
+                                  ;   1 User's I/O area is locked
+JCIA     =         O'104          ; Interactive flag (bit 6)
+JCCHG    =         O'104          ; Execute CHARGES utility for trailer message (bit 7)
+JCJBS    =         O'104          ; Job statement flag (bit 8)
+JCCSIM   =         O'104          ; CRAY-1 simulator running (bit 9)
+JCDLIT   =         O'104          ; Display literal delimiters (bit 10)
+JCRPRN   =         O'104          ; Retain level 1 parentheses (bit 11)
+JCVSEP   =         O'104          ; Last character was valid separator (bit 12)
+JCSDM    =         O'104          ; NOECHO of current statement (bit 13)
+JCPDMS   =         O'104          ; Suppress PDM user logfile messages (bit 14)
+JCCSQ    =         O'104          ; New CFT calling sequence in effort (bit 15)
+JCOVT    =         O'104          ; Overlay type (bit 16)
+JCULFT   =         O'104          ; Base of user LFT's (JCB-REL) (bits 17-47)
+JCPNST   =         O'104          ; Parentheses nesting level (bits 48-55)
+JCSTRM   =         O'104          ; Control statement termination (bits 56-63)
+JCEFI    =         O'105          ; Enable floating point interrupt (bit 0)
+JCOVL    =         O'105          ; Overlay flag (bit 1)
+JCSBC    =         O'105          ; SBCA flag (bit 2)
+JCBDM    =         O'105          ; Enable bidirectional mode (bit 3)
+JCORI    =         O'105          ; Interrupt on operand range flag (bit 4)
+JCCYCL   =         O'105          ; CPU cycle time (picosecs) bits (5-20)
+JCCPTP   =         O'105          ; CPU type (bits 21-29)
+JCMCP    =         O'105          ; Maximum number logical CPU's (bits 30-34)
+JCNLCP   =         O'105          ; Current number logical CPU's (bits 35-39)
+JCEMA    =         O'105          ; 1=Extended mem addressing enabled (bit 40)
+JCAVL    =         O'105          ; 1=Additional vector until enabled (bit 41)
+JCIAC    =         O'105          ; Number account processing retries allowed (bits 42-49)
+JCACRQ   =         O'105          ; Accounting mandatory flag (bit 50)
+JCPWRQ   =         O'105          ; Password required flag (bit 51)
+JCRYPT   =         O'105          ; Encryption flag (bit 52)
+JCSLVL   =         O'105          ; Security level flag (bit 53)
+JCSJOB   =         O'105          ; S on job card (bit 54)
+JCFRLS   =         O'105          ; Flag set when FRLS executes at job end (bit 55)
+JCCRL    =         O'106          ; COS revision level (bits 0-63)
+JCCRLS   =         O'106          ; COS revision number (bits 32-63)
+JCACN    =         O'107          ; 1-15 character account number
+JCACN1   =         O'107          ; Characters 1-8 of account number
+JCACN2   =         O'110          ; Characters 9-15 of account number
+JCPWD    =         O'111          ; 1-15 character password
+JCPWD1   =         O'111          ; Characters 1-8 of password
+JCPWD2   =         O'112          ; Characters 9-15 of password
+JCPROM   =         O'113          ; Current interactive prompt (L format)
+JCNULE   =         O'114          ; Number of user LFT entries below HLM (bits 0-15)
+JCPLEV   =         O'114          ; Current procedure nesting level (bits 16-31)
+JCILEV   =         O'114          ; Current iterative nexting level (bits 32-47)
+JCCLEV   =         O'114          ; Current conditional nesting level (bits 48-63)
+*  The next four words are used by the run-time memory manager:
+JCMMIN   =         O'115          ; Size of increments to managed mem (bits 0-31)
+JCMMIS   =         O'115          ; Initial size of managed memory (bits 32-63)
+JCMMBA   =         O'116          ; Base address of managed space (bits 0-31)
+JCMMEP   =         O'116          ; Size of smallest block added (bits 32-63)
+JCSTIN   =         O'117          ; Size of stack increments (bits 0-30)
+JCSTRT   =         O'117          ; Flag to indicate stack for root task (bit 31)
+JCSTIS   =         O'117          ; Initial stack size (bits 32-63)
+JCAVBA   =         O'120          ; Base of available space (bits 32-63)
+JCTCF    =         O'121          ; Task scheduling flag (bits 0-63)
+JCPSM    =         O'122          ; Pseudo-semaphore registers (bits 0-31)
+JCPSMR   =         O'122          ; Required zeroes (bits 32-63)
+JCSNGL   =         O'123          ; Single threading flag (bit 0)
+JCSNGC   =         O'123          ; Reserved for use in single thread code (1-63)
+JCNUDP   =         O'126          ; Number of system DSP's in user (bits 0-15)
+JCTPTR   =         O'127          ; Pointer to list of all tasks (bits 32-63)
+JCRDYQ   =         O'130          ; Multitasking ready queue header
+JCRUNQ   =         O'131          ; Multitasking run queue header
+JCLDR    =         O'146          ; Unsatisfied externals
+JCSTN    =         O'164          ; Job step count
+JCSTF    =         O'165          ; Job step failure flag
+JCBDAT   =         O'166          ; Date of absolute load module generation
+JCBTIM   =         O'167          ; Time of absolute load module generation
+JCDIG    =         O'170          ; Reserved for diagnostics
+
+**
+*  CLOSE - Close Dataset
+*
+*  CLOSE releases the buffer, the Logical File Table (LFT) , and the
+*  Dataset Parameter Table (DSP) for a COS-managed dataset. Disk space
+*  is not released (as opposed to RELEASE which gives up the DNT as
+*  well) and the dataset remains accessible to the job.
+*
+*  The buffers are flushed, if all of the following conditions are true
+*  for the dataset:
+*
+*  + The dataset is currently opened for output.
+*  + No end-of-data is written.
+*  + The dataset is being written sequentially.
+*  + The dataset's DSP is managed by COS.
+*  + The dataset has COS blocked dataset structure.
+*  + The dataset is not memory resident.
+*
+*    OPLABEL Optional label.
+*
+*    DN      Dataset name. Symbolic address of the Open Dataset Name
+*            Table (ODN) for this dataset or an A, S, or T (not AO or
+*            SO) register containing the address of the ODN. See the
+*            description of the OPEN macro later in this file.
+*    
+         MACRO
+OPLABEL  CLOSE     DN
+         IFC       'OPLABEL',NE,'',1
+OPLABEL  =         *
+         S0        F$CLS
+         IFC       'DN',NE,'S1',1
+         S1        DN
+         EX
+CLOSE    ENDM
+
+**
+*  ENDP - End Program
+*
+*  The ENDP request causes normal termination of the current program.
+*  Processing resumes with the next job control statement if reprieve
+*  processing is not enabled for normal job step termination. If
+*  reprieve processing is enabled for normal job step termination, the
+*  user's reprieve code is entered.
+*
+         MACRO
+OPLABEL  ENDP
+         IFC       'OPLABEL',NE,'',1
+OPLABEL  =         *
+         S0        F$ADV
+         EX
+ENDP     ENDM
+
+**
+*  MESSAGE - Enter message in log file
+*
+*  The MESSAGE macro causes the printable ASCII message at the location
+*  specified in the macro call to be entered in the job and system
+*  logfile. The message must be 1 through 80 characters, terminated by a
+*  zero byte.
+*
+*    OPLABEL Optional label.
+*
+*    ADDRESS A symbol or an A, S, or T register (except AO, SO, and S2)
+*            containing the starting address of the ASCII message. This
+*            parameter is required.
+*
+*    DEST    Destination for message; this parameter is optional and can
+*            be any of the following:
+*
+*              U  User logfile only; specified register=1.
+*              S  System logfile only; specified register=2.
+*              US User and system logfiles; specified register=3.
+*
+*    MSGCLASS Assign the message to class MSGCLASS. MSGCLASS can be a
+*            symbol or an A, S, or T register (except AO, SO, S2, S3, or
+*            S4) containing the message class. See the ECHO control
+*            statment in the CRAY-OS Version 1 Reference Manual,
+*            publication SR-OO11, for the available message classes.
+*            This parameter is optional.
+*
+*    OVERRIDE Message Suppression Override flag; if present, message is
+*            to go to $LOG regardless of ECHO status. All messages
+*            destined for system logfile are written to system log
+*            regardless of ECHO status. This parameter is optional.
+*
+         MACRO
+OPLABEL  MESSAGE   ADDRESS,DEST,MSGCLASS,OVERRIDE
+         IFC       'OPLABEL',NE,'',1
+OPLABEL  =         *
+         S0        F$MSG
+         IFC       $ADDRESS$,NE,$S1$,1
+         S1        ADDRESS
+         IFC       'DEST',EQ,'',1
+         S2        1
+MSG1     IFC       'DEST',NE,''
+MSG2     IFA       REG,DEST
+         IFC       'DEST'.NE.'S2',1
+         S2        DEST
+MSG2     ELSE
+MSG3     IFC       'DEST',EQ,'U'
+         S2        1
+MSG3     ELSE
+MSG4     IFC       'DEST',EQ,'S'
+         S2        2
+MSG4     ELSE
+         S2        3
+MSG4     ENDIF
+MSG3     ENDIF
+MSG2     ENDIF
+MSG1     ENDIF
+         IFC       'MSGCLASS',EQ,'',1
+         S3        1
+         IFC       'MSGCLASS',NE,'',1
+         S3        MSGCLASS
+         S3        S3<3
+         S2        S2!S3
+MSG5     IFC       'OVERRIDE',NE,''
+         S3        4
+         S2        S2!S3
+MSG5     ENDIF
+         EX
+MESSAGE  ENDM
+
+**
+*  OPEN - Open Dataset
+*
+*  The OPEN macro prepares a dataset for processing. When an OPEN macro
+*  is executed, the dataset is made known to the system if it is not an
+*  existing dataset. I/O tables are created in the upper end of the
+*  job's memory or in the heap, including the DSP (Dataset Parameter
+*  Table) and the LFT (Logical File Table). An I/O buffer is created if
+*  the dataset is COS blocked format, but not for an unblocked dataset.
+*  The address or offset of the DSP table is returned to the user.
+*
+*  An OPEN macro can be executed on a dataset that is already open.
+*
+*    OPLABEL Optional label. If oplabel is not specified, the address
+*            of the dataset name is generated.
+*
+*    DN      Dataset name. The OPEN macro generates a 2-word Open
+*            Dataset Name Table (ODN) the first time an OPEN of the
+*            dataset is encountered, unless you previously generated an
+*            ODN for the dataset. The ODN is illustrated in CRAY-OS
+*            Version 1 Reference Manual, publication SR-OOll. The dn
+*            becomes the symbolic address of the ODN and is used in all
+*            references to the dataset in other I/O requests.
+*
+*    PD      Processing direction. Can be any of the following:
+*              I  Dataset opened for input
+*              O  Dataset opened for output
+*              IO Dataset opened for input/output (default)
+*            pd can alternatively be an S or T register (but not an A
+*            register) with bit 0 set for input and/or bit 1 set for
+*            output.
+*
+*    LDT     Label Definition Table (LDT); an optional parameter that is
+*            the name of a previously defined LDT for tape processing.
+*            The pointer to this field is placed in the ODN built by the
+*            macro. The parameter applies to tape datasets only. See
+*            part 1, section 4 of this manual for a complete description
+*            of the LDT macro.
+*
+*    U       Unblocked. If the u parameter is specified, the DSP has
+*            DPUDS set and no buffer is allocated. The default is
+*            blocked. The u parameter is used only as a keyword; no
+*            registers are allowed.
+*
+         MACRO
+OPLABEL  OPEN      DN,PD,LDT,U
+         S0        F$OPN
+OPN1     IFA       REG,DN
+         IFC       'DN',NE,'S1',1
+         S1        DN
+OPN1     ELSE
+         SECTION   DATA
+         IFC       'OPLABEL',EQ,'',1
+DN       BSS       0
+         IFC       'OPLABEL',NE,'',1
+OPLABEL  BSS       0
+         DATA      'DN'L
+         IFC       'U',NE,'',1
+         VWD       6/1,2/0
+         IFC       'U',EQ,'',1
+         VWD       8/0
+         IFC       'LDT',EQ,'',1
+         VWD       56/0
+         IFC       'LDT',NE,'',1
+         VWD       24/LDT,32/0
+         SECTION   *
+         IFC       'OPLABEL',EQ,'',1
+         S1        DN
+         IFC       'OPLABEL',NE,'',1
+         S1        OPLABEL
+OPN1     ENDIF
+OPN2     IFA       REG,PD
+         S1        S1!PD
+OPN2     ELSE
+OPN3     IFC       'PD',EQ,'I'
+         S2        O'2
+OPN3     ELSE
+OPN4     IFC       'PD',EQ,'O'
+         S2        O'1
+OPN4     ELSE
+         S2        O'3
+OPN4     ENDIF
+OPN3     ENDIF
+         S2        S2<62
+         S1        S1!S2
+OPN2     ENDIF
+         EX
+OPEN     ENDM
