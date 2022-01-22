@@ -1840,7 +1840,6 @@ ErrorCode parseSourceLine(void) {
     err = Err_None;
     resetLocationField();
     resetErrorRegistrations();
-    listControlMask = LIST_ON;
     listSource();
     if (sourceLine[0] == '*' || sourceLine[0] == '\0') {
         listFlush(currentSection);

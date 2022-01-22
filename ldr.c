@@ -34,7 +34,7 @@
 #include "ldrtypes.h"
 #include "services.h"
 
-static Symbol *addSymbol(char *id, Block *block, u64 value, bool isParcelRelocation);
+static Symbol *addSymbol(char *id, Block *block, u64 value, bool isParcelAddress);
 static void adjustEntryPoints(Symbol *symbol);
 static char currentDate[9];
 static char currentTime[9];
@@ -44,6 +44,11 @@ static u64 getWord(u8 *bytes);
 static u64 loadModules(Dataset *ds, int pass);
 static void openNextSource(int argi, char *argv[]);
 static int parseOptions(int argc, char *argv[]);
+static void printAddress(u32 address, bool isParcelAddress);
+static void printLoadMap(void);
+static void printModuleSummary(Module *module);
+static void printSymbol(Symbol *symbol, bool doDisplayModule);
+static void printSymbols(Module *module, Symbol *symbol);
 static int processBRT(Dataset *ds, u64 hdr, int tableLength);
 static int processPDT(Dataset *ds, u64 hdr, int tableLength);
 static int processTXT(Dataset *ds, u64 hdr, int tableLength);
@@ -51,15 +56,10 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength);
 static int readWord(Dataset *ds, u64 *word);
 static int skipBytes(Dataset *ds, int count);
 static void usage(void);
-static void writeAddress(u32 address, bool isParcelAddress);
 static int writeExecutable(void);
-static void writeLoadMap(void);
-static void writeModuleSummary(Module *module);
 static int writeName(char *name, Dataset *ds);
 static int writePDT(Dataset *ds);
 static int writeString(char *s, Dataset *ds);
-static void writeSymbol(Symbol *symbol, bool doDisplayModule);
-static void writeSymbols(Module *module, Symbol *symbol);
 static int writeTXT(Dataset *ds);
 
 static u32     blockLimit = 0200;
@@ -134,7 +134,7 @@ int main(int argc, char *argv[]) {
     cosDsClose(objectFile);
     if (status == -1) unlink(oFile);
     if (loadMap != NULL) {
-        writeLoadMap();
+        printLoadMap();
         fclose(loadMap);
     }
     if (hasErrorFlag || errorCount > 0) {
@@ -146,7 +146,7 @@ int main(int argc, char *argv[]) {
     }
 }
 
-static Symbol *addSymbol(char *id, Block *block, u64 value, bool isParcelRelocation) {
+static Symbol *addSymbol(char *id, Block *block, u64 value, bool isParcelAddress) {
     Symbol *current;
     Symbol *new;
     int valence;
@@ -156,7 +156,7 @@ static Symbol *addSymbol(char *id, Block *block, u64 value, bool isParcelRelocat
     memcpy(new->id, id, 8);
     new->block = block;
     new->value = value;
-    new->isParcelRelocation = isParcelRelocation;
+    new->isParcelAddress = isParcelAddress;
     if (symbolTable == NULL) {
         symbolTable = new;
         return new;
@@ -198,7 +198,7 @@ static Symbol *addSymbol(char *id, Block *block, u64 value, bool isParcelRelocat
 static void adjustEntryPoints(Symbol *symbol) {
     if (symbol == NULL) return;
     adjustEntryPoints(symbol->left);
-    if (symbol->isParcelRelocation)
+    if (symbol->isParcelAddress)
         symbol->value += symbol->block->baseAddress << 2;
     else
         symbol->value += symbol->block->baseAddress;
@@ -403,19 +403,99 @@ static int parseOptions(int argc, char *argv[]) {
     return firstSrcIndex;
 }
 
+static void printAddress(u32 address, bool isParcelAddress) {
+    int parcelNumber;
+
+    if (isParcelAddress) {
+        parcelNumber = address & 0x03;
+        address >>= 2;
+    }
+    else {
+        parcelNumber = 0;
+    }
+    fprintf(loadMap, "%o%c", address, 'a' + parcelNumber);
+}
+
+static void printLoadMap(void) {
+    Module *module;
+
+    fprintf(loadMap,
+        "1Load Map                                                         Cray X-MP %s %s            %s %s\n",
+        ldrName, ldrVersion, currentDate, currentTime);
+    fputs(" \n", loadMap);
+    fprintf(loadMap, "       Program: %s\n", firstModule->id);
+    fprintf(loadMap, "        Length: %d words\n", blockLimit - 0200);
+    fprintf(loadMap, "           HLM: %o (octal)\n", blockLimit);
+    fputs(           " Start address: ", loadMap);
+    if (startSymbol != NULL) {
+        printAddress(startSymbol->value, TRUE);
+    }
+    else {
+        fputs("<none>", loadMap);
+    }
+    fputs("\n", loadMap);
+    for (module = firstModule; module != NULL; module = module->next) {
+        printModuleSummary(module);
+    }
+}
+
+static void printModuleSummary(Module *module) {
+    int i;
+    char *id;
+    Symbol *symbol;
+
+    fprintf(loadMap, " \n Module: %s", module->id);
+    if (module->hasErrorFlag)
+        fputs(" (Warning: error flag set)", loadMap);
+    fputs("\n   Entry     Section   Address\n", loadMap);
+    fputs("   --------  --------  ---------\n", loadMap);
+    printSymbols(module, symbolTable);
+    fputs("\n", loadMap);
+    if (module->externalRefCount > 0) {
+        fputs("   External  Module    Address\n", loadMap);
+        fputs("   --------  --------  ---------\n", loadMap);
+        for (i = 0; i < module->externalRefCount; i++) {
+            id = module->externalRefTable + (i * 8);
+            symbol = findSymbol(id);
+            if (symbol != NULL) {
+                printSymbol(symbol, TRUE);
+            }
+            else {
+                fprintf(loadMap, "   %.8s  *UNSATISFIED*\n", id);
+            }
+        }
+    }
+}
+
+static void printSymbol(Symbol *symbol, bool doDisplayModule) {
+    fprintf(loadMap, "   %s  %s  ", symbol->id, doDisplayModule ? symbol->block->module->id : symbol->block->id);
+    printAddress(symbol->value, symbol->isParcelAddress);
+    fputs("\n", loadMap);
+}
+
+static void printSymbols(Module *module, Symbol *symbol) {
+    if (symbol == NULL) return;
+    printSymbols(module, symbol->left);
+    if (symbol->block->module == module) printSymbol(symbol, FALSE);
+    printSymbols(module, symbol->right);
+}
+
 static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
     u32 baseAddress;
+    u32 bitAddress;
     Block *block;
     int blockIndex;
+    int byteCount;
+    int fieldLength;
+    int i;
     u32 imageBytes;
     int imageOffset;
-    bool isExtFmt;
     bool isParcelRelocation;
     u32 parcelAddress;
     int shiftBias;
+    int shiftCount;
     u64 word;
 
-    isExtFmt = isSet(hdr, 28);
     blockIndex = (hdr >> 25) & 0x7f;
     block = findBlock(currentModule, blockIndex);
     if (block == NULL) {
@@ -424,34 +504,72 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
         return skipBytes(ds, tableLength);
     }
     baseAddress = block->baseAddress;
-    while (tableLength > 0) {
-        if (readWord(ds, &word)) return -1;
-        tableLength -= 8;
-        for (shiftBias = 32; shiftBias >= 0; shiftBias -= 32) {
-            blockIndex = (word >> (25 + shiftBias)) & 0x7f;
-            isParcelRelocation = (word >> (24 + shiftBias)) & 1;
-            parcelAddress = (word >> shiftBias) & 0xffffff;
+    if (isSet(hdr, 28)) {
+        //
+        //  Process extended format table
+        //
+        while (tableLength > 0) {
+            if (readWord(ds, &word)) return -1;
+            tableLength -= 8;
+            blockIndex = (word >> 38) & 0x7f;
+            fieldLength = (word >> 32) & 0x3f;
+            isParcelRelocation = (word >> 31) & 1;
+            bitAddress = word & 0x3fffffff;
             block = findBlock(currentModule, blockIndex);
             if (block == NULL) {
-                if (blockIndex == 0x7f && parcelAddress == 0xffffff) break;
                 fprintf(stderr, "Failed to find block %d referenced by BRT of module %s\n", blockIndex, currentModule->id);
                 errorCount += 1;
                 continue;
             }
-            parcelAddress += block->baseAddress << 2;
-            imageOffset = parcelAddress * 2;
-            imageBytes = (image[imageOffset  ] << 24)
-                       | (image[imageOffset+1] << 16)
-                       | (image[imageOffset+2] <<  8)
-                       |  image[imageOffset+3];
+            imageOffset = (block->baseAddress * 8) + (bitAddress >> 3);
+            shiftCount = 7 - (bitAddress & 7);
+            byteCount = (fieldLength + 7) / 8;
+            if (shiftCount != 0) byteCount += 1;
+            imageBytes = 0;
+            for (i = byteCount - 1; i >= 0; i--) imageBytes = (imageBytes << 8) | image[imageOffset - i];
             if (isParcelRelocation)
                 imageBytes += baseAddress << 2;
             else
                 imageBytes += baseAddress;
-            image[imageOffset  ] =  imageBytes >> 24;
-            image[imageOffset+1] = (imageBytes >> 16) & 0xff;
-            image[imageOffset+2] = (imageBytes >>  8) & 0xff;
-            image[imageOffset+3] =  imageBytes        & 0xff;
+            for (i = 0; i < byteCount; i++) {
+                image[imageOffset--] = imageBytes & 0xff;
+                imageBytes >>= 8;
+            }
+        }
+    }
+    else {
+        //
+        //  Process standard format table
+        //
+        while (tableLength > 0) {
+            if (readWord(ds, &word)) return -1;
+            tableLength -= 8;
+            for (shiftBias = 32; shiftBias >= 0; shiftBias -= 32) {
+                blockIndex = (word >> (25 + shiftBias)) & 0x7f;
+                isParcelRelocation = (word >> (24 + shiftBias)) & 1;
+                parcelAddress = (word >> shiftBias) & 0xffffff;
+                block = findBlock(currentModule, blockIndex);
+                if (block == NULL) {
+                    if (blockIndex == 0x7f && parcelAddress == 0xffffff) break;
+                    fprintf(stderr, "Failed to find block %d referenced by BRT of module %s\n", blockIndex, currentModule->id);
+                    errorCount += 1;
+                    continue;
+                }
+                parcelAddress += block->baseAddress << 2;
+                imageOffset = parcelAddress * 2;
+                imageBytes = (image[imageOffset  ] << 24)
+                           | (image[imageOffset+1] << 16)
+                           | (image[imageOffset+2] <<  8)
+                           |  image[imageOffset+3];
+                if (isParcelRelocation)
+                    imageBytes += baseAddress << 2;
+                else
+                    imageBytes += baseAddress;
+                image[imageOffset  ] =  imageBytes >> 24;
+                image[imageOffset+1] = (imageBytes >> 16) & 0xff;
+                image[imageOffset+2] = (imageBytes >>  8) & 0xff;
+                image[imageOffset+3] =  imageBytes        & 0xff;
+            }
         }
     }
     return 0;
@@ -466,6 +584,7 @@ static int processPDT(Dataset *ds, u64 hdr, int tableLength) {
     int hdrLen;
     int i;
     bool isPrimary;
+    bool isParcelAddress;
     bool isParcelRelocation;
     Module *module;
     int n;
@@ -564,7 +683,7 @@ static int processPDT(Dataset *ds, u64 hdr, int tableLength) {
         word = getWord(table + offset);
         offset += 8;
         isPrimary = isSet(word, 55);
-        isParcelRelocation = isSet(word, 63);
+        isParcelAddress = isSet(word, 63);
         blockIndex = (word >> 1) & 0x7f;
         block = findBlock(module, blockIndex);
         if (block == NULL) {
@@ -576,7 +695,7 @@ static int processPDT(Dataset *ds, u64 hdr, int tableLength) {
         }
         word = getWord(table + offset); // relocation value
         offset += 8;
-        symbol = addSymbol(name, block, word, isParcelRelocation);
+        symbol = addSymbol(name, block, word, isParcelAddress);
         if (isPrimary) {
             if (startSymbol == NULL) {
                 startSymbol = symbol;
@@ -692,12 +811,12 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
         word = 0;
         for (i = byteCount - 1; i >= 0; i--) word = (word << 8) | image[imageOffset - i];
         if (isParcelRelocation) {
-            if (symbol->isParcelRelocation)
+            if (symbol->isParcelAddress)
                 word += symbol->value << shiftCount;
             else
                 word += symbol->value << (shiftCount + 2);
         }
-        else if (symbol->isParcelRelocation) {
+        else if (symbol->isParcelAddress) {
             word += (symbol->value >> 2) << shiftCount;
         }
         else {
@@ -707,7 +826,6 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
             image[imageOffset--] = word & 0xff;
             word >>= 8;
         }
-        word = getWord(image+imageOffset);
     }
     return 0;
 }
@@ -745,76 +863,12 @@ static void usage(void) {
     exit(1);
 }
 
-static void writeAddress(u32 address, bool isParcelAddress) {
-    int parcelNumber;
-
-    if (isParcelAddress) {
-        parcelNumber = address & 0x03;
-        address >>= 2;
-    }
-    else {
-        parcelNumber = 0;
-    }
-    fprintf(loadMap, "%o%c", address, 'a' + parcelNumber);
-}
-
 static int writeExecutable(void) {
     if (writePDT(objectFile) == -1 || writeTXT(objectFile) == -1) return -1;
     cosDsWriteEOR(objectFile);
     cosDsWriteEOF(objectFile);
     cosDsWriteEOD(objectFile);
     return 0;
-}
-
-static void writeLoadMap(void) {
-    Module *module;
-
-    fprintf(loadMap,
-        "1Load Map                                                         Cray X-MP %s %s            %s %s\n",
-        ldrName, ldrVersion, currentDate, currentTime);
-    fputs(" \n", loadMap);
-    fprintf(loadMap, "       Program: %s\n", firstModule->id);
-    fprintf(loadMap, "        Length: %d words\n", blockLimit - 0200);
-    fprintf(loadMap, "           HLM: %o (octal)\n", blockLimit);
-    fputs(           " Start address: ", loadMap);
-    if (startSymbol != NULL) {
-        writeAddress(startSymbol->value, startSymbol->isParcelRelocation);
-    }
-    else {
-        fputs("<none>", loadMap);
-    }
-    fputs("\n", loadMap);
-    for (module = firstModule; module != NULL; module = module->next) {
-        writeModuleSummary(module);
-    }
-}
-
-static void writeModuleSummary(Module *module) {
-    int i;
-    char *id;
-    Symbol *symbol;
-
-    fprintf(loadMap, " \n Module: %s", module->id);
-    if (module->hasErrorFlag)
-        fputs(" (Warning: error flag set)", loadMap);
-    fputs("\n   Entry     Section   Address\n", loadMap);
-    fputs("   --------  --------  ---------\n", loadMap);
-    writeSymbols(module, symbolTable);
-    fputs("\n", loadMap);
-    if (module->externalRefCount > 0) {
-        fputs("   External  Module    Address\n", loadMap);
-        fputs("   --------  --------  ---------\n", loadMap);
-        for (i = 0; i < module->externalRefCount; i++) {
-            id = module->externalRefTable + (i * 8);
-            symbol = findSymbol(id);
-            if (symbol != NULL) {
-                writeSymbol(symbol, 1);
-            }
-            else {
-                fprintf(loadMap, "   %.8s  *UNSATISFIED*\n", id);
-            }
-        }
-    }
 }
 
 static int writeName(char *name, Dataset *ds) {
@@ -844,12 +898,12 @@ static int writePDT(Dataset *ds) {
         'C','R','A','Y','-','X','M','P'
     };
     u64 pdtLen;
-    u32 transferAddress;
+    u32 startAddress;
     u64 word;
 
     entryCount = (startSymbol != NULL) ? 1 : 0;
     if (entryCount == 0) {
-        fputs("No transfer address\n", stderr);
+        fputs("No start address\n", stderr);
         errorCount += 1;
     }
     pdtLen = 1                 // header word
@@ -899,19 +953,19 @@ static int writePDT(Dataset *ds) {
     //
     if (startSymbol != NULL) {
         id = startSymbol->id;
-        isParcelRelocation = startSymbol->isParcelRelocation;
-        transferAddress = startSymbol->value;
+        isParcelRelocation = startSymbol->isParcelAddress;
+        startAddress = startSymbol->value;
     }
     else {
         id = "";
         isParcelRelocation = 0;
-        transferAddress = 0200;
+        startAddress = 0200;
     }
     if (writeName(id, ds) == -1) return -1;
     word = 0x100; // primary entry point
     if (isParcelRelocation) word |= 1;
     if (cosDsWriteWord(ds, word) == -1) return -1;
-    if (cosDsWriteWord(ds, transferAddress) == -1) return -1;
+    if (cosDsWriteWord(ds, startAddress) == -1) return -1;
     //
     //  Write trailer
     //
@@ -950,19 +1004,6 @@ static int writeString(char *s, Dataset *ds) {
         if (cosDsWriteWord(ds, word) == -1) return -1;
     }
     return 0;
-}
-
-static void writeSymbol(Symbol *symbol, bool doDisplayModule) {
-    fprintf(loadMap, "   %s  %s  ", symbol->id, doDisplayModule ? symbol->block->module->id : symbol->block->id);
-    writeAddress(symbol->value, symbol->isParcelRelocation);
-    fputs("\n", loadMap);
-}
-
-static void writeSymbols(Module *module, Symbol *symbol) {
-    if (symbol == NULL) return;
-    writeSymbols(module, symbol->left);
-    if (symbol->block->module == module) writeSymbol(symbol, 0);
-    writeSymbols(module, symbol->right);
 }
 
 static int writeTXT(Dataset *ds) {

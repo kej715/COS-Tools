@@ -31,22 +31,24 @@
 #include "services.h"
 
 static void addExternalEntry(Section *section, Value *val, bool isParcelRelocation, u32 bitAddress, u8 fieldLength);
-static void addRelocationEntry(Section *section, Value *val, bool isParcelRelocation);
+static void addExtRelocationEntry(Section *section, Value *val, bool isParcelRelocation, u32 bitAddress, u8 fieldLength);
+static void addStdRelocationEntry(Section *section, Value *val, bool isParcelRelocation);
 static int countBlocks(Module *module);
 static int countEntries(Module *module);
 static int countExternals(Module *module);
-static u64 extractSubfield(u64 word, int startingBitPos, int len);
+static u64 extractSubfield(u64 word, int fieldStartingBitPos, int len);
 static u64 getWord(Section *section, u32 parcelAddress);
 static void putHalfWord(Section *section, u32 parcelAddress, u32 halfWord);
 static void putParcel(Section *section, u32 parcelAddress, u16 parcel);
 static void putWord(Section *section, u32 parcelAddress, u64 word);
-static int writeBRT(ObjectBlock *block, Dataset *ds);
 static int writeCommonBlockEntry(ObjectBlock *block, Dataset *ds);
 static int writeEntryEntries(Module *module, Dataset *ds);
+static int writeExtBRT(ObjectBlock *block, Dataset *ds);
 static int writeExternalEntries(Module *module, Dataset *ds);
 static int writeName(char *name, Dataset *ds);
 static int writePDT(Module *module, Dataset *ds);
 static int writeProgramEntry(Module *module, Dataset *ds);
+static int writeStdBRT(ObjectBlock *block, Dataset *ds);
 static int writeString(char *s, Dataset *ds);
 static int writeTrailer(Module *module, Dataset *ds);
 static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds);
@@ -76,9 +78,9 @@ static void addExternalEntry(Section *section, Value *val, bool isParcelRelocati
 }
 
 /*
- *  addRelocationEntry - add a relocation table entry to a referenced object block
+ *  addExtRelocationEntry - add an extended relocation table entry to a referenced object block
  */
-static void addRelocationEntry(Section *section, Value *val, bool isParcelRelocation) {
+static void addExtRelocationEntry(Section *section, Value *val, bool isParcelRelocation, u32 bitAddress, u8 fieldLength) {
     ObjectBlock *baseBlock;
     RelocationTableEntry *entry;
     u16 targetBlockIndex;
@@ -92,6 +94,31 @@ static void addRelocationEntry(Section *section, Value *val, bool isParcelReloca
         baseBlock->relocationTableSize += RELOC_TABLE_INCREMENT;
     }
     entry = &baseBlock->relocationTable[baseBlock->relocationTableIndex++];
+    entry->type = RelocEntryType_Extended;
+    entry->blockIndex = section->objectBlock->index;
+    entry->offset = bitAddress;
+    entry->fieldLength = fieldLength;
+    entry->isParcelRelocation = isParcelRelocation;
+}
+
+/*
+ *  addStdRelocationEntry - add a standard relocation table entry to a referenced object block
+ */
+static void addStdRelocationEntry(Section *section, Value *val, bool isParcelRelocation) {
+    ObjectBlock *baseBlock;
+    RelocationTableEntry *entry;
+    u16 targetBlockIndex;
+
+    if (pass == 1) return;
+    baseBlock = val->section->objectBlock;
+    if (baseBlock->relocationTableIndex >= baseBlock->relocationTableSize) {
+        baseBlock->relocationTable = (RelocationTableEntry *)reallocate(baseBlock->relocationTable,
+            baseBlock->relocationTableSize * sizeof(RelocationTableEntry),
+            (baseBlock->relocationTableSize + RELOC_TABLE_INCREMENT) * sizeof(RelocationTableEntry));
+        baseBlock->relocationTableSize += RELOC_TABLE_INCREMENT;
+    }
+    entry = &baseBlock->relocationTable[baseBlock->relocationTableIndex++];
+    entry->type = RelocEntryType_Standard;
     entry->blockIndex = section->objectBlock->index;
     entry->offset = section->originCounter;
     entry->isParcelRelocation = isParcelRelocation;
@@ -128,7 +155,9 @@ static int countEntries(Module *module) {
     int count;
     Symbol *symbol;
 
-    for (count = 0, symbol = module->entryPoints; symbol != NULL; symbol = symbol->next) count += 1;
+    for (count = 0, symbol = module->entryPoints; symbol != NULL; symbol = symbol->next) {
+        if ((symbol->value.attributes & SYM_UNDEFINED) == 0) count += 1;
+    }
     return count;
 }
 
@@ -136,7 +165,7 @@ static int countExternals(Module *module) {
     int count;
     Symbol *symbol;
 
-    for (count = 0, symbol = module->firstExternal; symbol != NULL; symbol = symbol->next) count += 1;
+    for (count = 0, symbol = module->externals; symbol != NULL; symbol = symbol->next) count += 1;
     return count;
 }
 
@@ -150,10 +179,10 @@ void emit_g_h_i_jkm(Section *section, u8 g, u8 h, u8 i, Value *jkm) {
     instr = (g << 28) | (h << 25) | (i << 22) | (jkm->intValue & MASK22);
     putHalfWord(section, section->originCounter, instr);
     if (isExternal(jkm)) {
-       addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
+        addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
     }
     else if (isRelocatable(jkm)) {
-        addRelocationEntry(section, jkm, FALSE);
+        addStdRelocationEntry(section, jkm, FALSE);
     }
     listCodeLocation(section);
     listCode10_22(instr, jkm->attributes);
@@ -208,10 +237,10 @@ void emit_gh_i_jkm(Section *section, u8 gh, u8 i, Value *jkm) {
     instr = (gh << 25) | (i << 22) | (jkm->intValue & MASK22);
     putHalfWord(section, section->originCounter, instr);
     if (isExternal(jkm)) {
-       addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
+        addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
     }
     else if (isRelocatable(jkm)) {
-        addRelocationEntry(section, jkm, FALSE);
+        addStdRelocationEntry(section, jkm, FALSE);
     }
     listCodeLocation(section);
     listCode10_22(instr, jkm->attributes);
@@ -227,10 +256,10 @@ void emit_gh_ijkm(Section *section, u8 gh, Value *ijkm) {
     instr = (gh << 25) | (ijkm->intValue & MASK24);
     putHalfWord(section, section->originCounter, instr);
     if (isExternal(ijkm)) {
-       addExternalEntry(section, ijkm, TRUE, section->originCounter * 16 + 31, 24);
+        addExternalEntry(section, ijkm, TRUE, section->originCounter * 16 + 31, 24);
     }
     else if (isRelocatable(ijkm)) {
-        addRelocationEntry(section, ijkm, TRUE);
+        addStdRelocationEntry(section, ijkm, TRUE);
     }
     listCodeLocation(section);
     listCode7_24(instr, ijkm->attributes);
@@ -240,31 +269,48 @@ void emit_gh_ijkm(Section *section, u8 gh, Value *ijkm) {
 /*
  *  emitFieldBits - emit a field of bits
  */
-static int startingBitPos = 0;
+static u16 fieldAttributes = 0;
+static int fieldStartingBitPos = 0;
 
-void emitFieldBits(Section *section, u64 bits, int len, u16 attributes, bool doListFlush) {
+void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
+    u64 bits;
+    u32 bitAddress;
     u64 currentWord;
     int emptyBitCount;
     int shiftCount;
     u64 subfield;
     int subfieldLen;
 
+    bitAddress = ((section->originCounter & 0xfffffc) * 16) + section->wordBitPosCounter + (len - 1);
+    if (isExternal(val)) {
+        addExternalEntry(section, val, isParcelAddress(val), bitAddress, len);
+    }
+    else if (isRelocatable(val)) {
+        if ((bitAddress & 0x07) == 0x07
+            && ((isWordAddress(val) && len >= 22 && len <= 24)
+                || (isParcelAddress(val) && len == 24)))
+            addStdRelocationEntry(section, val, isParcelAddress(val));
+        else
+            addExtRelocationEntry(section, val, isParcelAddress(val), bitAddress, len);
+    }
+    fieldAttributes |= val->attributes;
+    bits = (val->type == NumberType_Integer) ? val->intValue : toCrayFloat(val->floatValue);
     currentWord = getWord(section, section->originCounter);
     emptyBitCount = 64 - section->wordBitPosCounter;
     while (len > emptyBitCount) {
         shiftCount = len - emptyBitCount;
         currentWord |= bits >> shiftCount;
         putWord(section, section->originCounter, currentWord);
-        subfieldLen = 64 - startingBitPos;
-        subfield = extractSubfield(currentWord, startingBitPos, subfieldLen);
-        listField(subfield, subfieldLen, attributes, 21);
+        subfieldLen = 64 - fieldStartingBitPos;
+        subfield = extractSubfield(currentWord, fieldStartingBitPos, subfieldLen);
+        listField(subfield, subfieldLen, fieldAttributes, 21);
         listFlush(section);
         listCodeLocation(section);
         len = shiftCount;
         bits = extractSubfield(bits, 64 - len, len);
         advanceBitPosition(section, emptyBitCount);
         currentWord = getWord(section, section->originCounter);
-        startingBitPos = 0;
+        fieldStartingBitPos = 0;
         emptyBitCount = 64 - section->wordBitPosCounter;
     }
     if (len > 0) {
@@ -273,14 +319,14 @@ void emitFieldBits(Section *section, u64 bits, int len, u16 attributes, bool doL
         putWord(section, section->originCounter, currentWord);
         advanceBitPosition(section, len);
         if (section->wordBitPosCounter == 0) {
-            subfieldLen = 64 - startingBitPos;
-            subfield = extractSubfield(currentWord, startingBitPos, subfieldLen);
-            listField(subfield, subfieldLen, attributes, 21);
+            subfieldLen = 64 - fieldStartingBitPos;
+            subfield = extractSubfield(currentWord, fieldStartingBitPos, subfieldLen);
+            listField(subfield, subfieldLen, fieldAttributes, 21);
             if (doListFlush) {
                 listFlush(section);
                 listCodeLocation(section);
             }
-            startingBitPos = 0;
+            fieldStartingBitPos = 0;
         }
     }
 }
@@ -288,24 +334,24 @@ void emitFieldBits(Section *section, u64 bits, int len, u16 attributes, bool doL
 /*
  *  emitFieldEnd - complete the emission of a field of bits
  */
-void emitFieldEnd(Section *section, u16 attributes) {
+void emitFieldEnd(Section *section) {
     int lastBitPos;
     int lastCol;
     int len;
     int shiftCount;
     u64 subfield;
 
-    len = section->wordBitPosCounter - startingBitPos;
+    len = section->wordBitPosCounter - fieldStartingBitPos;
     if (len > 0) {
         lastCol = (section->wordBitPosCounter + 1) / 3;
-        subfield = extractSubfield(getWord(section, section->originCounter), startingBitPos, len);
+        subfield = extractSubfield(getWord(section, section->originCounter), fieldStartingBitPos, len);
         lastBitPos = (section->wordBitPosCounter - 1) % 3;
         if (lastBitPos > 0) {
             shiftCount = 3 - lastBitPos;
             subfield <<= shiftCount;
             len += shiftCount;
         }
-        listField(subfield, len, attributes, lastCol);
+        listField(subfield, len, fieldAttributes, lastCol);
     }
 }
 
@@ -313,7 +359,8 @@ void emitFieldEnd(Section *section, u16 attributes) {
  *  emitFieldStart - begin the emission of a field of bits
  */
 void emitFieldStart(Section *section) {
-    startingBitPos = section->wordBitPosCounter;
+    fieldAttributes = 0;
+    fieldStartingBitPos = section->wordBitPosCounter;
 }
 
 /*
@@ -339,8 +386,8 @@ void emitLiterals(Module *module) {
         else {
             (void)evaluateExpression(literal->expression, &val);
             emitFieldStart(section);
-            emitFieldBits(section, (val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
-            emitFieldEnd(section, val.attributes);
+            emitFieldBits(section, &val, 64, FALSE);
+            emitFieldEnd(section);
         }
     }
     currentListControl = savedListControl;
@@ -354,6 +401,7 @@ void emitString(Section *section, char *s, int len, int count, JustifyType justi
     int fillCount;
     char *limit;
     int n;
+    Value val;
 
     n = 0;
     limit = s + len;
@@ -363,15 +411,20 @@ void emitString(Section *section, char *s, int len, int count, JustifyType justi
     }
     if (n > count) n = count;
     fillCount = count - n;
+    val.type = NumberType_Integer;
+    val.attributes = 0;
+    val.section = section;
 
     emitFieldStart(section);
     switch (justification) {
     case Justify_LeftBlankFill:
         while (n-- > 0) {
             if (*s == '\'') s += 1;
-            emitFieldBits(section, *s++, 8, 0, n > 0 || fillCount > 0);
+            val.intValue = *s++;
+            emitFieldBits(section, &val, 8, n > 0 || fillCount > 0);
         }
-        while (fillCount-- > 0) emitFieldBits(section, 0x20, 8, 0, fillCount > 0);
+        val.intValue = 0x20;
+        while (fillCount-- > 0) emitFieldBits(section, &val, 8, fillCount > 0);
         break;
     case Justify_LeftZeroEnd:
         if (fillCount < 1) {
@@ -381,31 +434,35 @@ void emitString(Section *section, char *s, int len, int count, JustifyType justi
     case Justify_LeftZeroFill:
         while (n-- > 0) {
             if (*s == '\'') s += 1;
-            emitFieldBits(section, *s++, 8, 0, n > 0 || fillCount > 0);
+            val.intValue = *s++;
+            emitFieldBits(section, &val, 8, n > 0 || fillCount > 0);
         }
-        while (fillCount-- > 0) emitFieldBits(section, 0, 8, 0, fillCount > 0);
+        val.intValue = 0;
+        while (fillCount-- > 0) emitFieldBits(section, &val, 8, fillCount > 0);
         break;
     case Justify_RightZeroFill:
-        while (fillCount-- > 0) emitFieldBits(section, 0, 8, 0, TRUE);
+        val.intValue = 0;
+        while (fillCount-- > 0) emitFieldBits(section, &val, 8, TRUE);
         while (n-- > 0) {
             if (*s == '\'') s += 1;
-            emitFieldBits(section, *s++, 8, 0, n > 0 || n > 0);
+            val.intValue = *s++;
+            emitFieldBits(section, &val, 8, n > 0 || n > 0);
         }
         break;
     }
-    emitFieldEnd(section, 0);
+    emitFieldEnd(section);
 }
 
 /*
  *  extractSubfield - extract a subfield of bits from a word
  */
-static u64 extractSubfield(u64 word, int startingBitPos, int len) {
+static u64 extractSubfield(u64 word, int fieldStartingBitPos, int len) {
     u64 mask;
     int shiftCount;
 
     if (len >= 64) return word;
     mask = ~((~(u64)0 >> len) << len);
-    shiftCount = 64 - (startingBitPos + len);
+    shiftCount = 64 - (fieldStartingBitPos + len);
     return (word >> shiftCount) & mask;
 }
 
@@ -536,40 +593,13 @@ static int writeEntryEntries(Module *module, Dataset *ds) {
     u64 word;
 
     for (symbol = module->entryPoints; symbol != NULL; symbol = symbol->next) {
+        if ((symbol->value.attributes & SYM_UNDEFINED) != 0) continue;
         if (writeName(symbol->id, ds) == -1) return -1;
         word = (symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0 ? 1 : 0; // relocation mode
         word |= symbol->value.section->objectBlock->index << 1;
         if (symbol == module->start) word |= 0x100; // primary entry point
         if (cosDsWriteWord(ds, word) == -1) return -1;
         word = symbol->value.intValue;
-        if (cosDsWriteWord(ds, word) == -1) return -1;
-    }
-    return 0;
-}
-
-static int writeBRT(ObjectBlock *block, Dataset *ds) {
-    RelocationTableEntry *entry;
-    int i;
-    u64 word;
-
-    word = ((u64)LDR_TT_BRT << 60) | (((((u64)block->relocationTableIndex + 1) / 2) + 1) << 36) | ((u64)block->index << 25);
-    if (cosDsWriteWord(ds, word) == -1) return -1;
-    i = 0;
-    while (i < block->relocationTableIndex) {
-        entry = &block->relocationTable[i++];
-        word = (u64)entry->blockIndex << 25;
-        if (entry->isParcelRelocation) word |= (u64)1 << 24;
-        word |= entry->offset;
-        word <<= 32;
-        if (i < block->relocationTableIndex) {
-            entry = &block->relocationTable[i++];
-            word |= (u64)entry->blockIndex << 25;
-            if (entry->isParcelRelocation) word |= (u64)1 << 24;
-            word |= entry->offset;
-        }
-        else {
-            word |= (u64)0xffffffff;
-        }
         if (cosDsWriteWord(ds, word) == -1) return -1;
     }
     return 0;
@@ -591,10 +621,36 @@ static int writeCommonBlockEntry(ObjectBlock *block, Dataset *ds) {
     return 0;
 }
 
+static int writeExtBRT(ObjectBlock *block, Dataset *ds) {
+    int entryCount;
+    RelocationTableEntry *entry;
+    int i;
+    u64 word;
+
+    entryCount = 0;
+    for (i = 0; i < block->relocationTableIndex; i++) {
+        entry = &block->relocationTable[i];
+        if (entry->type == RelocEntryType_Extended) entryCount += 1;
+    }
+    if (entryCount < 1) return 0;
+    word = ((u64)LDR_TT_BRT << 60) | ((u64)(entryCount + 1) << 36) | ((u64)1 << 35) | ((u64)block->index << 25);
+    if (cosDsWriteWord(ds, word) == -1) return -1;
+    for (i = 0; i < block->relocationTableIndex; i++) {
+        entry = &block->relocationTable[i];
+        if (entry->type != RelocEntryType_Extended) continue;
+        word  = (u64)entry->blockIndex << 38;
+        word |= (u64)entry->fieldLength << 32;
+        if (entry->isParcelRelocation) word |= (u64)1 << 31;
+        word |= entry->offset;
+        if (cosDsWriteWord(ds, word) == -1) return -1;
+    }
+    return 0;
+}
+
 static int writeExternalEntries(Module *module, Dataset *ds) {
     Symbol *symbol;
 
-    for (symbol = module->firstExternal; symbol != NULL; symbol = symbol->next) {
+    for (symbol = module->externals; symbol != NULL; symbol = symbol->next) {
         if (writeName(symbol->id, ds) == -1) return -1;
     }
     return 0;
@@ -633,13 +689,15 @@ int writeObjectRecord(Module *module, Dataset *ds) {
              return -1;
     }
     /*
-     *  Write a Block Relocation Table (BRT) for each object block that
-     *  has relocation entries.
+     *  Write Block Relocation Table(s) (BRT's) for each object block that
+     *  has relocation entries. Two types of BRT's can be written:
+     *  standard BRT's, and extended BRT's.
      */
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-         if (block->relocationTableIndex > 0
-             && writeBRT(block, ds) == -1)
-             return -1;
+         if (block->relocationTableIndex > 0) {
+             if (writeStdBRT(block, ds) == -1) return -1;
+             if (writeExtBRT(block, ds) == -1) return -1;
+         }
     }
     /*
      *  Write the External Reference Table (XRT)
@@ -752,6 +810,42 @@ static int writeProgramEntry(Module *module, Dataset *ds) {
     word |= programOrigin << 24;
     word |= programSize;
     if (cosDsWriteWord(ds, word) == -1) return -1;
+    return 0;
+}
+
+static int writeStdBRT(ObjectBlock *block, Dataset *ds) {
+    int entryCount;
+    RelocationTableEntry *entry;
+    int i;
+    u64 word;
+
+    entryCount = 0;
+    for (i = 0; i < block->relocationTableIndex; i++) {
+        entry = &block->relocationTable[i];
+        if (entry->type == RelocEntryType_Standard) entryCount += 1;
+    }
+    if (entryCount < 1) return 0;
+    word = ((u64)LDR_TT_BRT << 60) | (((u64)((entryCount + 1) / 2) + 1) << 36) | ((u64)block->index << 25);
+    if (cosDsWriteWord(ds, word) == -1) return -1;
+    entryCount = 0;
+    word = 0;
+    for (i = 0; i < block->relocationTableIndex; i++) {
+        entry = &block->relocationTable[i];
+        if (entry->type != RelocEntryType_Standard) continue;
+        if ((entryCount & 1) == 1) word <<= 32;
+        word |= (u64)entry->blockIndex << 25;
+        if (entry->isParcelRelocation) word |= (u64)1 << 24;
+        word |= entry->offset;
+        entryCount += 1;
+        if ((entryCount & 1) == 0) {
+            if (cosDsWriteWord(ds, word) == -1) return -1;
+            word = 0;
+        }
+    }
+    if ((entryCount & 1) == 1) {
+        word = (word << 32) | (u64)0xffffffff;
+        if (cosDsWriteWord(ds, word) == -1) return -1;
+    }
     return 0;
 }
 

@@ -62,6 +62,8 @@ typedef struct patternNode {
     };
 } PatternNode;
 
+static void addEntryPoint(Module *module, Symbol *symbol);
+static void addExternal(Module *module, Symbol *symbol);
 static void addInstruction(char *id, u8 attributes, InstructionHandler handler);
 static void addMacroCallParam(MacroCall *call, MacroParam *param, char *value, int valueLen);
 static MacroLine *addMacroLine(MacroDefn *defn);
@@ -323,9 +325,12 @@ static ErrorCode BSSZ(void) {
     savedListControl = currentListControl;
     currentListControl = 0;
     while (val.intValue-- > 0) {
+        val.intValue = 0;
+        val.attributes = 0;
+        val.section = currentSection;
         emitFieldStart(currentSection);
-        emitFieldBits(currentSection, 0, 64, 0, FALSE);
-        emitFieldEnd(currentSection, val.attributes);
+        emitFieldBits(currentSection, &val, 64, FALSE);
+        emitFieldEnd(currentSection);
     }
     currentListControl = savedListControl;
     return Err_None;
@@ -429,8 +434,8 @@ static ErrorCode CON(void) {
             if (err != Err_None) (void)registerError(err);
         }
         emitFieldStart(currentSection);
-        emitFieldBits(currentSection, (val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
-        emitFieldEnd(currentSection, val.attributes);
+        emitFieldBits(currentSection, &val, 64, FALSE);
+        emitFieldEnd(currentSection);
         if (*s == ',') {
             listFlush(currentSection);
             listCodeLocation(currentSection);
@@ -472,8 +477,8 @@ static ErrorCode DATA(void) {
         default:
             err = evaluateExpression(expression, &val);
             emitFieldStart(currentSection);
-            emitFieldBits(currentSection, (val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), 64, val.attributes, FALSE);
-            emitFieldEnd(currentSection, val.attributes);
+            emitFieldBits(currentSection, &val, 64, FALSE);
+            emitFieldEnd(currentSection);
             break;
         }
         freeToken(expression);
@@ -567,21 +572,21 @@ static ErrorCode ENTRY(void) {
             symbol = findSymbol(token.details.name.ptr, token.details.name.len, qualifier);
             if (symbol == NULL) {
                 val.type = NumberType_Integer;
-                val.attributes = SYM_UNDEFINED|SYM_ENTRY;
+                val.attributes = SYM_UNDEFINED;
                 val.section = NULL;
                 val.intValue = 0;
                 symbol = addSymbol(token.details.name.ptr, token.details.name.len, qualifier, &val);
             }
-            else if ((symbol->value.attributes & (SYM_EXTERNAL|SYM_REDEFINABLE)) == 0) {
-                symbol->value.attributes |= SYM_ENTRY;
-            }
-            else {
+            else if ((symbol->value.attributes & (SYM_EXTERNAL|SYM_REDEFINABLE)) != 0) {
                 symbol = NULL;
                 err = registerError(Err_OperandField);
             }
             if (pass == 1 && symbol != NULL) {
-                symbol->next = currentModule->entryPoints;
-                currentModule->entryPoints = symbol;
+                symbol->value.attributes |= SYM_ENTRY;
+                addEntryPoint(currentModule, symbol);
+            }
+            else if (pass == 2 && symbol != NULL && (symbol->value.attributes & SYM_UNDEFINED) != 0) {
+                err = registerError(Err_Undefined);
             }
         }
         else if (token.type != TokenType_None) {
@@ -636,15 +641,7 @@ static ErrorCode EXT(void) {
                 symbol = addSymbol(token.details.name.ptr, token.details.name.len, qualifier, &val);
                 n += 1;
                 if (pass == 1 && symbol != NULL) {
-                    if (currentModule->lastExternal != NULL) {
-                        symbol->externalIndex = currentModule->lastExternal->externalIndex + 1;
-                        currentModule->lastExternal->next = symbol;
-                    }
-                    else {
-                        symbol->externalIndex = 0;
-                        currentModule->firstExternal = symbol;
-                    }
-                    currentModule->lastExternal = symbol;
+                    addExternal(currentModule, symbol);
                 }
             }
             else if ((symbol->value.attributes & SYM_EXTERNAL) == 0) {
@@ -738,20 +735,183 @@ static ErrorCode IDENT(void) {
     return err;
 }
 
+static bool hasAttrVAL(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isPlainValue(&val);
+}
+static bool hasAttrPA(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isParcelAddress(&val);
+}
+static bool hasAttrWA(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isWordAddress(&val);
+}
+static bool hasAttrABS(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isAbsolute(&val);
+}
+static bool hasAttrIMM(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isImmobile(&val);
+}
+static bool hasAttrREL(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isRelocatable(&val);
+}
+static bool hasAttrEXT(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isExternal(&val);
+}
+static bool hasAttrCODE(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isCodeSection(val.section);
+}
+static bool hasAttrDATA(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isDataSection(val.section);
+}
+static bool hasAttrMIXED(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && (isCodeSection(val.section) || isDataSection(val.section));
+}
+static bool hasAttrCOMMON(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isCommonSection(val.section);
+}
+static bool hasAttrTASKCOM(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && val.section != NULL && val.section->type == SectionType_TaskCom;
+}
+static bool hasAttrDYNAMIC(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && val.section != NULL && val.section->type == SectionType_Dynamic;
+}
+static bool hasAttrSTACK(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && val.section != NULL && val.section->type == SectionType_Stack;
+}
+static bool hasAttrCM(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && val.section != NULL && val.section->location == SectionLocation_CM;
+}
+static bool hasAttrEM(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && val.section != NULL && val.section->location == SectionLocation_EM;
+}
+static bool hasAttrLM(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && val.section != NULL && val.section->location == SectionLocation_LM;
+}
+static bool hasAttrDEF(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val);
+}
+static bool hasAttrSET(Token *expression, ErrorCode *err) {
+    Symbol *symbol;
+
+    symbol = findQualifiedSymbol(expression);
+    return symbol != NULL && (symbol->value.attributes & SYM_REDEFINABLE) != 0;
+}
+static bool hasAttrREG(Token *expression, ErrorCode *err) {
+    return expression->type == TokenType_Register;
+}
+static bool hasAttrMIC(Token *expression, ErrorCode *err) {
+    return isUnqualifiedName(expression)
+        && findName(currentModule->micros, expression->details.name.ptr, expression->details.name.len) != NULL;
+}
+
+typedef struct attrEvalDefn {
+    char *keyword;
+    int len;
+    bool (*evaluator)(Token *expression, ErrorCode *err);
+} AttrEvalDefn;
+
+static AttrEvalDefn attrEvalDefns[] = {
+    {"VAL",     3, hasAttrVAL},
+    {"PA",      2, hasAttrPA},
+    {"WA",      2, hasAttrWA},
+    {"ABS",     3, hasAttrABS},
+    {"IMM",     3, hasAttrIMM},
+    {"REL",     3, hasAttrREL},
+    {"EXT",     3, hasAttrEXT},
+    {"CODE",    4, hasAttrCODE},
+    {"DATA",    4, hasAttrDATA},
+    {"MIXED",   5, hasAttrMIXED},
+    {"COM",     3, hasAttrCOMMON},
+    {"COMMON",  6, hasAttrCOMMON},
+    {"TASKCOM", 7, hasAttrTASKCOM},
+    {"DYNAMIC", 7, hasAttrDYNAMIC},
+    {"STACK",   5, hasAttrSTACK},
+    {"CM",      2, hasAttrCM},
+    {"EM",      2, hasAttrEM},
+    {"LM",      2, hasAttrLM},
+    {"DEF",     3, hasAttrDEF},
+    {"SET",     3, hasAttrSET},
+    {"REG",     3, hasAttrREG},
+    {"MIC",     3, hasAttrMIC},
+    {NULL,      0, NULL}
+};
+
+
 static ErrorCode IFA(void) {
     bool cond;
     Value count;
+    AttrEvalDefn *defn;
     ErrorCode err;
     Token *exp;
     int len;
     char *op;
     Token opToken;
     char *s;
-    Symbol *symbol;
+    bool targetCond;
     Token token;
-    Value val;
 
-    s = getNextToken(operandField, &opToken);
+    if (*operandField == '#') {
+        targetCond = FALSE;
+        s = operandField + 1;
+    }
+    else {
+        targetCond = TRUE;
+        s = operandField;
+    }
+    s = getNextToken(s, &opToken);
     if (isUnqualifiedName(&opToken) == FALSE || *s != ',') return Err_OperandField;
     op = opToken.details.name.ptr;
     len = opToken.details.name.len;
@@ -777,61 +937,18 @@ static ErrorCode IFA(void) {
         return Err_OperandField;
     }
     err = Err_None;
-    if (len == 2) {
-        err = evaluateExpression(exp, &val);
-        if (strncasecmp(op, "PA", 2) == 0) {
-            cond = (val.attributes & SYM_PARCEL_ADDRESS) != 0;
-        }
-        else if (strncasecmp(op, "WA", 2) == 0) {
-            cond = (val.attributes & SYM_WORD_ADDRESS) != 0;
-        }
-        else {
-            err = Err_OperandField;
-        }
+    for (defn = attrEvalDefns; defn->keyword != NULL; defn++) {
+        if (defn->len == len && strncasecmp(defn->keyword, op, len) == 0) break;
     }
-    else if (len == 3) {
-        if (strncasecmp(op, "MIC", 3) == 0) {
-            cond = isUnqualifiedName(exp)
-                   && findName(currentModule->micros, exp->details.name.ptr, exp->details.name.len) != NULL;
-        }
-        else if (strncasecmp(op, "REG", 3) == 0) {
-            cond = exp->type == TokenType_Register;
-        }
-        else if (strncasecmp(op, "SET", 3) == 0) {
-            symbol = findQualifiedSymbol(exp);
-            cond = symbol != NULL && (symbol->value.attributes & SYM_REDEFINABLE) != 0;
-        }
-        else {
-            err = evaluateExpression(exp, &val);
-            if (strncasecmp(op, "ABS", 3) == 0) {
-                cond = (val.attributes & SYM_RELOCATABLE) == 0;
-            }
-            else if (strncasecmp(op, "COM", 3) == 0) {
-                cond = isCommonSection(val.section);
-            }
-            else if (strncasecmp(op, "DEF", 3) == 0) {
-                cond = (val.attributes & SYM_UNDEFINED) == 0;
-            }
-            else if (strncasecmp(op, "EXT", 3) == 0) {
-                cond = (val.attributes & SYM_EXTERNAL) != 0;
-            }
-            else if (strncasecmp(op, "REL", 3) == 0) {
-                cond = (val.attributes & SYM_RELOCATABLE) != 0;
-            }
-            else if (strncasecmp(op, "VAL", 3) == 0) {
-                cond = (val.attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
-            }
-            else {
-                err = Err_OperandField;
-            }
-        }
+    if (defn->keyword != NULL) {
+        cond = (*defn->evaluator)(exp, &err);
     }
     else {
         err = Err_OperandField;
     }
     freeToken(exp);
     if (err != Err_None && err != Err_Undefined) return err;
-    if (cond == FALSE) skipLines(locationFieldToken, count.intValue);
+    if (cond != targetCond) skipLines(locationFieldToken, count.intValue);
 
     return Err_None;
 }
@@ -1661,7 +1778,13 @@ static ErrorCode START(void) {
             else if (symbol->value.type == NumberType_Integer
                      && (symbol->value.attributes & (SYM_WORD_ADDRESS|SYM_PARCEL_ADDRESS)) != 0
                      && (symbol->value.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) == 0) {
-                if (currentModule->start == NULL) currentModule->start = symbol;
+                if (currentModule->start == NULL) {
+                    currentModule->start = symbol;
+                    addEntryPoint(currentModule, symbol);
+                 }
+                 else {
+                     err = Err_OperandField;
+                 }
             }
             else {
                 err = Err_OperandField;
@@ -1768,9 +1891,8 @@ static ErrorCode VWD(void) {
         }
         if (err != Err_None) break;
         s = getNextValue(s, &val, &err);
-        if (err == Err_None) {
-            emitFieldBits(currentSection, (val.type == NumberType_Integer) ? val.intValue : toCrayFloat(val.intValue), fieldWidth, val.attributes, FALSE);
-        }
+        if (err != Err_None) (void)registerError(err);
+        emitFieldBits(currentSection, &val, fieldWidth, FALSE);
         if (*s == ',') {
             s += 1;
             if (currentSection->wordBitPosCounter == 0) listFlush(currentSection);
@@ -1780,7 +1902,7 @@ static ErrorCode VWD(void) {
         }
         if (err != Err_None) break;
     }
-    emitFieldEnd(currentSection, val.attributes);
+    emitFieldEnd(currentSection);
     return err;
 }
 
@@ -4168,6 +4290,50 @@ static ErrorCode X_A0_1__Vj(void) {
 }
 
 /*
+**  addEntryPoint - add an entry point definition to a module's chain of them
+*/
+static void addEntryPoint(Module *module, Symbol *symbol) {
+    Symbol *currentEntryPoint;
+
+    if (module->entryPoints == NULL) {
+        module->entryPoints = symbol;
+        return;
+    }
+    currentEntryPoint = module->entryPoints;
+    while (TRUE) {
+        if (strcmp(currentEntryPoint->id, symbol->id) == 0) return;
+        if (currentEntryPoint->next == NULL) {
+            currentEntryPoint->next = symbol;
+            return;
+        }
+        currentEntryPoint = currentEntryPoint->next;
+    }
+}
+
+/*
+**  addExternal - add an external definition to a module's chain of them
+*/
+static void addExternal(Module *module, Symbol *symbol) {
+    Symbol *currentExternal;
+
+    if (module->externals == NULL) {
+        symbol->externalIndex = 0;
+        module->externals = symbol;
+        return;
+    }
+    currentExternal = module->externals;
+    while (TRUE) {
+        if (strcmp(currentExternal->id, symbol->id) == 0) return;
+        if (currentExternal->next == NULL) {
+            symbol->externalIndex = currentExternal->externalIndex + 1;
+            currentExternal->next = symbol;
+            return;
+        }
+        currentExternal = currentExternal->next;
+    }
+}
+
+/*
 **  addInstruction - add a named instruction definition to the instruction tree
 */
 static void addInstruction(char *id, u8 attributes, InstructionHandler handler) {
@@ -4402,9 +4568,11 @@ ErrorCode callMacro(MacroDefn *defn, Token *locationFieldToken) {
         if (*s != '\0') s += 1;
         pp = pp->next;
     }
-    if (*s == '\0' && pp != NULL && pp->type == MacroParamType_Positional) {
-        freeMacroCall(call);
-        return Err_OperandField;
+    if (*s == '\0' && pp != NULL) {
+        while (pp != NULL && pp->type == MacroParamType_Positional) {
+            addMacroCallParam(call, pp, "", 0);
+            pp = pp->next;
+        }
     }
     //
     //  Parse keyword parameters
@@ -4508,7 +4676,7 @@ static ErrorCode defineSymbol(u16 attributes) {
     if (symbol == NULL) {
         symbol = addSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, currentQualifier, &val);
     }
-    else if ((symbol->value.attributes & SYM_REDEFINABLE) != 0) {
+    else if ((symbol->value.attributes & (SYM_UNDEFINED|SYM_REDEFINABLE)) != 0) {
         symbol->value.attributes = val.attributes;
         symbol->value.section = val.section;
         symbol->value.intValue = val.intValue;

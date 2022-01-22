@@ -218,9 +218,16 @@ typedef struct externalTableEntry {
     bool isParcelRelocation;
 } ExternalTableEntry;
 
+typedef enum relocationEntryType {
+    RelocEntryType_Standard = 0,
+    RelocEntryType_Extended
+} RelocationEntryType;
+
 typedef struct relocationTableEntry {
+    RelocationEntryType type;
     u16 blockIndex;
     u32 offset;
+    u8 fieldLength;
     bool isParcelRelocation;
 } RelocationTableEntry;
 
@@ -450,8 +457,7 @@ typedef struct module {
     Literal *literals;
     Symbol *start;
     Symbol *entryPoints;
-    Symbol *firstExternal;
-    Symbol *lastExternal;
+    Symbol *externals;
     Section *firstSection;
     Section *lastSection;
     ObjectBlock *firstObjectBlock;

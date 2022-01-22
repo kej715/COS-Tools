@@ -235,6 +235,7 @@ static int runPass(int passNo) {
         exit(1);
     }
     while (isEof() == FALSE) {
+        listControlMask = LIST_ON;
         readNextLine();
         err = parseSourceLine();
         if (err == Info_ModuleEnd) {

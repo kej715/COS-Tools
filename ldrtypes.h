@@ -56,7 +56,7 @@ typedef struct symbol {
     struct symbol *right;
     char *id;
     Block *block;
-    bool isParcelRelocation;
+    bool isParcelAddress;
     u64 value;
 } Symbol;
 

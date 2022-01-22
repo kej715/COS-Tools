@@ -100,17 +100,19 @@ void listCode10_22(u32 bits, u16 attributes) {
     if ((attributes & SYM_PARCEL_ADDRESS) != 0) {
         listCode(jkm >> 2, 22, COL_CODE + 12);
         listingLine[COL_CODE + 13] = parcelIndicator[jkm & 0x03];
-        if ((attributes & SYM_RELOCATABLE) != 0)
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
             listingLine[COL_CODE + 14] = '+';
     }
     else if ((attributes & SYM_WORD_ADDRESS) != 0) {
         listCode(jkm, 22, COL_CODE + 12);
         listingLine[COL_CODE + 13] = 'a';
-        if ((attributes & SYM_RELOCATABLE) != 0)
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
             listingLine[COL_CODE + 14] = '+';
     }
     else {
         listCode(bits & 0x3fffff, 22, COL_CODE + 12);
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
+            listingLine[COL_CODE + 13] = '+';
     }
 }
 
@@ -123,17 +125,19 @@ void listCode7_24(u32 bits, u16 attributes) {
     if ((attributes & SYM_PARCEL_ADDRESS) != 0) {
         listCode(jkm >> 2, 22, COL_CODE + 11);
         listingLine[COL_CODE + 12] = parcelIndicator[bits & 0x03];
-        if ((attributes & SYM_RELOCATABLE) != 0)
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
             listingLine[COL_CODE + 13] = '+';
     }
     else if ((attributes & SYM_WORD_ADDRESS) != 0) {
         listCode(jkm, 24, COL_CODE + 11);
         listingLine[COL_CODE + 12] = parcelIndicator[bits & 0x03];
-        if ((attributes & SYM_RELOCATABLE) != 0)
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
             listingLine[COL_CODE + 13] = '+';
     }
     else {
         listCode(jkm, 24, COL_CODE + 11);
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
+            listingLine[COL_CODE + 12] = '+';
     }
 }
 
@@ -188,6 +192,8 @@ void listErrorSummary(void) {
 
 void listField(u64 bits, int len, u16 attributes, int colOffset) {
     listCode(bits, len, COL_CODE + colOffset);
+    if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
+        listingLine[COL_CODE + colOffset + 1] = '+';
 }
 
 void listFlush(Section *section) {
@@ -319,7 +325,7 @@ static void listSymbols(Symbol *symbol) {
 
     if (symbol != NULL) {
         listSymbols(symbol->left);
-        if ((symbol->value.attributes & SYM_COUNTER) == 0) {
+        if ((symbol->value.attributes & (SYM_COUNTER|SYM_UNDEFINED)) == 0) {
             sprintf(listingLine, " %-8s ", symbol->id);
             col = 10;
             if (symbol->value.section != NULL) {
@@ -391,17 +397,19 @@ void listWord(u64 bits, u16 attributes) {
     if ((attributes & SYM_PARCEL_ADDRESS) != 0) {
         listCode(bits >> 2, 64, COL_CODE + 21);
         listingLine[COL_CODE + 22] = parcelIndicator[bits & 0x03];
-        if ((attributes & SYM_RELOCATABLE) != 0)
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
             listingLine[COL_CODE + 23] = '+';
     }
     else if ((attributes & SYM_WORD_ADDRESS) != 0) {
         listCode(bits, 64, COL_CODE + 21);
         listingLine[COL_CODE + 22] = parcelIndicator[bits & 0x03];
-        if ((attributes & SYM_RELOCATABLE) != 0)
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
             listingLine[COL_CODE + 23] = '+';
     }
     else {
         listCode(bits, 64, COL_CODE + 21);
+        if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
+            listingLine[COL_CODE + 22] = '+';
     }
 
 }

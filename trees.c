@@ -574,6 +574,10 @@ bool isDataSection(Section *section) {
             || (section->type == SectionType_Common && *section->id != '\0'));
 }
 
+bool isDefined(Value *val) {
+    return (val->attributes & SYM_UNDEFINED) == 0;
+}
+
 bool isExternal(Value *val) {
     return (val->attributes & SYM_EXTERNAL) != 0;
 }
