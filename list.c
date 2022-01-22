@@ -68,7 +68,7 @@ void listClearSource(void) {
     char *cp;
     char *limit;
 
-    if (isListSuppressed()) return;
+    if (pass == 1 || listingFile == NULL) return;
     cp = &listingLine[COL_SOURCE];
     limit = &listingLine[LISTING_LINE_LENGTH];
     while (cp < limit) *cp++ = ' ';
@@ -191,6 +191,7 @@ void listErrorSummary(void) {
 }
 
 void listField(u64 bits, int len, u16 attributes, int colOffset) {
+    if (isListSuppressed()) return;
     listCode(bits, len, COL_CODE + colOffset);
     if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
         listingLine[COL_CODE + colOffset + 1] = '+';
@@ -313,7 +314,7 @@ void listSource(void) {
     char *limit;
     char *sp;
 
-    if (isListSuppressed()) return;
+    if (pass == 1 || listingFile == NULL) return;
     sp = sourceLine;
     cp = &listingLine[COL_SOURCE];
     limit = &listingLine[LISTING_LINE_LENGTH];

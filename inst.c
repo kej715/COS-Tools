@@ -1771,7 +1771,7 @@ static ErrorCode START(void) {
     s = getNextToken(operandField, &token);
     if (isUnqualifiedName(&token) && *s == '\0') {
         if (pass == 2) {
-            symbol = findQualifiedSymbol(&token);
+            symbol = findSymbol(token.details.name.ptr, token.details.name.len, findQualifier(""));
             if (symbol == NULL) {
                 err = Err_Undefined;
             }

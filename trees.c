@@ -445,6 +445,7 @@ Name *findName(Name *root, char *id, int len) {
 
 Symbol *findQualifiedSymbol(Token *token) {
     Qualifier *qualifier;
+    Module *savedModule;
     Symbol *symbol;
 
     symbol = NULL;
@@ -459,6 +460,12 @@ Symbol *findQualifiedSymbol(Token *token) {
                 qualifier = findQualifier("");
                 if (qualifier != NULL) symbol = findSymbol(token->details.name.ptr, token->details.name.len, qualifier);
             }
+        }
+        if (symbol == NULL && currentModule != defaultModule) {
+            savedModule = currentModule;
+            currentModule = defaultModule;
+            symbol = findQualifiedSymbol(token);
+            currentModule = savedModule;
         }
     }
     return symbol;
