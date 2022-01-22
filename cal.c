@@ -30,8 +30,8 @@
 #include "caltypes.h"
 #include "cosdataset.h"
 
-static void openNextSource(int argi, char *argv[]);
-static int  parseOptions(int argc, char *argv[]);
+static int  openNextSource(int argi, int argc, char *argv[], bool *isExtText);
+static void parseOptions(int argc, char *argv[]);
 static void resetDefaultModule(void);
 static void resetQualifierStack(void);
 static int  runPass(int passNo);
@@ -45,18 +45,28 @@ static char *oFile = NULL;
 
 int main(int argc, char *argv[]) {
     int errCount;
+    bool isExtText;
     Module *module;
+    FILE *savedListingFile;
+    Dataset *savedObjectFile;
     int srcIndex;
 
-    srcIndex = parseOptions(argc, argv);
+    parseOptions(argc, argv);
     instInit();
     defaultModule = addModule("", 0);
     errCount = 0;
+    srcIndex = 1;
     while (srcIndex < argc) {
-        openNextSource(srcIndex, argv);
+        srcIndex = openNextSource(srcIndex, argc, argv, &isExtText);
         timeInit();
         listInit();
         firstModule = lastModule = NULL;
+        if (isExtText) {
+            savedListingFile = listingFile;
+            listingFile = NULL;
+            savedObjectFile = objectFile;
+            objectFile = NULL;
+        }
         runPass(1);
         for (module = firstModule; module != NULL; module = module->next) {
             emitLiterals(module);
@@ -72,8 +82,8 @@ int main(int argc, char *argv[]) {
         listSymbolTable();
         writeObjectCode();
         fclose(sourceFile);
-        if (lFile == NULL) fclose(listingFile);
-        if (oFile == NULL) {
+        if (lFile == NULL && listingFile != NULL) fclose(listingFile);
+        if (oFile == NULL && objectFile != NULL) {
             if (cosDsWriteEOF(objectFile) == -1
                 || cosDsWriteEOD(objectFile) == -1
                 || cosDsClose(objectFile) == -1) {
@@ -81,7 +91,10 @@ int main(int argc, char *argv[]) {
                 exit(1);
             }
         }
-        srcIndex += 1;
+        if (isExtText) {
+            listingFile = savedListingFile;
+            objectFile = savedObjectFile;
+        }
     }
     if (lFile != NULL) fclose(listingFile);
     if (oFile != NULL) {
@@ -98,13 +111,25 @@ int main(int argc, char *argv[]) {
     }
 }
 
-static void openNextSource(int argi, char *argv[]) {
+static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     char *cp;
     char *dp;
     char filePath[MAX_FILE_PATH_LENGTH+5];
     char *fp;
     char *limit;
 
+    *isExtText = FALSE;
+    while (argi < argc) {
+        if (*argv[argi] != '-') break;
+        if (strcmp(argv[argi], "-t") == 0) {
+            argi += 1;
+            if (argi >= argc) break;
+            if (*argv[argi] != '-') {
+                *isExtText = TRUE;
+                break;
+            }
+        }
+    }
     fp = filePath;
     limit = fp + MAX_FILE_PATH_LENGTH;
     dp = NULL;
@@ -120,6 +145,7 @@ static void openNextSource(int argi, char *argv[]) {
          *fp++ = *cp;
     }
     *fp = '\0';
+    argi += 1;
     if (dp == NULL) {
         dp = fp;
         strcpy(dp, ".cal");
@@ -129,6 +155,7 @@ static void openNextSource(int argi, char *argv[]) {
         perror(filePath);
         exit(1);
     }
+    if (*isExtText) return argi;
     if (lFile == NULL) {
         strcpy(dp, ".lst");
         listingFile = fopen(filePath, "w");
@@ -145,13 +172,14 @@ static void openNextSource(int argi, char *argv[]) {
             exit(1);
         }
     }
+    return argi;
 }
 
-static int parseOptions(int argc, char *argv[]) {
+static void parseOptions(int argc, char *argv[]) {
     int i;
-    int firstSrcIndex;
+    int sourceCount;
 
-    firstSrcIndex = argc;
+    sourceCount = 0;
     i = 1;
     while (i < argc) {
         if (strcmp(argv[i], "-l") == 0) {
@@ -183,25 +211,21 @@ static int parseOptions(int argc, char *argv[]) {
                 exit(1);
             }
         }
+        else if (strcmp(argv[i], "-t") == 0) {
+            i += 1;
+            if (i >= argc || *argv[i] == '-') {
+                usage();
+            }
+        }
         else if (*argv[i] == '-') {
             usage();
         }
         else {
-            firstSrcIndex = i++;
-            break;
+            sourceCount += 1;
         }
         i += 1;
     }
-    while (i < argc) {
-        if (*argv[i] == '-') {
-            usage();
-        }
-        i += 1;
-    }
-    if (firstSrcIndex >= argc) {
-        usage();
-    }
-    return firstSrcIndex;
+    if (sourceCount < 1) usage();
 }
 
 void resetBase(void) {
@@ -259,10 +283,11 @@ static void timeInit(void) {
 }
 
 static void usage(void) {
-    fputs("Usage: cal [-l lfile][-o ofile] sfile\n", stdout);
+    fputs("Usage: cal [-l lfile][-o ofile] [-t tfile]... sfile ...\n", stdout);
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - object file\n", stderr);
-    fputs("  sfile - source file\n", stderr);
+    fputs("  -t tfile - external text file\n", stderr);
+    fputs("  sfile - source file(s)\n", stderr);
     exit(1);
 }
 
