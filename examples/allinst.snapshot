@@ -1,4 +1,4 @@
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    1
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    1
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -53,7 +53,7 @@
                 7a                      0   TAG2     BSS       0                                                                    
                 7a 002100                            EFI                                                                            
                 7b 002200                            DFI                                                                            
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    2
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    2
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -100,7 +100,7 @@
                23c 0205 00051531                     A5        A'SY'R                                                               
                24a 022600                            A6        #MINUS1                                                              
                24b 031300                            A3        -1                                                                   
-               24c 0204 17777777                     A4        X-1                                                                  
+               24c 0204 17777777+                    A4        X-1                                                                  
                25a 023420                            A4        S2                                                                   
                25b 023201                            A2        VL                                                                   
                25c 024517                            A5        B17                                                                  
@@ -108,7 +108,7 @@
                25d 024517                            A5        B.SVNTN                                                              
                26a 025634                            B34       A6                                                                   
                                        34   THRTY4   =         O'34                                                                 
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    3
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    3
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -158,12 +158,12 @@
                40c 0414 01777776                     S4        -O'1777777                                                           
                                         3   VAL2     =         3                                                                    
                41a 0414 00000003                     S4        #VAL2                                                                
-               41c 0401 17777777                     S1        X-1                                                                  
+               41c 0401 17777777+                    S1        X-1                                                                  
                42a 042200                            S2        -1                                                                   
                42b 042273                            S2        <5                                                                   
                42c 042273                            S2        #>O'73                                                               
                42d 042366                            S3        <D'10                                                                
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    4
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    4
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -218,7 +218,7 @@
                56d 060405                            S4        S0+S5                                                                
                57a 061123                            S1        S2-S3                                                                
                57b 061506                            S5        -S6                                                                  
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    5
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    5
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -273,7 +273,7 @@
                71d 073200                            S2        VM                                                                   
                72a 073001                            S0        SR0                                                                  
                72b 073301                            S3        SR0                                                                  
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    6
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    6
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -328,7 +328,7 @@
               114b 1346 00000000                     ,A4       S6                                                                   
               114d 1324 17777777                     -1,A2     S4                                                                   
               115b 1305 00003000                     ADDR,     S5                                                                   
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    7
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    7
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -383,7 +383,7 @@
               131a 174320                            V3        /HV2                                                                 
               131b 160413                            V4        S1*FV3                                                               
               131c 167532                            V5        V3*IV2                                                               
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    8
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    8
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -407,7 +407,7 @@
                                                                                                                                     
                                                      END                                                                            
                                                                                                                                     
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/20/22 18:30:43  PAGE    9
+1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    9
   SYMBOL TABLE                                                            SECTION:              QUALIFIER: 
 
 
