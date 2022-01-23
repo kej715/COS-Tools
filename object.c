@@ -553,7 +553,7 @@ void reserveStorage(Section *section, u32 firstAddress, u32 count) {
     ObjectBlock *block;
     u32 lastAddress;
 
-    if (pass == 1) return;
+    if (pass == 1 || count < 1) return;
     lastAddress = firstAddress + count - 1;
     addr = lastAddress * 2;
     block = section->objectBlock;
