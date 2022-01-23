@@ -142,6 +142,7 @@ bool isParcelAddress(Value *value);
 bool isPlainValue(Value *value);
 bool isRelative(Value *val);
 bool isRelocatable(Value *value);
+bool isSameSection(Section *s1, Section *s2);
 bool isUnqualifiedName(Token *token);
 bool isWordAddress(Value *value);
 void listClearSource(void);

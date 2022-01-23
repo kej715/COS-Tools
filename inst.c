@@ -294,7 +294,12 @@ static ErrorCode BSS(void) {
     }
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
-    if (*s != '\0' || isInteger(&val) == FALSE || isParcelAddress(&val)) return Err_OperandField;
+    if (*s != '\0'
+        || isInteger(&val) == FALSE
+        || isIntegerRange(&val, 0, 0x3fffff) == FALSE
+        || isAbsolute(&val) == FALSE
+        || isParcelAddress(&val))
+        return Err_OperandField;
     listValue(&val);
     firstAddress = currentSection->originCounter;
     advanceBitPosition(currentSection, val.intValue * 64);
@@ -320,7 +325,12 @@ static ErrorCode BSSZ(void) {
     }
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
-    if (*s != '\0' || isParcelAddress(&val) || isInteger(&val) == FALSE) return Err_OperandField;
+    if (*s != '\0'
+        || isInteger(&val) == FALSE
+        || isIntegerRange(&val, 0, 0x3fffff) == FALSE
+        || isAbsolute(&val) == FALSE
+        || isParcelAddress(&val))
+        return Err_OperandField;
     listValue(&val);
     savedListControl = currentListControl;
     currentListControl = 0;
@@ -648,6 +658,7 @@ static ErrorCode EXT(void) {
                 err = registerError(Err_DoubleDefinition);
             }
             else {
+                if (pass == 2) symbol->value.attributes |= SYM_DEFINED_P2;
                 n += 1;
             }
         }
@@ -841,7 +852,7 @@ static bool hasAttrDEF(Token *expression, ErrorCode *err) {
     Value val;
 
     *err = evaluateExpression(expression, &val);
-    return isDefined(&val);
+    return (pass == 1) ? isDefined(&val) : (val.attributes & SYM_DEFINED_P2) != 0;
 }
 static bool hasAttrSET(Token *expression, ErrorCode *err) {
     Symbol *symbol;
@@ -1450,6 +1461,7 @@ static ErrorCode MICSIZE(void) {
     else if (symbol->value.attributes != val.attributes || symbol->value.intValue != val.intValue) {
         err = Err_DoubleDefinition;
     }
+    if (pass == 2) symbol->value.attributes |= SYM_DEFINED_P2;
 
     if (err == Err_None || err >= Warn_Programmer) listValue(&val);
 
@@ -1677,10 +1689,13 @@ static ErrorCode SECTION(void) {
                 return Err_DoubleDefinition;
             }
         }
-        else if (symbol->value.intValue != 0
-                 || symbol->value.section != section
-                 || symbol->value.attributes != (SYM_WORD_ADDRESS|SYM_RELOCATABLE)) {
-            return Err_DoubleDefinition;
+        else {
+            symbol->value.attributes |= SYM_DEFINED_P2;
+            if (symbol->value.intValue != 0
+                || symbol->value.section != section
+                || symbol->value.attributes != (SYM_WORD_ADDRESS|SYM_RELOCATABLE)) {
+                return Err_DoubleDefinition;
+            }
         }
     }
     if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
@@ -4684,6 +4699,7 @@ static ErrorCode defineSymbol(u16 attributes) {
     else if (symbol->value.attributes != val.attributes || symbol->value.intValue != val.intValue) {
         err = Err_DoubleDefinition;
     }
+    if (pass == 2) symbol->value.attributes |= SYM_DEFINED_P2;
 
     if (err == Err_None || err >= Warn_Programmer) listValue(&val);
 

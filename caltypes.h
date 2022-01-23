@@ -153,6 +153,7 @@ typedef struct name {
 #define SYM_ENTRY           0x080
 #define SYM_COUNTER         0x100
 #define SYM_UNDEFINED       0x200
+#define SYM_DEFINED_P2      0x400
 
 /*
  *  Data types of numeric values

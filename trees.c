@@ -91,10 +91,11 @@ ErrorCode addLocationSymbol(Section *section, char *id, int len, u16 attributes)
                 err = Err_DoubleDefinition;
             }
         }
-        else if (symbol->value.intValue != val.intValue
-                 || symbol->value.section != val.section
-                 || ((symbol->value.attributes ^ val.attributes) & ~(SYM_UNDEFINED|SYM_ENTRY)) != 0) {
+        else if ((symbol->value.attributes & SYM_DEFINED_P2) != 0) {
             err = Err_DoubleDefinition;
+        }
+        else {
+            symbol->value.attributes |= SYM_DEFINED_P2;
         }
     }
     else {
@@ -611,6 +612,10 @@ bool isRelative(Value *val) {
 
 bool isRelocatable(Value *val) {
     return (val->attributes & SYM_RELOCATABLE) != 0;
+}
+
+bool isSameSection(Section *s1, Section *s2) {
+    return (strcmp(s1->id, s2->id) == 0 && s1->type == s2->type && s1->location == s2->location);
 }
 
 bool isWordAddress(Value *value) {
