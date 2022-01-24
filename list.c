@@ -123,21 +123,21 @@ void listCode7_24(u32 bits, u16 attributes) {
     jkm = bits & 0xffffff;
     listCode(bits >> 25, 7, COL_CODE + 2);
     if ((attributes & SYM_PARCEL_ADDRESS) != 0) {
-        listCode(jkm >> 2, 22, COL_CODE + 11);
-        listingLine[COL_CODE + 12] = parcelIndicator[bits & 0x03];
+        listCode(jkm >> 2, 22, COL_CODE + 12);
+        listingLine[COL_CODE + 13] = parcelIndicator[bits & 0x03];
         if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
-            listingLine[COL_CODE + 13] = '+';
+            listingLine[COL_CODE + 14] = '+';
     }
     else if ((attributes & SYM_WORD_ADDRESS) != 0) {
-        listCode(jkm, 24, COL_CODE + 11);
-        listingLine[COL_CODE + 12] = parcelIndicator[bits & 0x03];
+        listCode(jkm, 24, COL_CODE + 12);
+        listingLine[COL_CODE + 13] = parcelIndicator[bits & 0x03];
         if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
-            listingLine[COL_CODE + 13] = '+';
+            listingLine[COL_CODE + 14] = '+';
     }
     else {
-        listCode(jkm, 24, COL_CODE + 11);
+        listCode(jkm, 24, COL_CODE + 12);
         if ((attributes & (SYM_RELOCATABLE|SYM_EXTERNAL)) != 0)
-            listingLine[COL_CODE + 12] = '+';
+            listingLine[COL_CODE + 13] = '+';
     }
 }
 
