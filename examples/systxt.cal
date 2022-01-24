@@ -84,7 +84,7 @@ JCHLM    =         O'101          ; High limit of user code (bits 16-39)
 JCFL     =         O'101          ; Current field length (bits 40-63)
 JCNPF    =         O'102          ; Number of buffers and datasets (bits 0-15)
 JCBFB    =         O'102          ; Base address of I/O buffers (bits 16-39)
-JCDSP    =         O'102          ; Base address of DSP area (40-63)
+JCDSP    =         O'102          ; Base address of DSP area (bits 40-63)
 JCNLE    =         O'103          ; Number of entries in LFT (bits 0-15)
 JCMFL    =         O'103          ; Maximum field length allowed (bits 16-39)
 JCLFT    =         O'103          ; Base of LFT (bits 40-63)
@@ -167,6 +167,27 @@ JCSTF    =         O'165          ; Job step failure flag
 JCBDAT   =         O'166          ; Date of absolute load module generation
 JCBTIM   =         O'167          ; Time of absolute load module generation
 JCDIG    =         O'170          ; Reserved for diagnostics
+
+**
+*  Open Dataset Name (ODN) Table Definitions
+*
+ODDN     =         O'000          ; Dataset name
+ODV      =         O'001          ; Close volume (bit 1)
+ODM      =         O'001          ; Open for 'mod' (append) (bit 2)
+ODS      =         O'001          ; Close or open saved position (bit 3)
+ODH      =         O'001          ; Hold resources (bit 4)
+ODUDS    =         O'001          ; Open as unblocked (bit 5)
+ODLDT    =         O'001          ; LDT address (bits 8-31)
+ODOST    =         O'001          ; Type of open requested (bits 36-39)
+ODDSP    =         O'001          ; DSP pointer
+                                  ;   Negative: negative offset
+                                  ;   Positive: absolute address
+OSTDEF   =         D'00           ; COS 1.15 and earlier
+OSTSA    =         D'00           ; Open system-managed, system-resident
+OSTUA    =         D'01           ; Open user-managed, user-resident
+OSTMSY   =         D'02           ; Open system-managed, user-resident
+OSTS2U   =         D'03           ; Switch system-managed to user-managed
+OSTS2S   =         D'04           ; Switch user-managed to system-managed
 
 **
 *  CLOSE - Close Dataset
