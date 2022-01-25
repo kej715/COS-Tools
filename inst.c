@@ -4117,7 +4117,7 @@ static ErrorCode X_Ah__Bjk_Ai(void) {
         emit_gh_i_jk(currentSection, 035, i, jk);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4140,7 +4140,7 @@ static ErrorCode X_Ah__Tjk_Ai(void) {
         emit_gh_i_jk(currentSection, 037, i, jk);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4162,7 +4162,7 @@ static ErrorCode X_Ah__Ai(void) {
         emit_g_h_i_jkm(currentSection, 011, h, i, &val);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4180,12 +4180,12 @@ static ErrorCode X_X__Ai(void) {
     err = registerError(evaluateExpression(instArgv[0], &val1));
     err = registerError(evaluateExpression(instArgv[1], &val2));
     err = registerError(getRegisterNumber(instArgv[2], &i));
-    if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
+    if (isZero(&val2) == FALSE) err = registerError(Err_ResultField);
     if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
         emit_gh_i_jkm(currentSection, 0110, i, &val1);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4207,7 +4207,7 @@ static ErrorCode X_Ah__Si(void) {
         emit_g_h_i_jkm(currentSection, 013, h, i, &val);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4225,12 +4225,12 @@ static ErrorCode X_X__Si(void) {
     err = registerError(evaluateExpression(instArgv[0], &val1));
     err = registerError(evaluateExpression(instArgv[1], &val2));
     err = registerError(getRegisterNumber(instArgv[2], &i));
-    if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
+    if (isZero(&val2) == FALSE) err = registerError(Err_ResultField);
     if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
         emit_gh_i_jkm(currentSection, 0130, i, &val1);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4253,7 +4253,7 @@ static ErrorCode X_A0_Ak__Vj(void) {
         emit_gh_i_j_k(currentSection, 0177, 0, j, k);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4276,7 +4276,7 @@ static ErrorCode X_A0_Vk__Vj(void) {
         emit_gh_i_j_k(currentSection, 0177, 1, j, k);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4299,7 +4299,7 @@ static ErrorCode X_A0_1__Vj(void) {
         emit_gh_i_j_k(currentSection, 0177, 0, j, 0);
     }
     else {
-        err = Err_OperandField;
+        err = Err_ResultField;
     }
     return err;
 }
@@ -4689,7 +4689,8 @@ static ErrorCode defineSymbol(u16 attributes) {
     symbol = findSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, currentQualifier);
     val.attributes |= attributes;
     if (symbol == NULL) {
-        symbol = addSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, currentQualifier, &val);
+        symbol = addSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len,
+                           currentQualifier, &val);
     }
     else if ((symbol->value.attributes & (SYM_UNDEFINED|SYM_REDEFINABLE)) != 0) {
         symbol->value.attributes = val.attributes;
@@ -5402,6 +5403,14 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
     while (TRUE) {
         s = getNextToken(start, &token);
         switch (token.type) {
+        case TokenType_Register:
+            while (TRUE) {
+                if (node->type == NodeType_Register && node->regster == token.details.regster.type) break;
+                node = node->sibling;
+                if (node == NULL) return NULL;
+            }
+            instArgv[instArgc++] = copyToken(&token);
+            break;
         case TokenType_None:
             while (TRUE) {
                 if (node->type == NodeType_Expression) break;
@@ -5416,26 +5425,21 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
         case TokenType_Name:
         case TokenType_Number:
         case TokenType_String:
-            while (TRUE) {
-                if (node->type == NodeType_Expression) break;
-                node = node->sibling;
-                if (node == NULL) return NULL;
-            }
-            s = parseExpression(start, &expression);
-            instArgv[instArgc++] = expression;
-            break;
-        case TokenType_Register:
-            while (TRUE) {
-                if (node->type == NodeType_Register && node->regster == token.details.regster.type) break;
-                node = node->sibling;
-                if (node == NULL) return NULL;
-            }
-            instArgv[instArgc++] = copyToken(&token);
-            break;
         case TokenType_Operator:
-            if (start == fields[i - 1] || *(start - 1) == ',') {
+            if (token.type != TokenType_Operator || token.details.operator.type == Op_SubExpr) {
+                while (TRUE) {
+                    if (node->type == NodeType_Expression) break;
+                    node = node->sibling;
+                    if (node == NULL) return NULL;
+                }
+                s = parseExpression(start, &expression);
+                instArgv[instArgc++] = expression;
+                break;
             }
-            else {
+            //
+            // The token is a "true" operator, i.e., not an operand and not '('
+            //
+            if (start != fields[i - 1] && *(start - 1) != ',') {
                 while (node != NULL) {
                     if (node->type == NodeType_Operator && node->operator == token.details.operator.type) break;
                     node = node->sibling;

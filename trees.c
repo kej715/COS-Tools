@@ -184,8 +184,12 @@ Name *addName(Name **root, char *id, int len) {
             new = NULL;
             break;
         }
-        else {
+        else if (current->left != NULL) {
             current = current->left;
+        }
+        else {
+            current->left = new;
+            break;
         }
     }
     return new;
@@ -227,8 +231,12 @@ Qualifier *addQualifier(char *id, int len) {
             new = NULL;
             break;
         }
-        else {
+        else if (current->left != NULL) {
             current = current->left;
+        }
+        else {
+            current->left = new;
+            break;
         }
     }
     return new;
@@ -264,7 +272,6 @@ Symbol *addSymbol(char *id, int len, Qualifier *qualifier, Value *value) {
         qualifier->symbols = new;
         return new;
     }
-
     while (current != NULL) {
         valence = strncmp(current->id, id, len);
         if (valence > 0) {
@@ -290,8 +297,12 @@ Symbol *addSymbol(char *id, int len, Qualifier *qualifier, Value *value) {
             new = NULL;
             break;
         }
-        else {
+        else if (current->left != NULL) {
             current = current->left;
+        }
+        else {
+            current->left = new;
+            break;
         }
     }
     return new;
@@ -447,6 +458,7 @@ Name *findName(Name *root, char *id, int len) {
 Symbol *findQualifiedSymbol(Token *token) {
     Qualifier *qualifier;
     Module *savedModule;
+    Qualifier *savedQualifier;
     Symbol *symbol;
 
     symbol = NULL;
@@ -464,9 +476,12 @@ Symbol *findQualifiedSymbol(Token *token) {
         }
         if (symbol == NULL && currentModule != defaultModule) {
             savedModule = currentModule;
+            savedQualifier = currentQualifier;
             currentModule = defaultModule;
+            currentQualifier = findQualifier("");
             symbol = findQualifiedSymbol(token);
             currentModule = savedModule;
+            currentQualifier = savedQualifier;
         }
     }
     return symbol;
