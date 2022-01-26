@@ -146,11 +146,37 @@ Dataset *cosDsOpen(char *pathname) {
  *  cosDsRead - read a sequence of bytes from a dataset
  */
 int cosDsRead(Dataset *ds, u8 *buffer, int len) {
+    int cursor;
+    u64 cw;
+    int cwn;
+    u64 fwi;
     int n;
 
     if (ds == NULL || ds->isWritable) return -1;
+    if (ds->isAtCW) return 0;
     n = 0;
-    while (n < len && ds->bytesRead < ds->nextCtrlWordIndex) {
+    while (n < len) {
+        if (ds->bytesRead == ds->nextCtrlWordIndex) {
+            while (ds->limit - ds->cursor < 8) {
+                cursor = 0;
+                while (ds->cursor < ds->limit)
+                    ds->buffer[cursor++] = ds->buffer[ds->cursor++];
+                ds->limit = cursor;
+                ds->cursor = 0;
+                cwn = read(ds->fd, &ds->buffer[ds->limit], COS_BLOCK_SIZE - ds->limit);
+                if (cwn < 1) return -1;
+                ds->limit += cwn;
+            }
+            cw = getWord(ds);
+            ds->cursor += 8;
+            ds->bytesRead += 8;
+            fwi = cw & COS_BCW_FWI_MASK;
+            ds->nextCtrlWordIndex = ds->bytesRead + (fwi * 8);
+            if (cosDsIsBCW(cw)) continue;
+            ds->isAtCW = 1;
+            ds->controlWord = cw;
+            return n;
+        }
         if (ds->cursor >= ds->limit) {
             ds->cursor = 0;
             ds->limit = read(ds->fd, ds->buffer, COS_BLOCK_SIZE);
@@ -169,28 +195,9 @@ int cosDsRead(Dataset *ds, u8 *buffer, int len) {
  *  cosDsReadCW - read a control word from a dataset
  */
 u64 cosDsReadCW(Dataset *ds) {
-    int cursor;
-    u64 cw;
-    u64 fwi;
-    int n;
-
-    if (ds == NULL || ds->isWritable || ds->bytesRead != ds->nextCtrlWordIndex) return 0;
-    while (ds->limit - ds->cursor < 8) {
-        cursor = 0;
-        while (ds->cursor < ds->limit)
-            ds->buffer[cursor++] = ds->buffer[ds->cursor++];
-        ds->limit = cursor;
-        ds->cursor = 0;
-        n = read(ds->fd, &ds->buffer[ds->limit], COS_BLOCK_SIZE - ds->limit);
-        if (n < 1) return 0;
-        ds->limit += n;
-    }
-    cw = getWord(ds);
-    ds->cursor += 8;
-    ds->bytesRead += 8;
-    fwi = cw & COS_BCW_FWI_MASK;
-    ds->nextCtrlWordIndex = ds->bytesRead + (fwi * 8);
-    return cw;
+    if (ds == NULL || ds->isWritable || ds->isAtCW == 0) return 0;
+    ds->isAtCW = 0;
+    return ds->controlWord;
 }
 
 /*

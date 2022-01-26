@@ -69,10 +69,12 @@
 #define COS_BLOCK_SIZE 4096
 typedef struct dataset {
     int fd;
+    bool isAtCW;
     bool isWritable;
     int cursor;
     int limit;
     int nextCtrlWordIndex;
+    u64 controlWord;
     int bytesRead;
     int currentBlock;
     int lastFileBlock;
