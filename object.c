@@ -86,7 +86,7 @@ static void addExtRelocationEntry(Section *section, Value *val, bool isParcelRel
     u16 targetBlockIndex;
 
     if (pass == 1) return;
-    baseBlock = val->section->objectBlock;
+    baseBlock = section->objectBlock;
     if (baseBlock->relocationTableIndex >= baseBlock->relocationTableSize) {
         baseBlock->relocationTable = (RelocationTableEntry *)reallocate(baseBlock->relocationTable,
             baseBlock->relocationTableSize * sizeof(RelocationTableEntry),
@@ -95,9 +95,9 @@ static void addExtRelocationEntry(Section *section, Value *val, bool isParcelRel
     }
     entry = &baseBlock->relocationTable[baseBlock->relocationTableIndex++];
     entry->type = RelocEntryType_Extended;
-    entry->blockIndex = section->objectBlock->index;
+    entry->blockIndex = val->section->objectBlock->index;
     entry->offset = bitAddress;
-    entry->fieldLength = fieldLength;
+    entry->fieldLength = fieldLength & 0x3f;
     entry->isParcelRelocation = isParcelRelocation;
 }
 
@@ -288,10 +288,12 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
     else if (isRelocatable(val)) {
         if ((bitAddress & 0x07) == 0x07
             && ((isWordAddress(val) && len >= 22 && len <= 24)
-                || (isParcelAddress(val) && len == 24)))
+                || (isParcelAddress(val) && len == 24))) {
             addStdRelocationEntry(section, val, isParcelAddress(val));
-        else
+        }
+        else {
             addExtRelocationEntry(section, val, isParcelAddress(val), bitAddress, len);
+        }
     }
     fieldAttributes |= val->attributes;
     bits = (val->type == NumberType_Integer) ? val->intValue : toCrayFloat(val->floatValue);

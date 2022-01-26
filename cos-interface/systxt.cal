@@ -299,10 +299,10 @@ LOC      BSS       0
          IFC       'LOC',EQ,'',1
 DN_@     BSS       0
          DATA      'DN'L
-         CON       FIRST
-         CON       FIRST
-         CON       FIRST
-         CON       FIRST+(NB*D'512)
+         VWD       40/0,24/FIRST
+         VWD       40/0,24/FIRST
+         VWD       40/0,24/FIRST
+         VWD       40/0,24/FIRST+(NB*D'512)
          BSSZ      D'19
 DSP      ENDM
 
@@ -590,7 +590,7 @@ OPLABEL  =         *
          A1        DN
          A2        UDA
          A3        CT
-         R         $RWDR
+         R         $RWDP
 READP    ENDM
 
 **

@@ -294,7 +294,8 @@ static u64 loadModules(Dataset *ds, int pass) {
             }
             break;
         default:
-            // ignore unrecognized table types
+            // issue warning and ignore unrecognized table types
+            fprintf(stderr, "Warning: unrecognized table type: %02o\n", tableType);
             break;
         }
         if (skipBytes(ds, tableLength) == -1) return 0;
@@ -483,6 +484,7 @@ static void printSymbols(Module *module, Symbol *symbol) {
 static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
     u32 baseAddress;
     u32 bitAddress;
+    u32 bitAddrOffset;
     Block *block;
     int blockIndex;
     int byteCount;
@@ -503,11 +505,11 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
         errorCount += 1;
         return skipBytes(ds, tableLength);
     }
-    baseAddress = block->baseAddress;
     if (isSet(hdr, 28)) {
         //
         //  Process extended format table
         //
+        bitAddrOffset = block->baseAddress;
         while (tableLength > 0) {
             if (readWord(ds, &word)) return -1;
             tableLength -= 8;
@@ -517,11 +519,13 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
             bitAddress = word & 0x3fffffff;
             block = findBlock(currentModule, blockIndex);
             if (block == NULL) {
-                fprintf(stderr, "Failed to find block %d referenced by BRT of module %s\n", blockIndex, currentModule->id);
+                fprintf(stderr, "Failed to find block %d referenced by extended relocation entry in BRT of module %s\n",
+                        blockIndex, currentModule->id);
                 errorCount += 1;
                 continue;
             }
-            imageOffset = (block->baseAddress * 8) + (bitAddress >> 3);
+            baseAddress = block->baseAddress;
+            imageOffset = (bitAddrOffset * 8) + (bitAddress >> 3);
             shiftCount = 7 - (bitAddress & 7);
             byteCount = (fieldLength + 7) / 8;
             if (shiftCount != 0) byteCount += 1;
@@ -541,6 +545,7 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
         //
         //  Process standard format table
         //
+        baseAddress = block->baseAddress;
         while (tableLength > 0) {
             if (readWord(ds, &word)) return -1;
             tableLength -= 8;
@@ -551,7 +556,8 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
                 block = findBlock(currentModule, blockIndex);
                 if (block == NULL) {
                     if (blockIndex == 0x7f && parcelAddress == 0xffffff) break;
-                    fprintf(stderr, "Failed to find block %d referenced by BRT of module %s\n", blockIndex, currentModule->id);
+                    fprintf(stderr, "Failed to find block %d referenced by standard relocation entry in BRT of module %s\n",
+                            blockIndex, currentModule->id);
                     errorCount += 1;
                     continue;
                 }
@@ -784,6 +790,7 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
         isParcelRelocation = isSet(word, 13);
         extIndex = (word >> 36) & 0x3fff;
         fieldLength = (word >> 30) & 0x3f;
+        if (fieldLength == 0) fieldLength = 64;
         bitAddress = word & 0x3fffffff;
         block = findBlock(currentModule, blockIndex);
         if (block == NULL) {
