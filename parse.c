@@ -1883,6 +1883,7 @@ ErrorCode parseSourceLine(void) {
         //
         macroDefn = findMacroDefn(resultField, len);
         if (macroDefn != NULL) {
+            listCodeLocation(currentSection);
             err = registerError(callMacro(macroDefn, locationFieldToken));
         }
         //
