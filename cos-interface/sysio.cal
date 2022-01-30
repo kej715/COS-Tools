@@ -31,7 +31,9 @@
 *    (S6) Contents of DPCWF if (SO)<=0 and (S1)=0, otherwise, meaningless.
 *         Note that for READ/READP, the unused bit count can also be
 *         obtained from S6 if (SO)<O.
-*  
+*
+*  Uses: S2, A5
+*
 
 $RWDP    SUBR
          S1        BIOFRRP        ; Function Read Record Partial
@@ -57,19 +59,21 @@ $RWD1    S0        DPBIO,A1
          S1        A1
          EX
 $RWD2    R         $WIO           ; wait for function to complete
-         S0        DPBIO,A1
+         S2        DPBIO,A1
+         S0        S2
          JSM       $RWD2          ; if not complete
          S0        S0<1
          JSM       $RWD6          ; if error
          S1        0              ; set no errors encountered
-         S0        S0>(D'63-D'40) ; position and isolate count of words read
-         S2        <D'24
-         S0        S0&S2
-         JSZ       $RWD5          ; if no words read
-         A4        S0             ; compute LWA+1 of data transferred to UDA
+         S2        S2>(D'63-D'39) ; position and isolate count of words read
+         A0        S2
+         JAZ       $RWD5          ; if no words read
+         A4        S2             ; compute LWA+1 of data transferred to UDA
          A4        A2+A4
-         S0        DPCWF,A1       ; check for EOR
-         JSM       $RWD4          ; if EOR
+         A5        S2
+         A0        A5-A3
+         JAM       $RWD4          ; if words read < words requested
+         S0        1
 $RWD3    =         *
 $RWD     RETURN
 
@@ -82,7 +86,8 @@ $RWD4    S6        DPBUBC,A1      ; position and isolate unused bit count
 
 $RWD5    A4        A2             ; no words read, determine whether EOR/EOF/EOD
          S0        DPCWF,A1       ; check for EOR
-         JSM       $RWD4          ; if EOR
+         S0        S0>(D'63-D'03)
+         JSZ       $RWD4          ; if EOR
          S0        0              ; indicate EOF/EOD
          J         $RWD3
 
