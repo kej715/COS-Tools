@@ -314,6 +314,7 @@ static ErrorCode BSSZ(void) {
     char *s;
     u16 savedListControl;
     Value val;
+    int wordCount;
 
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     err = Err_None;
@@ -334,10 +335,11 @@ static ErrorCode BSSZ(void) {
     listValue(&val);
     savedListControl = currentListControl;
     currentListControl = 0;
-    while (val.intValue-- > 0) {
-        val.intValue = 0;
-        val.attributes = 0;
-        val.section = currentSection;
+    wordCount = val.intValue;
+    val.intValue = 0;
+    val.attributes = 0;
+    val.section = currentSection;
+    while (wordCount-- > 0) {
         emitFieldStart(currentSection);
         emitFieldBits(currentSection, &val, 64, FALSE);
         emitFieldEnd(currentSection);
