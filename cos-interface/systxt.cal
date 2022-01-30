@@ -731,7 +731,6 @@ NAME     SUBR
          BSSZ       1
 NAME     =          W.*
          A0         B00
-*        NAME_@,    A0
          NAME-1,    A0
 SUBR     ENDM
 
