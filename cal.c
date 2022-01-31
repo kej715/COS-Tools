@@ -44,6 +44,7 @@ static char *lFile = NULL;
 static char *oFile = NULL;
 
 int main(int argc, char *argv[]) {
+    ErrorCode code;
     int errCount;
     bool isExtText;
     Module *module;
@@ -107,6 +108,11 @@ int main(int argc, char *argv[]) {
     }
     if (errCount > 0) {
         fprintf(stderr, "%d errors detected\n", errCount);
+        for (code = Err_DataItem; code <= Warn_RedefinedMacro; code++) {
+            if ((errorUnion & (1 << code)) != 0) {
+                fprintf(stderr, "%-2s %s\n", getErrorIndicator(code), getErrorMessage(code));
+            }
+        }
         exit(1);
     }
 }
