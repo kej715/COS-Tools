@@ -576,8 +576,11 @@ OPLABEL  READ      DN,UDA,CT
          IFC       'OPLABEL',NE,'',1
 OPLABEL  =         *
          EXT       $RWDR
+         IFC       'DN',NE,'A1',1
          A1        DN
+         IFC       'UDA',NE,'A2',1
          A2        UDA
+         IFC       'CT',NE,'A3',1
          A3        CT
          R         $RWDR
 READ     ENDM
@@ -587,8 +590,11 @@ OPLABEL  READP     DN,UDA,CT
          IFC       'OPLABEL',NE,'',1
 OPLABEL  =         *
          EXT       $RWDP
+         IFC       'DN',NE,'A1',1
          A1        DN
+         IFC       'UDA',NE,'A2',1
          A2        UDA
+         IFC       'CT',NE,'A3',1
          A3        CT
          R         $RWDP
 READP    ENDM
@@ -656,6 +662,33 @@ OPLABEL  =         *
 READCP   ENDM
 
 **
+*  RECALL - Recall job upon I/O request completion
+*
+*  The RECALL macro removes a job from processing. The job does not
+*  become a candidate for processing until the previously issued I/O
+*  request for the specified dataset is completed or partially
+*  completed: that is, the job is resumed when another physical request
+*  is completed, which may be more then one block of data.
+*
+*    OPLABEL Optional label.
+*
+*    ADDRESS Symbolic address of the Open Dataset Name Table (ODN) or
+*            Dataset Parameter Table (DSP) for this dataset or an A, S,
+*            or T register containing the ODN or DSP address. See
+*            description of OPEN macro earlier in this file.
+*
+         MACRO
+OPLABEL  RECALL    ADDRESS
+         IFC       'OPLABEL',NE,'',1
+OPLABEL  =         *
+         S0        F$RCL
+         IFC       'ADDRESS',NE,'S1',1
+         S1        ADDRESS
+         EX
+RECALL   ENDM
+
+
+**
 *  RELEASE - Release Dataset
 *
 *  The RELEASE macro causes the dataset whose Dataset Parameter Table
@@ -685,7 +718,7 @@ OPLABEL  RELEASE   ADDRESS,HOLD
          IFC       'OPLABEL',NE,'',1
 OPLABEL  =         *
          S0        F$RLS
-         IFC       $ADDRESS$,NE,$S1$,1
+         IFC       'ADDRESS',NE,'S1',1
          S1        ADDRESS
 RLS1     IFC       'HOLD',NE,''
          IFC       'ADDRESS',NE,'A1',1
@@ -777,12 +810,34 @@ SUBR     ENDM
 OPLABEL  WRITE     DN,UDA,CT,UBC
          IFC       'OPLABEL',NE,'',1
 OPLABEL  =         *
+         EXT       $WWDR
+         IFC       'DN',NE,'A1',1
+         A1        DN
+         IFC       'UDA',NE,'A2',1
+         A2        UDA
+         IFC       'CT',NE,'A3',1
+         A3        CT
+WRITE1   IFC       'UBC',EQ,''
+         S2        0
+WRITE1   ELSE
+         IFC       'UBC',NE,'S1',1
+         S2        UBC
+WRITE1   ENDIF
+         R         $WWDR
 WRITE    ENDM
 
          MACRO
 OPLABEL  WRITEP    DN,UDA,CT
          IFC       'OPLABEL',NE,'',1
 OPLABEL  =         *
+         EXT       $WWDS
+         IFC       'DN',NE,'A1',1
+         A1        DN
+         IFC       'UDA',NE,'A2',1
+         A2        UDA
+         IFC       'CT',NE,'A3',1
+         A3        CT
+         R         $WWDS
 WRITEP   ENDM
 
 **
@@ -847,7 +902,7 @@ WRITECP  ENDM
 *
 *  The WRITED macro causes buffers to be flushed. If the dataset is
 *  memory resident, buffers are flushed to mass storage only if the EOD
-*  occurs within the last block of the buffer, in this case, the
+*  occurs within the last block of the buffer. In this case, the
 *  memory-resident flags are also cleared.
 *
 *    OPLABEL Optional label.
@@ -864,6 +919,10 @@ WRITECP  ENDM
 OPLABEL  WRITED    DN
          IFC       'OPLABEL',NE,'',1
 OPLABEL  =         *
+         EXT       $WEOD
+         IFC       'DN',NE,'A1',1
+         A1        DN
+         R         $WEOD
 WRITED   ENDM
 
 **
@@ -890,4 +949,8 @@ WRITED   ENDM
 OPLABEL  WRITEF    DN
          IFC       'OPLABEL',NE,'',1
 OPLABEL  =         *
+         EXT       $WEOF
+         IFC       'DN',NE,'A1',1
+         A1        DN
+         R         $WEOF
 WRITEF   ENDM
