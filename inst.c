@@ -4699,7 +4699,8 @@ static ErrorCode defineSymbol(u16 attributes) {
         symbol->value.section = val.section;
         symbol->value.intValue = val.intValue;
     }
-    else if (symbol->value.attributes != val.attributes || symbol->value.intValue != val.intValue) {
+    else if (((symbol->value.attributes ^ val.attributes) & ~SYM_DEFINED_P2) != 0
+             || symbol->value.intValue != val.intValue) {
         err = Err_DoubleDefinition;
     }
     if (pass == 2) symbol->value.attributes |= SYM_DEFINED_P2;

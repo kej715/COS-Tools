@@ -1001,7 +1001,7 @@ char *getNextToken(char *s, Token *token) {
             if (*s == '.') {
                 s += 1;
                 token->details.regster.ptr = s;
-                while (*s != '\0' && *s != ',') s += 1;
+                while (isNameChar(*s)) s += 1;
                 token->details.regster.len = s - token->details.regster.ptr;
             }
             else {
