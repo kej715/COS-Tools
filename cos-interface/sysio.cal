@@ -2,7 +2,78 @@
          SUBTITLE  'System I/O utility functions'
          IDENT     SYSIO
          COMMENT   'SYSIO - System I/O utility functions'
-         ENTRY     $RWDP,$RWDR,$WWDS,$WWDR,$WEOF,$WEOD,$REWD
+
+**
+*  $PARGS - Parse command line arguments
+*
+*  Entry:
+*    (A1) Argument parsing table address
+*
+KEY      SET       1
+MASK8    SET       2
+COMMA    SET       3
+EQUAL    SET       4
+STOP     SET       5
+JCAWRD   SET       6
+         ENTRY     $PARGS
+$PARGS   SUBR
+$PARGS1  S.KEY     ARGKEY,A1
+         S0        S.KEY
+         JSZ       $PARGS8        ; if end of table
+         A2        JCCPR
+         S.MASK8   <8
+         S.COMMA   ARGCOMMA
+         S.EQUAL   ARGEQUAL
+         S.STOP    ARGSTOP
+$PARGS2  S.JCAWRD  ,A2            ; next word from job comm area
+         A2        A2+1
+         S0        S.KEY\S.JCAWRD
+         JSZ       $PARGS4        ; if keyword matches
+$PARGS3  S.JCAWRD  ,A2            ; next word from job comm area
+         A2        A2+1
+         S.JCAWRD  S.JCAWRD&S.MASK8
+         S0        S.COMMA\S.JCAWRD
+         JSZ       $PARGS2        ; if comma found
+         S0        S.STOP\S.JCAWRD
+         JSN       $PARGS3        ; if period not found
+*
+*        End of command line detected. Parameter not found.
+*
+         S1        ARGDFL,A1
+         ARGVAL,A1 S1
+         J         $PARGS7
+*
+*        Keyword match found. Look for equal sign and value.
+*
+$PARGS4  S.JCAWRD  ,A2            ; next word from job comm area
+         A2        A2+1
+         S.JCAWRD  S.JCAWRD&S.MASK8
+         S0        S.JCAWRD\S.EQUAL
+         JSZ       $PARGS6        ; if equal sign
+         S0        S.JCAWRD\S.COMMA
+         JSN       $PARGS3        ; if not comma
+*
+*        Keyword without value specified. Use default value
+*
+$PARGS5  S1        ARGDFL,A1
+         ARGVAL,A1 S1
+         J         $PARGS7
+*
+*        Equal sign detected, look for value next.
+*
+$PARGS6  S.JCAWRD  ,A2            ; next word from job comm area
+         A2        A2+1
+         S7        >8
+         S0        S.JCAWRD&S7
+         JSZ       $PARGS5        ; if delimiter detected
+         ARGVAL,A1 S.JCAWRD       ; store parameter value
+
+$PARGS7  A2        ARGTEL         ; advance to next arg table entry
+         A1        A1+A2
+         J         $PARGS1
+
+$PARGS8  =         *
+$PARGS   RETURN
 
 **
 *  $RWDP/$RWDR - Read Words Partial/Record
@@ -34,12 +105,13 @@
 *
 *  Uses: S2, S3, A5
 *
-
+         ENTRY     $RWDP
 $RWDP    SUBR
          S2        BIOFRRP        ; Function Read Record Partial
          R         $RWD
 $RWDP    RETURN
 
+         ENTRY     $RWDR
 $RWDR    SUBR
          S2        BIOFRR         ; Function Read Record
          R         $RWD
@@ -119,13 +191,14 @@ $RWD7    RECALL    A1
 *
 *  Uses: S3, S4
 *
-
+         ENTRY     $WWDS
 $WWDS    SUBR
          S2        0              ; Unused bit count (ignored)
          S3        BIOFWRP        ; Function Write Record Partial
          R         $WWD
 $WWDS    RETURN
 
+         ENTRY     $WWDR
 $WWDR    SUBR
          S3        BIOFWR         ; Function Write Record
          R         $WWD
@@ -174,7 +247,7 @@ $WWD4    RECALL    A1
 *
 *  Uses: S2
 *
-
+         ENTRY     $WEOD
 $WEOD    SUBR
          S2        BIOFEOD
          R         $WEFD
@@ -194,7 +267,7 @@ $WEOD    RETURN
 *
 *  Uses: S2
 *
-
+         ENTRY     $WEOF
 $WEOF    SUBR
          S2        BIOFEOF
          R         $WEFD

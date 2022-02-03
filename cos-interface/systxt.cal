@@ -169,7 +169,7 @@ JCBTIM   =         O'167          ; Time of absolute load module generation
 JCDIG    =         O'170          ; Reserved for diagnostics
 
 **
-*  Open Dataset Name (ODN) Table Definitions
+*  Open Dataset Name (ODN) table definitions
 *
 ODDN     =         O'000          ; Dataset name
 ODV      =         O'001          ; Close volume (bit 1)
@@ -190,7 +190,7 @@ OSTS2U   =         D'03           ; Switch system-managed to user-managed
 OSTS2S   =         D'04           ; Switch user-managed to system-managed
 
 **
-*  Dataset Parameter Table Definitions
+*  Dataset Parameter table definitions
 *
 DPCWF    =         O'005          ; Control word types detected (bits 0-3)
 DPEOR    =         O'10           ;   End of record
@@ -220,6 +220,20 @@ DPBWC    =         O'007          ; Word count (bits 16-39)
                                   ;   Number of words at DPBWA to read or write
                                   ;   Contains actual number read when read complete
 DPBWA    =         O'007          ; Word address of user data area (bits 40-63)
+
+**
+*  Command line argument parsing definitions
+* 
+ARGKEY   =         0              ; Keyword of parameter
+ARGREQ   =         1              ; 1 if required parameter, 0 if optional
+ARGDFL   =         2              ; Default value
+ARGVAL   =         3              ; Value of parameter
+ARGTEL   =         ARGVAL+1       ; Argument table entry length
+
+ARGCOLON =         O'03           ; Colon delimiter
+ARGEQUAL =         O'07           ; Equal sign delimiter
+ARGCOMMA =         O'17           ; Comma delimiter
+ARGSTOP  =         O'37           ; Period delimiter
 
 **
 *  CLOSE - Close Dataset
@@ -725,7 +739,7 @@ RLS1     IFC       'HOLD',NE,''
          A1        ADDRESS
          S2        1,A1
          S3        1
-         S3        S3<59
+         S3        S3<(D'63-D'4)
          S2        S2!S3
          1,A1      S2
 RLS1     ENDIF
