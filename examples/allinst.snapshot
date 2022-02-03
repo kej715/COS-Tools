@@ -1,4 +1,4 @@
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    1
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    1
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -53,7 +53,7 @@
                 7a                      0   TAG2     BSS       0                                                                    
                 7a 002100                            EFI                                                                            
                 7b 002200                            DFI                                                                            
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    2
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    2
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -72,20 +72,20 @@
                                         3   RTNADDR  =         3                                                                    
                12c 005017                            J         B17                                                                  
                12d 005003                            J         B.RTNADDR                                                            
-               13a 006 00000006a+                    J         TAG1                                                                 
-               13c 006 00000016a+                    J         LDY3+1                                                               
-               14a 006 00000014d+                    J         *+3                                                                  
-               14c 007 00000015a+                    R         HELP                                                                 
+               13a 006  00000006a+                   J         TAG1                                                                 
+               13c 006  00000016a+                   J         LDY3+1                                                               
+               14a 006  00000014d+                   J         *+3                                                                  
+               14c 007  00000015a+                   R         HELP                                                                 
                15a                      0   LDY3     BSS       0                                                                    
                15a                      0   HELP     BSS       0                                                                    
-               15a 010 00000013a+                    JAZ       TAG3+2                                                               
-               15c 011 00000021a+                    JAN       TAG4                                                                 
-               16a 012 00000007a+                    JAP       TAG2                                                                 
-               16c 013 00000006a+                    JAM       TAG1                                                                 
-               17a 014 00000007a+                    JSZ       TAG2                                                                 
-               17c 015 00000010a+                    JSN       TAG1+2                                                               
-               20a 016 00000020d+                    JSP       *+3                                                                  
-               20c 017 00000021a+                    JSM       TAG4                                                                 
+               15a 010  00000013a+                   JAZ       TAG3+2                                                               
+               15c 011  00000021a+                   JAN       TAG4                                                                 
+               16a 012  00000007a+                   JAP       TAG2                                                                 
+               16c 013  00000006a+                   JAM       TAG1                                                                 
+               17a 014  00000007a+                   JSZ       TAG2                                                                 
+               17c 015  00000010a+                   JSN       TAG1+2                                                               
+               20a 016  00000020d+                   JSP       *+3                                                                  
+               20c 017  00000021a+                   JSM       TAG4                                                                 
                                             *                                                                                       
                                             *        Ai exp                                                                         
                                             *                                                                                       
@@ -108,7 +108,7 @@
                25d 024517                            A5        B.SVNTN                                                              
                26a 025634                            B34       A6                                                                   
                                        34   THRTY4   =         O'34                                                                 
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    3
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    3
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -163,7 +163,7 @@
                42b 042273                            S2        <5                                                                   
                42c 042273                            S2        #>O'73                                                               
                42d 042366                            S3        <D'10                                                                
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    4
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    4
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -218,7 +218,7 @@
                56d 060405                            S4        S0+S5                                                                
                57a 061123                            S1        S2-S3                                                                
                57b 061506                            S5        -S6                                                                  
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    5
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    5
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -273,7 +273,7 @@
                71d 073200                            S2        VM                                                                   
                72a 073001                            S0        SR0                                                                  
                72b 073301                            S3        SR0                                                                  
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    6
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    6
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -328,7 +328,7 @@
               114b 1346 00000000                     ,A4       S6                                                                   
               114d 1324 17777777                     -1,A2     S4                                                                   
               115b 1305 00003000                     ADDR,     S5                                                                   
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    7
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    7
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -383,7 +383,7 @@
               131a 174320                            V3        /HV2                                                                 
               131b 160413                            V4        S1*FV3                                                               
               131c 167532                            V5        V3*IV2                                                               
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    8
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    8
    References all machine instructions                                    SECTION:              QUALIFIER: 
 
 
@@ -407,7 +407,7 @@
                                                                                                                                     
                                                      END                                                                            
                                                                                                                                     
-1Sample Test Program                                              Cray X-MP xCAL 0.5            01/23/22 12:05:21  PAGE    9
+1Sample Test Program                                              Cray X-MP xCAL 0.5            02/03/22 12:04:35  PAGE    9
   SYMBOL TABLE                                                            SECTION:              QUALIFIER: 
 
 
