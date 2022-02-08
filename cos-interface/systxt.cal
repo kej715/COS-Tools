@@ -236,6 +236,23 @@ ARGCOMMA =         O'17           ; Comma delimiter
 ARGSTOP  =         O'37           ; Period delimiter
 
 **
+*  ABORT - Abort Program
+*
+*  The ABORT request provides for abnormal termination of the current
+*  job step without terminating the entire job. Processing resumes with
+*  the job control statement that follows the first EXIT statement after
+*  the aborted job step. If no EXIT statement exists, the job is
+*  terminated.
+*
+         MACRO
+OPLABEL  ABORT
+         IFC       'OPLABEL',NE,'',1
+OPLABEL  =         *
+         S0        F$ABT
+         EX
+ABORT    ENDM
+
+**
 *  CLOSE - Close Dataset
 *
 *  CLOSE releases the buffer, the Logical File Table (LFT) , and the
@@ -450,9 +467,9 @@ MESSAGE  ENDM
 *            part 1, section 4 of this manual for a complete description
 *            of the LDT macro.
 *
-*    U       Unblocked. If the u parameter is specified, the DSP has
+*    U       Unblocked. If the U parameter is specified, the DSP has
 *            DPUDS set and no buffer is allocated. The default is
-*            blocked. The u parameter is used only as a keyword; no
+*            blocked. The U parameter is used only as a keyword; no
 *            registers are allowed.
 *
          MACRO
@@ -554,15 +571,14 @@ OPEN     ENDM
 *
 *    OPLABEL Optional label.
 *
-*    DN      Dataset name (symbolic address of the Open Dataset Name
-*            Table (ODN) for this dataset), or an A, B, or S register
-*            (not A0 or S0) containing the Dataset Parameter Table (DSP)
-*            address or negative DSP offset relative to JCDSP
+*    DN      Symbolic address of the Dataset Parameter Table (DSP), or
+*            an A, B, or S register (not A0 or S0) containing the DSP
+*            address or negative DSP offset relative to JCDSP.
 *
 *    UDA     User data area first word address (FWA) or an A, B, or S
 *            register (not A1) containing the UDA address.
 *
-*    CT      Word count or an A, B, or S register (not Al or A2)
+*    CT      Word count or an A, B, or S register (not A1 or A2)
 *            containing the number of words to be read.
 *
 *  Return conditions:
@@ -612,68 +628,6 @@ OPLABEL  =         *
          A3        CT
          R         $RWDP
 READP    ENDM
-
-**
-*  READC/READCP - Read characters
-*
-*  The READC and READCP macros transfer character data from a dataset
-*  into the user data area.
-*
-*  The READC macro causes one record to be processed at a time. Each
-*  macro call causes the dataset to be positioned after the EOR that
-*  terminated the read.
-*
-*  The READCP macro generates a return jump to the $RCHP subroutine.
-*  With READCP, characters are transferred to the user data area as
-*  requested by the user. Each call is terminated by reaching an EOR or
-*  by satisfying the character count, whichever occurs first.
-*
-*  One character from the record is placed, right-adjusted, zero-filled,
-*  in each word of the data area. Blank-compressed fields are recognized
-*  and expanded, one blank per word.
-*
-*  Unrecovered data errors do not abort the job. Instead, control is
-*  returned to the caller. The caller can use the good data read, (A2)
-*  through (A4)-1, and then abort. You can also skip or accept the bad
-*  data. If the caller does nothing, the job aborts when the next read
-*  request occurs. See the Library Reference Manual, CRI publication
-*  SR-0014, for detailed descriptions of SKIPBAD and ACPTBAD.
-*
-*  Memory-resident datasets are treated as described for READ/READP
-*  macro.
-*
-*    OPLABEL Optional label.
-*
-*    DN      Dataset name (symbolic address of the Open Dataset Name
-*            Table (ODN) for this dataset), or an A, B, or S register
-*            (not A0 or S0) containing the Dataset Parameter Table (DSP)
-*            address or negative DSP offset relative to JCDSP
-*
-*    UDA     User data area first word address (FWA) or an A, B, or S
-*            register (not A1) containing the UDA address.
-*
-*    CT      Character count or an A, B, or S register (not Al or A2)
-*            containing the character count.
-*
-*  Return conditions:
-*
-*    Same as for READ/READP, except that the requested count (A3) and
-*    data-transfer length (A4-A2) is in characters rather than words.
-*    Unused bits are not meaningful for READC/READCP since the unused
-*    characters are reflected in the number of characters transferred
-*    ((A4)-(A2)).
-*
-         MACRO
-OPLABEL  READC     DN,UDA,CT
-         IFC       'OPLABEL',NE,'',1
-OPLABEL  =         *
-READC    ENDM
-
-         MACRO
-OPLABEL  READCP    DN,UDA,CT
-         IFC       'OPLABEL',NE,'',1
-OPLABEL  =         *
-READCP   ENDM
 
 **
 *  RECALL - Recall job upon I/O request completion
@@ -800,16 +754,15 @@ SUBR     ENDM
 *
 *    OPLABEL Optional label.
 *
-*    DN      Dataset name (symbolic address of the Open Dataset Name
-*            Table (ODN) for this dataset), or an A, B, or S register
-*            (not A0 or S0) containing the Dataset Parameter Table (DSP)
-*            address or negative DSP offset relative to JCDSP
+*    DN      Symbolic address of the Dataset Parameter Table (DSP), or
+*            an A, B, or S register (not A0 or S0) containing the DSP
+*            address or negative DSP offset relative to JCDSP.
 *
 *    UDA     User data area first word address (FWA) or an A, B, or S
 *            register (not A1) containing the UDA address.
 *
-*    CT      Word count or an A, B, or S register (not Al or A2)
-*            containing the number of words to be read.
+*    CT      Word count or an A, B, or S register (not A1 or A2)
+*            containing the number of words to be written.
 *
 *    UBC     Unused bit count or an A, B, or S register (not A1, A2, or
 *            A3) containing the unused bit count or null. If null,
@@ -855,60 +808,6 @@ OPLABEL  =         *
 WRITEP   ENDM
 
 **
-*  WRITEC/WRITECP - Write characters
-*
-*  The WRITEC and WRITECP macros transfer characters from the user's
-*  data area to the dataset. The WRITEC macro causes one record to be
-*  processed at a time. An EOR is written following each WRITEC.
-*
-*  With the WRITECP macro, characters are written from the user's data
-*  area without an EOR.
-*
-*  One character is taken from bits 56 through 63 of each word of the
-*  data area and packed into the record, eight characters per word.
-*  Blank compression occurs.
-*
-*  Memory-resident datasets are handled as described for WRITE/WRITEP.
-*
-*  To write only an EOR, the WRITEC macro with a character count of 0 is
-*  used.
-*
-*    NOTE: Use WRITEC with a character count of 0 to complete a record
-*          written with WRITECP. If you write the EOR by some other
-*          means (such as with WRITE or by closing the dataset), the
-*          last seven characters of data can be lost.
-*
-*    OPLABEL Optional label.
-*
-*    DN      Dataset name (symbolic address of the Open Dataset Name
-*            Table (ODN) for this dataset), or an A, B, or S register
-*            (not A0 or S0) containing the Dataset Parameter Table (DSP)
-*            address or negative DSP offset relative to JCDSP
-*
-*    UDA     User data area first word address (FWA) or an A, B, or S
-*            register (not A1) containing the UDA address.
-*
-*    CT      Character count or an A, B, or S register (not Al or A2)
-*            containing the character count.
-*
-*  Return conditions:
-*
-*    Same as for WRITE/WRITEP except that the requested count (A3) is in
-*    characters rather than words.
-*
-         MACRO
-OPLABEL  WRITEC    DN,UDA,CT
-         IFC       'OPLABEL',NE,'',1
-OPLABEL  =         *
-WRITEC   ENDM
-
-         MACRO
-OPLABEL  WRITECP   DN,UDA,CT
-         IFC       'OPLABEL',NE,'',1
-OPLABEL  =         *
-WRITECP  ENDM
-
-**
 *  WRITED - Write end-of-data
 *
 *  The WRITED macro causes an EOR (if not previously written), an EOF
@@ -921,9 +820,8 @@ WRITECP  ENDM
 *
 *    OPLABEL Optional label.
 *
-*    DN      Dataset name (symbolic address of the Open Dataset Name
-*            Table (ODN) for this dataset), or an A, B, or S register
-*            (not A0 or S0) containing the Dataset Parameter Table (DSP)
+*    DN      Symbolic address of the Dataset Parameter Table (DSP), or
+*            an A, B, or S register (not A0 or S0) containing the DSP
 *            address or negative DSP offset relative to JCDSP.
 *
 *  Return conditions:
@@ -951,9 +849,8 @@ WRITED   ENDM
 *
 *    OPLABEL Optional label.
 *
-*    DN      Dataset name (symbolic address of the Open Dataset Name
-*            Table (ODN) for this dataset), or an A, B, or S register
-*            (not A0 or S0) containing the Dataset Parameter Table (DSP)
+*    DN      Symbolic address of the Dataset Parameter Table (DSP), or
+*            an A, B, or S register (not A0 or S0) containing the DSP
 *            address or negative DSP offset relative to JCDSP.
 *
 *  Return conditions:
