@@ -10,70 +10,109 @@
 *    (A1) Argument parsing table address
 *
 KEY      SET       1
-MASK8    SET       2
-COMMA    SET       3
-EQUAL    SET       4
-STOP     SET       5
-JCAWRD   SET       6
+COMMA    SET       2
+EQUAL    SET       3
+STOP     SET       4
+JCAWRD   SET       5
          ENTRY     $PARGS
 $PARGS   SUBR
-$PARGS1  S.KEY     ARGKEY,A1
-         S0        S.KEY
-         JSZ       $PARGS8        ; if end of table
-         A2        JCCPR
-         S.MASK8   <8
          S.COMMA   ARGCOMMA
          S.EQUAL   ARGEQUAL
          S.STOP    ARGSTOP
-$PARGS2  S.JCAWRD  ,A2            ; next word from job comm area
+         A2        JCCPR          ; point to first word of command args
+         A3        ARGTEL         ; set argument table entry length
+$PARGS1  S.JCAWRD  ,A2            ; next word from job comm area
          A2        A2+1
-         S0        S.KEY\S.JCAWRD
-         JSZ       $PARGS4        ; if keyword matches
-$PARGS3  S.JCAWRD  ,A2            ; next word from job comm area
-         A2        A2+1
-         S.JCAWRD  S.JCAWRD&S.MASK8
-         S0        S.COMMA\S.JCAWRD
-         JSZ       $PARGS2        ; if comma found
-         S0        S.STOP\S.JCAWRD
-         JSN       $PARGS3        ; if period not found
-*
-*        End of command line detected. Parameter not found.
-*
-         S1        ARGDFL,A1
-         ARGVAL,A1 S1
-         J         $PARGS7
-*
-*        Keyword match found. Look for equal sign and value.
-*
-$PARGS4  S.JCAWRD  ,A2            ; next word from job comm area
-         A2        A2+1
-         S.JCAWRD  S.JCAWRD&S.MASK8
-         S0        S.JCAWRD\S.EQUAL
-         JSZ       $PARGS6        ; if equal sign
+         S6        <8
+         S.JCAWRD  S.JCAWRD&S6
+$PARGS2  S0        S.JCAWRD\S.STOP
+         JSZ       $PARGS10       ; if end of command line
          S0        S.JCAWRD\S.COMMA
-         JSN       $PARGS3        ; if not comma
+         JSN       $PARGS1        ; if not comma
+         S.KEY     ,A2            ; next word from job comm area
+         S6        S.KEY&S6
+         S7        O'20
+         S0        S6-S7
+         JSP       $PARGS3        ; if not delimiter
+         S0        S6
+         JSN       $PARGS1        ; if delimiter
+$PARGS3  A2        A2+1
 *
-*        Keyword without value specified. Use default value
+*        Find keyword in argument parsing table
 *
-$PARGS5  S1        ARGDFL,A1
-         ARGVAL,A1 S1
-         J         $PARGS7
-*
-*        Equal sign detected, look for value next.
-*
-$PARGS6  S.JCAWRD  ,A2            ; next word from job comm area
+         A4        A1
+$PARGS4  S6        ,A4            ; keyword from next table entry
+         S0        S.KEY\S6
+         JSZ       $PARGS5        ; if keyword matches
+         S0        S6
+         JSZ       $PARGS9        ; if end of table, unrecognized keyword
+         A4        A4+A3          ; advance to next table entry
+         J         $PARGS4
+
+$PARGS5  S.JCAWRD  ,A2            ; next word from job comm area
          A2        A2+1
-         S7        >8
-         S0        S.JCAWRD&S7
-         JSZ       $PARGS5        ; if delimiter detected
-         ARGVAL,A1 S.JCAWRD       ; store parameter value
+         S6        <8
+         S.JCAWRD  S.JCAWRD&S6
+         S0        S.JCAWRD\S.EQUAL
+         JSZ       $PARGS7        ; if equal sign specified
+*
+*        Keyword match and no value specified, so set default value
+*
+$PARGS6  S7        ARGDFL,A4
+         ARGVAL,A4 S7
+         J         $PARGS2
+*
+*        Equal sign specified, look for value
+*
+$PARGS7  S.JCAWRD  ,A2            ; next word from job comm area
+         S6        S.JCAWRD&S6
+         S7        O'20
+         S0        S6-S7
+         JSP       $PARGS8        ; if not delimiter
+         S0        S6
+         JSN       $PARGS6        ; if delimiter
+$PARGS8  ARGVAL,A4 S.JCAWRD       ; store parameter value
+         A2        A2+1
+         J         $PARGS1        ; process next command line argument
+*
+*        Unrecognized keyword detected
+*
+$PARGS9  $PARGSB,  S.KEY
+         MESSAGE   $PARGSA,US
+         ABORT
+*
+*        End of command line. Check for required arguments that
+*        were not specified.
+*
+$PARGS10 A4        A1
 
-$PARGS7  A2        ARGTEL         ; advance to next arg table entry
-         A1        A1+A2
-         J         $PARGS1
+$PARGS11 S0        ,A4
+         JSZ       $PARGS14       ; if end of table
+         S0        ARGVAL,A4
+         JSZ       $PARGS12       ; if no value specified
+         A4        A4+A3
+         J         $PARGS11
 
-$PARGS8  =         *
+$PARGS12 S0        ARGREQ,A4
+         JSN       $PARGS13       ; if value required
+         S1        ARGDFL,A4      ; set default value
+         ARGVAL,A4 S1
+         A4        A4+A3
+         J         $PARGS11
+
+$PARGS13 S1        ARGKEY,A4
+         $PARGSD,  S1
+         MESSAGE   $PARGSC,US
+         ABORT
+
+$PARGS14 =         *
 $PARGS   RETURN
+
+$PARGSA  DATA      'Unrecognized parameter:'
+$PARGSB  BSSZ      2
+
+$PARGSC  DATA      'Required parameter unspecified:'
+$PARGSD  BSSZ      2
 
 **
 *  $RWDP/$RWDR - Read Words Partial/Record
