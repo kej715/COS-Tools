@@ -1,0 +1,100 @@
+         TITLE     'COPYD'
+         SUBTITLE  'Copy Blocked Dataset'
+         IDENT     COPYD
+         COMMENT   'COPYD - Copy Blocked Dataset'
+         ENTRY     COPYD
+         EXT       $PARGS
+         START     COPYD
+
+NB       =         D'10
+UDASZ    =         NB*D'512
+BUFSZ    =         NB*D'512
+
+IDSP     DSP       IN$,IBUF,NB
+IODN     DATA      'IN$'L
+         VWD       6/4,30/0,4/OSTSA,24/IDSP ; system managed/resident
+*        VWD       36/0,4/OSTSA,24/IDSP     ; system managed/resident
+
+ODSP     DSP       OUT$,OBUF,NB
+OODN     DATA      'OUT$'L
+         VWD       6/4,30/0,4/OSTSA,24/ODSP ; system managed/resident
+*        VWD       36/0,4/OSTSA,24/ODSP     ; system managed/resident
+
+COPYD    =         *
+         A1        ARGS           ; parse command line arguments
+         R         $PARGS
+         S1        ARGI,          ; set input dataset name
+         IDSP,     S1
+         IODN,     S1
+         S1        ARGO,          ; set output dataset name
+         ODSP,     S1
+         OODN,     S1
+         OPEN      IODN,I         ; open input file
+         JSN       COP7           ; if open failed
+         OPEN      OODN,O         ; open output file
+         JSN       COP8           ; if open failed
+
+COP1     READP     IDSP,UDA,UDASZ
+         JSM       COP2           ; if EOR
+         JSZ       COP3           ; if EOF, EOD, null record, or error
+         A3        A4-A2          ; number of words read
+         WRITEP    ODSP,UDA,A3
+         S0        S1
+         JSZ       COP1           ; if no error
+         J         COP6
+
+COP2     A3        A4-A2          ; number of words read
+         WRITE     ODSP,UDA,A3,S6
+         S0        S1
+         JSZ       COP1           ; if no error
+         J         COP6
+
+COP3     S0        S1
+         JSN       COP5           ; if unrecoverable read error
+         S1        IDSP+DPCWF,    ; determine whether EOF or EOD
+         S2        <2
+         S1        S1>(D'63-D'03)
+         S1        S1&S2
+         S0        S2-S1
+         JSZ       COP4           ; if EOD
+         WRITEF    ODSP
+         S0        S1
+         JSZ       COP1           ; if no error
+         J         COP6
+
+COP4     WRITED    ODSP
+         S0        S1
+         JSN       COP6           ; if error
+         MESSAGE   ='Copy complete'Z,US
+         ENDP
+
+COP5     MESSAGE   ='Unrecoverable read error'Z,US
+         ABORT
+
+COP6     MESSAGE   ='Unrecoverable write error'Z,US
+         ABORT
+
+COP7     S1        ARGI,
+         COPB,     S1
+         MESSAGE   COPA,US
+         ABORT
+
+COP8     S1        ARGO,
+         COPB,     S1
+         MESSAGE   COPA,US
+         ABORT
+
+COPA     DATA      'Failed to open'
+COPB     BSSZ      2
+
+ARGS     DATA      'I'L,0,'IN$'L
+ARGI     DATA      0
+         DATA      'O'L,0,'OUT$'L
+ARGO     DATA      0
+         CON       0
+
+IBUF     BSS       BUFSZ
+OBUF     BSS       BUFSZ
+UDA      BSS       UDASZ
+
+         END
