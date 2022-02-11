@@ -3,7 +3,7 @@
          IDENT     COPYD
          COMMENT   'COPYD - Copy Blocked Dataset'
          ENTRY     COPYD
-         EXT       $PARGS
+         EXT       $I2D@24,$PARGS
          START     COPYD
 
 NB       =         D'10
@@ -46,8 +46,11 @@ COP1     READP     IDSP,UDA,UDASZ
 COP2     A3        A4-A2          ; number of words read
          WRITE     ODSP,UDA,A3,S6
          S0        S1
-         JSZ       COP1           ; if no error
-         J         COP6
+         JSN       COP6           ; if no error
+         A1        RCOUNT,        ; increment count of records
+         A1        A1+1
+         RCOUNT,   A1
+         J         COP1
 
 COP3     S0        S1
          JSN       COP5           ; if unrecoverable read error
@@ -59,13 +62,24 @@ COP3     S0        S1
          JSZ       COP4           ; if EOD
          WRITEF    ODSP
          S0        S1
-         JSZ       COP1           ; if no error
-         J         COP6
+         JSN       COP6           ; if error
+         A1        FCOUNT,        ; increment count of files
+         A1        A1+1
+         FCOUNT,   A1
+         J         COP1
 
 COP4     WRITED    ODSP
          S0        S1
          JSN       COP6           ; if error
-         MESSAGE   ='Copy complete'Z,US
+         A1        RCOUNT,
+         S7        =' ',
+         R         $I2D@24
+         COPB,     S7
+         A1        FCOUNT,
+         S7        =' ',
+         R         $I2D@24
+         COPC,     S7
+         MESSAGE   COPA,US
          ENDP
 
 COP5     MESSAGE   ='Unrecoverable read error'Z,US
@@ -75,23 +89,33 @@ COP6     MESSAGE   ='Unrecoverable write error'Z,US
          ABORT
 
 COP7     S1        ARGI,
-         COPB,     S1
-         MESSAGE   COPA,US
+         COPE,     S1
+         MESSAGE   COPD,US
          ABORT
 
 COP8     S1        ARGO,
-         COPB,     S1
-         MESSAGE   COPA,US
+         COPE,     S1
+         MESSAGE   COPD,US
          ABORT
 
-COPA     DATA      'Failed to open'
-COPB     BSSZ      2
+COPA     DATA      'Copy complete. Records: '
+COPB     DATA      0
+         DATA      ' Files: '
+COPC     DATA      0
+         CON       0
+
+COPD     DATA      'Failed to open'
+COPE     DATA      0
+         CON       0
 
 ARGS     DATA      'I'L,0,'IN$'L
 ARGI     DATA      0
          DATA      'O'L,0,'OUT$'L
 ARGO     DATA      0
          CON       0
+
+RCOUNT   CON       0
+FCOUNT   CON       0
 
 IBUF     BSS       BUFSZ
 OBUF     BSS       BUFSZ
