@@ -135,6 +135,9 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
                 break;
             }
         }
+        else {
+            argi += 2;
+        }
     }
     fp = filePath;
     limit = fp + MAX_FILE_PATH_LENGTH;
