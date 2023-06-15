@@ -29,10 +29,12 @@
 #include "calproto.h"
 #include "caltypes.h"
 #include "cosdataset.h"
+#include "fnv.h"
 
 static int  openNextSource(int argi, int argc, char *argv[], bool *isExtText);
 static void parseOptions(int argc, char *argv[]);
 static void resetDefaultModule(void);
+static void resetLocalSymbols(void);
 static void resetQualifierStack(void);
 static int  runPass(int passNo);
 static void timeInit(void);
@@ -50,13 +52,16 @@ int main(int argc, char *argv[]) {
     Module *module;
     FILE *savedListingFile;
     Dataset *savedObjectFile;
+    bool savedSyntaxIndicator;
     int srcIndex;
+    int warnCount;
 
+    defaultModule = addModule("", 0);
     parseOptions(argc, argv);
     instInit();
-    defaultModule = addModule("", 0);
     errCount = 0;
     srcIndex = 1;
+    warnCount = 0;
     while (srcIndex < argc) {
         srcIndex = openNextSource(srcIndex, argc, argv, &isExtText);
         timeInit();
@@ -67,6 +72,8 @@ int main(int argc, char *argv[]) {
             listingFile = NULL;
             savedObjectFile = objectFile;
             objectFile = NULL;
+            savedSyntaxIndicator = isFlexibleSyntax;
+            isFlexibleSyntax = FALSE;
         }
         runPass(1);
         for (module = firstModule; module != NULL; module = module->next) {
@@ -79,6 +86,7 @@ int main(int argc, char *argv[]) {
             emitLiterals(module);
         }
         errCount += getErrorCount();
+        warnCount += getWarningCount();
         listErrorSummary();
         listSymbolTable();
         writeObjectCode();
@@ -95,6 +103,7 @@ int main(int argc, char *argv[]) {
         if (isExtText) {
             listingFile = savedListingFile;
             objectFile = savedObjectFile;
+            isFlexibleSyntax = savedSyntaxIndicator;
         }
     }
     if (lFile != NULL) fclose(listingFile);
@@ -106,15 +115,14 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     }
-    if (errCount > 0) {
-        fprintf(stderr, "%d errors detected\n", errCount);
-        for (code = Err_DataItem; code <= Warn_RedefinedMacro; code++) {
-            if ((errorUnion & (1 << code)) != 0) {
-                fprintf(stderr, "%-2s %s\n", getErrorIndicator(code), getErrorMessage(code));
-            }
+    if (warnCount > 0) fprintf(stderr, "%d warning%s detected\n", warnCount, warnCount > 1 ? "s" : "");
+    if (errCount > 0)  fprintf(stderr, "%d error%s detected\n", errCount, errCount > 1 ? "s" : "");
+    for (code = Err_DataItem; code <= Warn_RedefinedMacro; code++) {
+        if ((errorUnion & (1 << code)) != 0) {
+            fprintf(stderr, "%-2s %s\n", getErrorIndicator(code), getErrorMessage(code));
         }
-        exit(1);
     }
+    exit(errCount > 0 || (warnCount > 0 && isFatalWarnings));
 }
 
 static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
@@ -127,13 +135,22 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     *isExtText = FALSE;
     while (argi < argc) {
         if (*argv[argi] != '-') break;
-        if (strcmp(argv[argi], "-t") == 0) {
+        if (strcmp(argv[argi], "-f") == 0) {
+            argi += 1;
+        }
+        else if (strcmp(argv[argi], "-t") == 0) {
             argi += 1;
             if (argi >= argc) break;
             if (*argv[argi] != '-') {
                 *isExtText = TRUE;
                 break;
             }
+        }
+        else if (strcmp(argv[argi], "-w") == 0) {
+            argi += 1;
+        }
+        else if (strcmp(argv[argi], "-x") == 0) {
+            argi += 1;
         }
         else {
             argi += 2;
@@ -185,13 +202,45 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
 }
 
 static void parseOptions(int argc, char *argv[]) {
+    char *cp;
+    Fnv32_t hash;
     int i;
+    int len;
     int sourceCount;
+    char *sp;
 
     sourceCount = 0;
     i = 1;
     while (i < argc) {
-        if (strcmp(argv[i], "-l") == 0) {
+        if (strcmp(argv[i], "-f") == 0) {
+            isFlexibleSyntax = TRUE;
+        }
+        else if (strcmp(argv[i], "-i") == 0) {
+            i += 1;
+            if (i >= argc) {
+                usage();
+            }
+            cp = argv[i];
+            sp = NULL;
+            while (*cp != '\0') {
+                if (*cp == '/' || *cp == '\\') sp = cp;
+                cp += 1;
+            }
+            sp = sp != NULL ? sp + 1 : argv[i];
+            for (cp = sp; *cp != '\0'; cp++) {
+                if (*cp == '.') {
+                    *cp = '\0';
+                    break;
+                }
+            }
+            len = strlen(sp);
+            if (len > MAX_NAME_LENGTH) {
+                hash = fnv32a(sp, len, FNV1_32A_INIT);
+                sprintf(sp + 4, "%04x", hash & 0xffff);
+            }
+            defaultModule = addModule(sp, strlen(sp));
+        }
+        else if (strcmp(argv[i], "-l") == 0) {
             i += 1;
             if (i >= argc) {
                 usage();
@@ -226,6 +275,12 @@ static void parseOptions(int argc, char *argv[]) {
                 usage();
             }
         }
+        else if (strcmp(argv[i], "-w") == 0) {
+            isFatalWarnings = TRUE;
+        }
+        else if (strcmp(argv[i], "-x") == 0) {
+            isImplicitExternals = TRUE;
+        }
         else if (*argv[i] == '-') {
             usage();
         }
@@ -244,8 +299,23 @@ void resetBase(void) {
 
 static void resetDefaultModule(void) {
     currentModule = defaultModule;
+    if (currentModule->id[0] != '\0') {
+        firstModule = lastModule = currentModule;
+    }
     resetModule(currentModule);
+    currentQualifier = findQualifier("");
     currentSection = currentModule->firstSection;
+    sectionStackPtr = 0;
+    macroStackPtr = 0;
+    qualifierStackPtr = 0;
+}
+
+static void resetLocalSymbols(void) {
+    int i;
+
+    for (i = 0; i < MAX_LOCAL_SYMBOLS; i++) {
+        localSymbolCtrs[i] = 0;
+    }
 }
 
 static void resetQualifierStack(void) {
@@ -262,6 +332,7 @@ static int runPass(int passNo) {
     clearErrorIndications();
     resetBase();
     resetDefaultModule();
+    resetLocalSymbols();
     resetQualifierStack();
     if (fseek(sourceFile, 0L, SEEK_SET) != 0) {
         fputs("Failed to rewind source file\n", stderr);
@@ -292,10 +363,13 @@ static void timeInit(void) {
 }
 
 static void usage(void) {
-    fputs("Usage: cal [-l lfile][-o ofile] [-t tfile]... sfile ...\n", stdout);
+    fputs("Usage: cal [-f][-i ident][-l lfile][-o ofile][-t tfile]...[-x] sfile ...\n", stdout);
+    fputs("  -f       - enable flexible syntax\n", stderr);
+    fputs("  -i ident - default module identifier\n", stderr);
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - object file\n", stderr);
     fputs("  -t tfile - external text file\n", stderr);
+    fputs("  -x       - enable implicit external symbols\n", stderr);
     fputs("  sfile - source file(s)\n", stderr);
     exit(1);
 }

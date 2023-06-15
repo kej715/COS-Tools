@@ -592,17 +592,30 @@ u64 toCrayFloat(u64 ieee) {
 
 static int writeEntryEntries(Module *module, Dataset *ds) {
     Symbol *symbol;
+    u64 symValue;
     u64 word;
 
     for (symbol = module->entryPoints; symbol != NULL; symbol = symbol->next) {
         if ((symbol->value.attributes & SYM_UNDEFINED) != 0) continue;
         if (writeName(symbol->id, ds) == -1) return -1;
-        word = (symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0 ? 1 : 0; // relocation mode
+        word = 0;
+        symValue = symbol->value.intValue;
+        if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0) {
+            word = 1; // parcel recloation mode
+        }
+        else if ((symbol->value.attributes & SYM_BYTE_ADDRESS) != 0) {
+            if (symbol->value.section->objectBlock->type == SectionType_Code || symbol->value.section->objectBlock->type == SectionType_Mixed) {
+                word = 1; // parcel relocation mode if symbol is in a code section
+                symValue >>= 1; // byte address to parcel address
+            }
+            else {
+                symValue >>= 3; // byte address to word address
+            }
+        }
         word |= symbol->value.section->objectBlock->index << 1;
         if (symbol == module->start) word |= 0x100; // primary entry point
         if (cosDsWriteWord(ds, word) == -1) return -1;
-        word = symbol->value.intValue;
-        if (cosDsWriteWord(ds, word) == -1) return -1;
+        if (cosDsWriteWord(ds, symValue) == -1) return -1;
     }
     return 0;
 }

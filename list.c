@@ -341,6 +341,8 @@ static void listSymbols(Symbol *symbol) {
                 listingLine[col++] = 'W';
             else if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0)
                 listingLine[col++] = 'P';
+            else if ((symbol->value.attributes & SYM_BYTE_ADDRESS) != 0)
+                listingLine[col++] = 'B';
             else
                 listingLine[col++] = 'V';
             if ((symbol->value.attributes & SYM_EXTERNAL) != 0)

@@ -125,4 +125,55 @@ void readNextLine(void) {
         }
     }
     sourceLine[lineEnd] = '\0';
+    /*
+     * If flexible syntax is enabled, then labels will be delimited by ":" and may stand alone on
+     * lines, and instructions may begin in column 1 when labels are not present. In these cases,
+     * transform lines into "normal" CAL syntax by removing ":" delimiters and concatenating or
+     * shifting lines.
+     */
+    if (isFlexibleSyntax && sourceLine[0] != '*' && sourceLine[0] != ' ' && sourceLine[0] != '\0') {
+        char *cp;
+        char *dp;
+        char lineBuf[MAX_SOURCE_LINE_LENGTH*2+1];
+        char *labelEnd;
+        long val;
+
+        for (cp = sourceLine; *cp != '\0' && *cp != ':' && *cp != ' '; cp++)
+             ;
+        if (*cp == ':') {
+            labelEnd = cp;
+            *cp++ = ' ';
+            while (*cp == ' ' && *cp != '\0') cp += 1;
+            if (*cp != '\0') return; // non-standalone label
+            *labelEnd = '\0';
+            if (sourceLine[0] >= '0' && sourceLine[0] <= '9') {
+                val = strtol(sourceLine, NULL, 10);
+                localSymbolCtrs[val] += 1;
+                sprintf(sourceLine, "@%ld$%d = *", val, localSymbolCtrs[val]);
+                return;
+            }
+            else {
+                strcpy(lineBuf, sourceLine);
+            }
+            readNextLine();
+            dp = lineBuf+strlen(lineBuf);
+            cp = sourceLine;
+            while (*cp != '\0') *dp++ = *cp++;
+            *dp = '\0';
+            if ((dp - lineBuf) > MAX_SOURCE_LINE_LENGTH) lineBuf[MAX_SOURCE_LINE_LENGTH] = '\0';
+            strcpy(sourceLine, lineBuf);
+        }
+        else {
+            for (i = lineEnd; i > 0; i--) {
+                sourceLine[i] = sourceLine[i - 1];
+            }
+            sourceLine[0] = ' ';
+            if (lineEnd < MAX_SOURCE_LINE_LENGTH) {
+                sourceLine[lineEnd + 1] = '\0';
+            }
+            else {
+                sourceLine[lineEnd] = '\0';
+            }
+        }
+    }
 }

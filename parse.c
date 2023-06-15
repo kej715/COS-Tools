@@ -22,12 +22,14 @@
 **--------------------------------------------------------------------------
 */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "calconst.h"
 #include "calproto.h"
 #include "caltypes.h"
+#include "fnv.h"
 #include "services.h"
 
 typedef struct opStackEntry {
@@ -62,6 +64,7 @@ static void popOp(OpStackEntry *op);
 static void pushArg(Value *arg);
 static void pushOp(Token *token);
 static void resetLocationField(void);
+static void squishString(char *s, int len);
 
 static char fields[(COLUMN_LIMIT+2)*3];
 
@@ -293,7 +296,7 @@ ErrorCode evaluateExpression(Token *expression, Value *value) {
          section->relocationCoefficient = section->immobileCoefficient = 0;
     }
     err = evaluateExprHelper(expression);
-    if (argStackPtr == 1 && opStackPtr == 0) {
+    if (err == Err_None && argStackPtr == 1 && opStackPtr == 0) {
         popArg(value);
         if (isRelative(value)) {
             if (isImmobile(value))
@@ -411,7 +414,9 @@ static ErrorCode evaluateExprHelper(Token *expression) {
             err = evaluateExprHelper(expression->details.operator.rightArg);
             if (err != Err_None && err < Warn_Programmer) return err;
         }
-        while (opStackPtr > 0 && opStack[opStackPtr - 1].type != Op_SubExpr) {
+        while (opStackPtr > 0
+               && opStack[opStackPtr - 1].type != Op_SubExpr
+               && opStack[opStackPtr - 1].type != Op_Literal) {
             popOp(&op);
             err = executeOperator(op.type);
             if (err != Err_None && err < Warn_Programmer) break;
@@ -502,12 +507,13 @@ static ErrorCode evaluateString(Token *token) {
 static ErrorCode evaluateSymbol(Token *token) {
     ErrorCode err;
     bool isLocCtr;
+    Qualifier *qualifier;
     Symbol *symbol;
     Value val;
 
+    err = Err_None;
     symbol = findQualifiedSymbol(token);
     if (symbol != NULL) {
-        err = Err_None;
         val.type = symbol->value.type;
         if ((symbol->value.attributes & SYM_COUNTER) != 0) {
             val.attributes = SYM_PARCEL_ADDRESS;
@@ -562,6 +568,16 @@ static ErrorCode evaluateSymbol(Token *token) {
             if ((val.attributes & SYM_UNDEFINED) != 0) err = Err_Undefined;
         }
     }
+    else if (pass == 2 && isImplicitExternals && isUnqualifiedName(token)) {
+        qualifier = findQualifier("");
+        val.type = NumberType_Integer;
+        val.attributes = SYM_EXTERNAL|SYM_DEFINED_P2;
+        val.section = NULL;
+        val.intValue = 0;
+        symbol = addSymbol(token->details.name.ptr, token->details.name.len, qualifier, &val);
+        val.externalSymbol = symbol;
+        addExternal(currentModule, symbol);
+    }
     else {
         val.type = NumberType_Integer;
         val.attributes = SYM_UNDEFINED;
@@ -577,14 +593,25 @@ static ErrorCode evaluateSymbol(Token *token) {
 static ErrorCode executeOperator(OperatorType opType) {
     ErrorCode err;
     Token expression;
+    ErrorCode ignore;
     Value leftArg;
     Literal *literal;
     Value rightArg;
 
     if (argStackPtr < 1) return Err_Expression;
-    popArg(&rightArg);
-    if (rightArg.type != NumberType_Integer) err = registerError(Warn_ExpressionElement);
     err = Err_None;
+    popArg(&rightArg);
+    if (rightArg.type != NumberType_Integer) {
+        if (opType == Op_Negate && rightArg.type == NumberType_Float) {
+            rightArg.floatValue = -rightArg.floatValue;
+            rightArg.coefficient = -rightArg.coefficient;
+            pushArg(&rightArg);
+            return err;
+        }
+        else {
+            ignore = registerError(Warn_ExpressionElement);
+        }
+    }
     switch (opType) {
     case Op_Negate:
         rightArg.intValue = -rightArg.intValue;
@@ -595,8 +622,21 @@ static ErrorCode executeOperator(OperatorType opType) {
         pushArg(&rightArg);
         break;
     case Op_Complement:
-        if (isAbsolute(&rightArg) == FALSE) err = registerError(Warn_ExpressionElement);
+        if (isAbsolute(&rightArg) == FALSE) ignore = registerError(Warn_ExpressionElement);
         rightArg.intValue = ~rightArg.intValue;
+        pushArg(&rightArg);
+        break;
+    case Op_Byte:
+        if (isParcelAddress(&rightArg)) {
+            rightArg.intValue *= 2;
+            rightArg.attributes &= ~SYM_PARCEL_ADDRESS;
+        }
+        else if (isWordAddress(&rightArg)) {
+            rightArg.intValue *= 8;
+            rightArg.attributes &= ~SYM_WORD_ADDRESS;
+        }
+        rightArg.attributes |= SYM_BYTE_ADDRESS;
+        if (rightArg.section == NULL) rightArg.section = currentSection;
         pushArg(&rightArg);
         break;
     case Op_Parcel:
@@ -604,14 +644,25 @@ static ErrorCode executeOperator(OperatorType opType) {
             rightArg.intValue *= 4;
             rightArg.attributes &= ~SYM_WORD_ADDRESS;
         }
+        else if (isByteAddress(&rightArg)) {
+            if ((rightArg.intValue & 0x01) != 0) ignore = registerError(Warn_ExpressionElement);
+            rightArg.intValue /= 2;
+            rightArg.attributes &= ~SYM_BYTE_ADDRESS;
+        }
         rightArg.attributes |= SYM_PARCEL_ADDRESS;
         if (rightArg.section == NULL) rightArg.section = currentSection;
         pushArg(&rightArg);
         break;
     case Op_Word:
         if (isParcelAddress(&rightArg)) {
+            if ((rightArg.intValue & 0x03) != 0) ignore = registerError(Warn_ExpressionElement);
             rightArg.intValue /= 4;
             rightArg.attributes &= ~SYM_PARCEL_ADDRESS;
+        }
+        else if (isByteAddress(&rightArg)) {
+            if ((rightArg.intValue & 0x07) != 0) ignore = registerError(Warn_ExpressionElement);
+            rightArg.intValue /= 8;
+            rightArg.attributes &= ~SYM_BYTE_ADDRESS;
         }
         rightArg.attributes |= SYM_WORD_ADDRESS;
         if (rightArg.section == NULL) rightArg.section = currentSection;
@@ -621,7 +672,7 @@ static ErrorCode executeOperator(OperatorType opType) {
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
         if (leftArg.type != NumberType_Integer)
-            err = registerError(Warn_ExpressionElement);
+            ignore = registerError(Warn_ExpressionElement);
         if (isExternal(&leftArg) && isExternal(&rightArg))
             err = registerError(Err_RelocatableField);
         if (isRelative(&rightArg)) {
@@ -639,27 +690,52 @@ static ErrorCode executeOperator(OperatorType opType) {
         }
         else if (isPlainValue(&leftArg)) {
             leftArg.intValue = leftArg.intValue + rightArg.intValue;
-            leftArg.attributes = (leftArg.attributes & ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS))
-                               | (rightArg.attributes & (SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS));
+            leftArg.attributes = (leftArg.attributes & ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS))
+                               | (rightArg.attributes & (SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS));
         }
         else if (isWordAddress(&leftArg)) {
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue + rightArg.intValue;
             }
+            else if (isParcelAddress(&rightArg)) {
+                leftArg.intValue = (leftArg.intValue * 4) + rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = leftArg.intValue + (rightArg.intValue * 4);
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 8) + rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
-        else { // left is parcel type
+        else if (isParcelAddress(&leftArg)) { // left is parcel type
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue + rightArg.intValue;
             }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue + (rightArg.intValue * 4);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = (leftArg.intValue / 4) + rightArg.intValue;
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 2) + rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+        }
+        else { // left is byte type
+            if (isPlainValue(&rightArg)) {
+                leftArg.intValue = leftArg.intValue + rightArg.intValue;
+            }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue + (rightArg.intValue * 8);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+            else {
+                leftArg.intValue = leftArg.intValue + (rightArg.intValue * 2);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
         if (leftArg.section == NULL && isExternal(&leftArg) == FALSE)
@@ -669,8 +745,7 @@ static ErrorCode executeOperator(OperatorType opType) {
     case Op_Subtract:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (leftArg.type != NumberType_Integer)
-            err = registerError(Warn_ExpressionElement);
+        if (leftArg.type != NumberType_Integer) ignore = registerError(Warn_ExpressionElement);
         if (isExternal(&leftArg) && isExternal(&rightArg))
             err = registerError(Err_RelocatableField);
         if (isRelative(&rightArg)) {
@@ -695,20 +770,45 @@ static ErrorCode executeOperator(OperatorType opType) {
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue - rightArg.intValue;
             }
+            else if (isParcelAddress(&rightArg)) {
+                leftArg.intValue = (leftArg.intValue * 4) - rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = leftArg.intValue - (rightArg.intValue * 4);
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 8) - rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
-        else { // left is parcel type
+        else if (isParcelAddress(&leftArg)) { // left is parcel type
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue - rightArg.intValue;
             }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue - (rightArg.intValue * 4);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = (leftArg.intValue / 4) - rightArg.intValue;
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 2) - rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+        }
+        else { // left is byte type
+            if (isPlainValue(&rightArg)) {
+                leftArg.intValue = leftArg.intValue - rightArg.intValue;
+            }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue - (rightArg.intValue * 8);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+            else {
+                leftArg.intValue = leftArg.intValue - (rightArg.intValue * 2);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
         if (leftArg.section == NULL && isExternal(&leftArg) == FALSE)
@@ -718,8 +818,7 @@ static ErrorCode executeOperator(OperatorType opType) {
     case Op_Multiply:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (leftArg.type != NumberType_Integer)
-            err = registerError(Warn_ExpressionElement);
+        if (leftArg.type != NumberType_Integer) ignore = registerError(Warn_ExpressionElement);
         if (isExternal(&leftArg) == FALSE || isExternal(&rightArg) == FALSE) {
             if (isAbsolute(&leftArg)) {
                 if (isAbsolute(&rightArg) == FALSE) {
@@ -732,7 +831,7 @@ static ErrorCode executeOperator(OperatorType opType) {
                 if (isAbsolute(&leftArg) == FALSE) leftArg.coefficient = rightArg.intValue;
             }
             else { // both arguments are relocatable
-                err = registerError(Warn_ExpressionElement);
+                ignore = registerError(Warn_ExpressionElement);
             }
             if (isExternal(&rightArg)) {
                 leftArg.attributes |= SYM_EXTERNAL;
@@ -746,7 +845,7 @@ static ErrorCode executeOperator(OperatorType opType) {
             leftArg.intValue = leftArg.intValue * rightArg.intValue;
             if (isPlainValue(&leftArg) == FALSE) {
                 leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
         else if (isPlainValue(&leftArg)) {
@@ -758,20 +857,45 @@ static ErrorCode executeOperator(OperatorType opType) {
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue * rightArg.intValue;
             }
+            else if (isParcelAddress(&rightArg)) {
+                leftArg.intValue = (leftArg.intValue * 4) * rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = leftArg.intValue * (rightArg.intValue * 4);
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 8) * rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
-        else { // left is parcel type
+        else if (isParcelAddress(&leftArg)) { // left is parcel type
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue * rightArg.intValue;
             }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue * (rightArg.intValue * 4);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = (leftArg.intValue / 4) * rightArg.intValue;
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 2) * rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+        }
+        else { // left is byte type
+            if (isPlainValue(&rightArg)) {
+                leftArg.intValue = leftArg.intValue * rightArg.intValue;
+            }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue * (rightArg.intValue * 8);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+            else {
+                leftArg.intValue = leftArg.intValue * (rightArg.intValue * 2);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
         pushArg(&leftArg);
@@ -779,8 +903,7 @@ static ErrorCode executeOperator(OperatorType opType) {
     case Op_Divide:
         if (argStackPtr < 1) return Err_Expression;
         popArg(&leftArg);
-        if (leftArg.type != NumberType_Integer)
-            err = registerError(Warn_ExpressionElement);
+        if (leftArg.type != NumberType_Integer) ignore = registerError(Warn_ExpressionElement);
         if ((leftArg.attributes & (SYM_RELOCATABLE|SYM_IMMOBILE|SYM_EXTERNAL)) != 0
             || (rightArg.attributes & (SYM_RELOCATABLE|SYM_IMMOBILE|SYM_EXTERNAL)) != 0)
             err = registerError(Err_RelocatableField);
@@ -795,26 +918,51 @@ static ErrorCode executeOperator(OperatorType opType) {
         else if (isPlainValue(&leftArg)) {
             leftArg.intValue = leftArg.intValue / rightArg.intValue;
             leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-            err = Warn_ExpressionElement;
+            ignore = registerError(Warn_ExpressionElement);
         }
         else if (isWordAddress(&leftArg)) {
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue / rightArg.intValue;
             }
+            else if (isParcelAddress(&rightArg)) {
+                leftArg.intValue = (leftArg.intValue * 4) / rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = leftArg.intValue / (rightArg.intValue * 4);
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 8) / rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
-        else { // left is parcel type
+        else if (isParcelAddress(&leftArg)) { // left is parcel type
             if (isPlainValue(&rightArg)) {
                 leftArg.intValue = leftArg.intValue / rightArg.intValue;
             }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue / (rightArg.intValue * 4);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
             else {
-                leftArg.intValue = (leftArg.intValue / 4) / rightArg.intValue;
-                leftArg.attributes &= ~(SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
-                err = Warn_ExpressionElement;
+                leftArg.intValue = (leftArg.intValue * 2) / rightArg.intValue;
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+        }
+        else { // left is byte type
+            if (isPlainValue(&rightArg)) {
+                leftArg.intValue = leftArg.intValue / rightArg.intValue;
+            }
+            else if (isWordAddress(&rightArg)) {
+                leftArg.intValue = leftArg.intValue / (rightArg.intValue * 8);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
+            }
+            else {
+                leftArg.intValue = leftArg.intValue / (rightArg.intValue * 2);
+                leftArg.attributes &= ~(SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS);
+                ignore = registerError(Warn_ExpressionElement);
             }
         }
         pushArg(&leftArg);
@@ -1024,18 +1172,18 @@ char *getNextToken(char *s, Token *token) {
                         return parseNumber(start + 2, 10, token);
                     }
                     break;
-                case 'O':
-                case 'o':
-                    if (*s == '\'') {
-                        return parseNumber(start + 2, 8, token);
-                    }
-                    break;
                 case 'X':
                 case 'x':
                     if (*s == '\'') {
                         return parseNumber(start + 2, 16, token);
                     }
                     break;
+                case 'O':
+                case 'o':
+                    if (*s == '\'') {
+                        return parseNumber(start + 2, 8, token);
+                    }
+                    // fall through for possible "O."
                 case 'P':
                 case 'p':
                 case 'W':
@@ -1046,9 +1194,13 @@ char *getNextToken(char *s, Token *token) {
                             token->details.operator.type = Op_Parcel;
                             token->details.operator.precedence = PRECEDENCE_PARCEL;
                         }
-                        else {
+                        else if (*start == 'W' || *start == 'w') {
                             token->details.operator.type = Op_Word;
                             token->details.operator.precedence = PRECEDENCE_WORD;
+                        }
+                        else {
+                            token->details.operator.type = Op_Byte;
+                            token->details.operator.precedence = PRECEDENCE_BYTE;
                         }
                         return s + 1;
                     }
@@ -1065,6 +1217,14 @@ char *getNextToken(char *s, Token *token) {
                 token->details.name.qualPtr = NULL;
                 token->details.name.qualLen = 0;
             }
+            else if (isFlexibleSyntax) {
+                squishString(start, len);
+                token->type = TokenType_Name;
+                token->details.name.ptr = start;
+                token->details.name.len = MAX_NAME_LENGTH;
+                token->details.name.qualPtr = NULL;
+                token->details.name.qualLen = 0;
+            }
             else {
                 token->type = TokenType_Error;
                 token->details.error.code = Err_Syntax;
@@ -1077,6 +1237,24 @@ char *getNextToken(char *s, Token *token) {
     else if ((*s >= '0' && *s <= '9')
              || (*s == '.' && *(s + 1) >= '0' && *(s + 1) <= '9')) {
         s = parseNumber(s, (currentBase == 0) ? 8 : currentBase, token);
+        if (isFlexibleSyntax
+            && token->type == TokenType_Number
+            && token->details.number.type == NumberType_Integer
+            && (*s == 'f' || *s == 'b')) {
+            static char name[MAX_NAME_LENGTH+1];
+            if (*s == 'b') {
+                sprintf(name, "@%ld$%d", token->details.number.intValue, localSymbolCtrs[token->details.number.intValue]);
+            }
+            else {
+                sprintf(name, "@%ld$%d", token->details.number.intValue, localSymbolCtrs[token->details.number.intValue] + 1);
+            }
+            token->type = TokenType_Name;
+            token->details.name.ptr = name;
+            token->details.name.len = strlen(name);
+            token->details.name.qualPtr = NULL;
+            token->details.name.qualLen = 0;
+            s += 1;
+        }
     }
     //
     //  Recognize strings
@@ -1332,6 +1510,7 @@ ErrorCode getRegisterNumber(Token *regster, int *number) {
         if (err != Err_None) return err;
         if (isParcelAddress(&val)
             || isWordAddress(&val)
+            || isByteAddress(&val)
             || val.type != NumberType_Integer
             || val.intValue < 0
             || val.intValue >= limit) return Err_FieldWidth;
@@ -1408,6 +1587,7 @@ static bool isQualDelimiter(char c) {
 }
 
 static bool isRegisterDesignator(char *s, int len, Token *token) {
+    char c;
     int i;
     char *limit;
     int ordinal;
@@ -1429,7 +1609,9 @@ static bool isRegisterDesignator(char *s, int len, Token *token) {
                 ordinal = (ordinal * 8) + (*sp - '0');
             }
             else if (*pp != *sp) {
-                break;
+                if (*sp < 'a' || *sp > 'z') break;
+                c = toupper(*sp);
+                if (*pp != c) break;
             }
             pp += 1;
             sp += 1;
@@ -1649,7 +1831,7 @@ static char *parseFloat(char *s, int base, Token *token) {
             if (*s >= '0' && *s <= '9') {
                 val = (val * 16.0) + (f64)(*s - '0');
             }
-            else if (*s == 'E' && (*(s + 1) == '+' || *(s + 1) == '-')) {
+            else if ((*s == 'E' || *s == 'e') && (*(s + 1) == '+' || *(s + 1) == '-')) {
                 break;
             }
             else if (*s >= 'A' && *s <= 'F') {
@@ -1692,7 +1874,7 @@ static char *parseFloat(char *s, int base, Token *token) {
                 if (*s >= '0' && *s <= '9') {
                     frac += (f64)(*s - '0') / divisor;
                 }
-                else if (*s == 'E' && (*(s + 1) == '+' || *(s + 1) == '-')) {
+                else if ((*s == 'E' || *s == 'e') && (*(s + 1) == '+' || *(s + 1) == '-')) {
                     break;
                 }
                 else if (*s >= 'A' && *s <= 'F') {
@@ -1713,7 +1895,7 @@ static char *parseFloat(char *s, int base, Token *token) {
     /*
      *  Process power of 10 indication
      */
-    if (*s == 'E'
+    if ((*s == 'E' || *s == 'e')
         && (((*s + 1) >= '0' && (*s + 1) <= '9')
             || ((*(s + 1) == '+' || *(s + 1) == '-') && *(s + 2) >= '0' && *(s + 2) <= '9'))) {
         s = parseInteger(s + 1, base, &valE);
@@ -1778,7 +1960,7 @@ static char *parseInteger(char *s, int base, i64 *value) {
             if (*s >= '0' && *s <= '9') {
                 val = (val * 16) + (*s - '0');
             }
-            else if (*s == 'E' && (*(s + 1) == '+' || *(s + 1) == '-')) {
+            else if ((*s == 'E' || *s == 'e') && (*(s + 1) == '+' || *(s + 1) == '-')) {
                 break;
             }
             else if (*s >= 'A' && *s <= 'F') {
@@ -1805,7 +1987,7 @@ static char *parseNumber(char *s, int base, Token *token) {
 
     start = s;
     s = parseInteger(start, base, &value);
-    if (*s == '.' || *s == 'E') return parseFloat(start, base, token);
+    if (*s == '.' || *s == 'E' || *s == 'e') return parseFloat(start, base, token);
     if (*s == 'S') {
         if ((*(s + 1) >= '0' && *(s + 1) <= '9')
             || ((*(s + 1) == '+' || *(s + 1) == '-') && *(s + 2) >= '0' && *(s + 2) <= '9')) {
@@ -2099,4 +2281,11 @@ static void resetLocationField(void) {
         freeToken(locationFieldToken);
         locationFieldToken = NULL;
     }
+}
+
+static void squishString(char *s, int len) {
+    Fnv32_t hash;
+
+    hash = fnv32a(s, len, FNV1_32A_INIT);
+    sprintf(s + 4, "%04x", hash & 0xffff);
 }

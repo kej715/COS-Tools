@@ -40,6 +40,50 @@ static void freeQualifier(Qualifier *qualifier);
 static void freeSymbol(Symbol *symbol);
 static void resetSection(Section *section);
 
+/*
+**  addEntryPoint - add an entry point definition to a module's chain of them
+*/
+void addEntryPoint(Module *module, Symbol *symbol) {
+    Symbol *currentEntryPoint;
+
+    if (module->entryPoints == NULL) {
+        module->entryPoints = symbol;
+        return;
+    }
+    currentEntryPoint = module->entryPoints;
+    while (TRUE) {
+        if (strcasecmp(currentEntryPoint->id, symbol->id) == 0) return;
+        if (currentEntryPoint->next == NULL) {
+            currentEntryPoint->next = symbol;
+            return;
+        }
+        currentEntryPoint = currentEntryPoint->next;
+    }
+}
+
+/*
+**  addExternal - add an external definition to a module's chain of them
+*/
+void addExternal(Module *module, Symbol *symbol) {
+    Symbol *currentExternal;
+
+    if (module->externals == NULL) {
+        symbol->externalIndex = 0;
+        module->externals = symbol;
+        return;
+    }
+    currentExternal = module->externals;
+    while (TRUE) {
+        if (strcasecmp(currentExternal->id, symbol->id) == 0) return;
+        if (currentExternal->next == NULL) {
+            symbol->externalIndex = currentExternal->externalIndex + 1;
+            currentExternal->next = symbol;
+            return;
+        }
+        currentExternal = currentExternal->next;
+    }
+}
+
 Literal *addLiteral(Token *expression) {
     Literal *lp;
     Literal *newLiteral;
@@ -160,7 +204,7 @@ Name *addName(Name **root, char *id, int len) {
         return new;
     }
     while (current != NULL) {
-        valence = strncmp(current->id, id, len);
+        valence = strncasecmp(current->id, id, len);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -207,7 +251,7 @@ Qualifier *addQualifier(char *id, int len) {
         return new;
     }
     while (current != NULL) {
-        valence = strncmp(current->id, id, len);
+        valence = strncasecmp(current->id, id, len);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -273,7 +317,7 @@ Symbol *addSymbol(char *id, int len, Qualifier *qualifier, Value *value) {
         return new;
     }
     while (current != NULL) {
-        valence = strncmp(current->id, id, len);
+        valence = strncasecmp(current->id, id, len);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -326,6 +370,8 @@ static void adjustSymValsForSyms(Symbol *symbol) {
             symbol->value.intValue += symbol->value.section->originOffset >> 2;
         else if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0)
             symbol->value.intValue += symbol->value.section->originOffset;
+        else if ((symbol->value.attributes & SYM_BYTE_ADDRESS) != 0)
+            symbol->value.intValue += symbol->value.section->originOffset * 2;
     }
     adjustSymValsForSyms(symbol->left);
     adjustSymValsForSyms(symbol->right);
@@ -442,7 +488,7 @@ Name *findName(Name *root, char *id, int len) {
 
     current = root;
     while (current != NULL) {
-        valence = strncmp(current->id, id, (size_t)len);
+        valence = strncasecmp(current->id, id, (size_t)len);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -493,7 +539,7 @@ Qualifier *findQualifier(char *id) {
 
     current = currentModule->qualifiers;
     while (current != NULL) {
-        valence = strcmp(current->id, id);
+        valence = strcasecmp(current->id, id);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -510,7 +556,7 @@ Qualifier *findQualifierWithLen(char *id, int len) {
 
     current = currentModule->qualifiers;
     while (current != NULL) {
-        valence = strncmp(current->id, id, (size_t)len);
+        valence = strncasecmp(current->id, id, (size_t)len);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -529,7 +575,7 @@ Symbol *findSymbol(char *id, int len, Qualifier *qualifier) {
 
     current = qualifier->symbols;
     while (current != NULL) {
-        valence = strncmp(current->id, id, (size_t)len);
+        valence = strncasecmp(current->id, id, (size_t)len);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -579,6 +625,10 @@ bool isAbsolute(Value *val) {
     return (val->attributes & (SYM_IMMOBILE|SYM_RELOCATABLE|SYM_EXTERNAL)) == 0;
 }
 
+bool isByteAddress(Value *value) {
+    return (value->attributes & SYM_BYTE_ADDRESS) != 0;
+}
+
 bool isCodeSection(Section *section) {
     return section != NULL && (section->type == SectionType_Mixed || section->type == SectionType_Code);
 }
@@ -613,6 +663,18 @@ bool isNamedCommonSection(Section *section) {
     return section != NULL && section->type == SectionType_Common && *section->id != '\0';
 }
 
+bool isNotByteAddress(Value *value) {
+    return (value->attributes & (SYM_WORD_ADDRESS|SYM_PARCEL_ADDRESS)) != 0;
+}
+
+bool isNotParcelAddress(Value *value) {
+    return (value->attributes & (SYM_WORD_ADDRESS|SYM_BYTE_ADDRESS)) != 0;
+}
+
+bool isNotWordAddress(Value *value) {
+    return (value->attributes & (SYM_PARCEL_ADDRESS|SYM_BYTE_ADDRESS)) != 0;
+}
+
 bool isParcelAddress(Value *value) {
     return (value->attributes & SYM_PARCEL_ADDRESS) != 0;
 }
@@ -630,7 +692,7 @@ bool isRelocatable(Value *val) {
 }
 
 bool isSameSection(Section *s1, Section *s2) {
-    return (strcmp(s1->id, s2->id) == 0 && s1->type == s2->type && s1->location == s2->location);
+    return (strcasecmp(s1->id, s2->id) == 0 && s1->type == s2->type && s1->location == s2->location);
 }
 
 bool isWordAddress(Value *value) {

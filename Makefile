@@ -30,11 +30,13 @@ CALHDRS = basetypes.h    \
           caltypes.h     \
           cosdataset.h   \
           cosldr.h       \
+          fnv.h          \
           services.h
 
 CALOBJS = cal.o          \
           cosdataset.o   \
           error.o        \
+          fnv32a.o       \
           global.o       \
           inst.o         \
           io.o           \
@@ -72,6 +74,8 @@ cal.o:  cal.c $(CALHDRS)
 cosdataset.o: cosdataset.c cosdataset.h
 	$(CC) $(CFLAGS) -c $<
 error.o: error.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+fnv32a.o: fnv32a.c fnv.h
 	$(CC) $(CFLAGS) -c $<
 global.o: global.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<

@@ -62,8 +62,6 @@ typedef struct patternNode {
     };
 } PatternNode;
 
-static void addEntryPoint(Module *module, Symbol *symbol);
-static void addExternal(Module *module, Symbol *symbol);
 static void addInstruction(char *id, u8 attributes, InstructionHandler handler);
 static void addMacroCallParam(MacroCall *call, MacroParam *param, char *value, int valueLen);
 static MacroLine *addMacroLine(MacroDefn *defn);
@@ -115,6 +113,7 @@ static int instArgc;
 static Token *instArgv[MAX_INST_ARGS];
 static PatternNode *instructionPatterns = NULL;
 static NamedInstruction *namedInstructions = NULL;
+static Value zeroIntVal = {NumberType_Integer, 0, NULL, NULL, 0, 0};
 
 /*
 **--------------------------------------------------------------------------
@@ -258,7 +257,7 @@ static ErrorCode BLOCK(void) {
         return Err_OperandField;
     }
     for (section = currentModule->firstSection; section != NULL; section = section->next) {
-        if (strncmp(section->id, id, len) == 0
+        if (strncasecmp(section->id, id, len) == 0
             && section->id[len] == '\0'
             && section->type == SectionType_Mixed
             && section->location == SectionLocation_CM) break;
@@ -298,7 +297,7 @@ static ErrorCode BSS(void) {
         || isInteger(&val) == FALSE
         || isIntegerRange(&val, 0, 0x3fffff) == FALSE
         || isAbsolute(&val) == FALSE
-        || isParcelAddress(&val))
+        || isNotWordAddress(&val))
         return Err_OperandField;
     listValue(&val);
     firstAddress = currentSection->originCounter;
@@ -330,7 +329,7 @@ static ErrorCode BSSZ(void) {
         || isInteger(&val) == FALSE
         || isIntegerRange(&val, 0, 0x3fffff) == FALSE
         || isAbsolute(&val) == FALSE
-        || isParcelAddress(&val))
+        || isNotWordAddress(&val))
         return Err_OperandField;
     listValue(&val);
     savedListControl = currentListControl;
@@ -399,7 +398,7 @@ static ErrorCode COMMON(void) {
         return Err_OperandField;
     }
     for (section = currentModule->firstSection; section != NULL; section = section->next) {
-        if (strncmp(section->id, id, len) == 0 && section->id[len] == '\0') break;
+        if (strncasecmp(section->id, id, len) == 0 && section->id[len] == '\0') break;
     }
     if (section == NULL) {
         if (pass == 1) {
@@ -593,6 +592,11 @@ static ErrorCode ENTRY(void) {
                 symbol = NULL;
                 err = registerError(Err_OperandField);
             }
+            else if ((symbol->value.attributes & SYM_BYTE_ADDRESS) != 0
+                     && (symbol->value.intValue & 0x07) != 0) {
+                symbol = NULL;
+                err = registerError(Err_OperandField);
+            }
             if (pass == 1 && symbol != NULL) {
                 symbol->value.attributes |= SYM_ENTRY;
                 addEntryPoint(currentModule, symbol);
@@ -754,6 +758,12 @@ static bool hasAttrVAL(Token *expression, ErrorCode *err) {
     *err = evaluateExpression(expression, &val);
     return isDefined(&val) && isPlainValue(&val);
 }
+static bool hasAttrBA(Token *expression, ErrorCode *err) {
+    Value val;
+
+    *err = evaluateExpression(expression, &val);
+    return isDefined(&val) && isByteAddress(&val);
+}
 static bool hasAttrPA(Token *expression, ErrorCode *err) {
     Value val;
 
@@ -878,6 +888,7 @@ typedef struct attrEvalDefn {
 
 static AttrEvalDefn attrEvalDefns[] = {
     {"VAL",     3, hasAttrVAL},
+    {"BA",      2, hasAttrBA},
     {"PA",      2, hasAttrPA},
     {"WA",      2, hasAttrWA},
     {"ABS",     3, hasAttrABS},
@@ -1168,7 +1179,7 @@ static ErrorCode LOC(void) {
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
     if (*s != '\0'
-        || isParcelAddress(&val)
+        || isNotWordAddress(&val)
         || isInteger(&val) == FALSE
         || val.intValue < 0
         || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
@@ -1317,7 +1328,7 @@ static ErrorCode MACRO(void) {
         }
         s = getNextName(s, &id, &len);
         if (locationParamLen == macroNameLen
-            && strncmp(locationParam, name->id, locationParamLen) == 0
+            && strncasecmp(locationParam, name->id, locationParamLen) == 0
             && len == 4
             && strncasecmp(id, "ENDM", 4) == 0) {
             return Err_None; // end of macro definition
@@ -1512,7 +1523,7 @@ static ErrorCode ORG(void) {
         if (err != Err_None) return err;
     }
     if (*s != '\0'
-        || isParcelAddress(&val)
+        || isNotWordAddress(&val)
         || isInteger(&val) == FALSE
         || val.intValue < 0
         || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
@@ -1652,7 +1663,7 @@ static ErrorCode SECTION(void) {
             || type == SectionType_Dynamic
             || type == SectionType_TaskCom;
     for (section = currentModule->firstSection; section != NULL; section = section->next) {
-        if (strncmp(section->id, id, len) == 0
+        if (strncasecmp(section->id, id, len) == 0
             && section->id[len] == '\0'
             && ((section->type == type && section->location == location)
                 || isCommon || isCommonSection(section)))
@@ -1964,12 +1975,10 @@ static ErrorCode Ai__Aj_add_1(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
-    if (isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 030, i, j, 0);
-    }
-    else {
+    if (isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 030, i, j, 0);
     return err;
 }
 
@@ -1999,12 +2008,10 @@ static ErrorCode Ai__Aj_sub_1(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
-    if (isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 031, i, j, 0);
-    }
-    else {
+    if (isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 031, i, j, 0);
     return err;
 }
 
@@ -2038,6 +2045,7 @@ static ErrorCode Ai__X(void) {
         }
     }
     else {
+        emit_gh_i_jk(currentSection, 031, i, 0);
         err = Err_OperandField;
     }
     return err;
@@ -2055,12 +2063,11 @@ static ErrorCode Ai__X_Ah(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     err = registerError(getRegisterNumber(instArgv[2], &h));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
-        emit_g_h_i_jkm(currentSection, 010, h, i, &val);
-    }
-    else {
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val)) {
+        val = zeroIntVal;
         err = Err_OperandField;
     }
+    emit_g_h_i_jkm(currentSection, 010, h, i, &val);
     return err;
 }
 
@@ -2078,12 +2085,11 @@ static ErrorCode Ai__X_X(void) {
     err = registerError(evaluateExpression(instArgv[1], &val1));
     err = registerError(evaluateExpression(instArgv[2], &val2));
     if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
-        emit_gh_i_jkm(currentSection, 0100, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val1)) {
+        val1 = zeroIntVal;
+        err  = Err_OperandField;
     }
-    else {
-        err = Err_OperandField;
-    }
+    emit_gh_i_jkm(currentSection, 0100, i, &val1);
     return err;
 }
 
@@ -2199,12 +2205,11 @@ static ErrorCode Bjk_Ai__X_A0(void) {
     err = registerError(getRegisterNumber(instArgv[1], &i));
     err = registerError(evaluateExpression(instArgv[2], &val));
     err = registerError(getRegisterNumber(instArgv[3], &z));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(currentSection, 034, i, jk);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
+        val = zeroIntVal;
         err = Err_OperandField;
     }
+    emit_gh_i_jk(currentSection, 034, i, jk);
     return err;
 }
 
@@ -2275,12 +2280,11 @@ static ErrorCode CLN(void) {
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
-    if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 5)) {
-        emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 3);
-    }
-    else {
+    if (isSimpleInteger(&val) == FALSE || isIntegerRange(&val, 0, 5) == FALSE) {
+        val = zeroIntVal;
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 3);
     return err;
 }
 
@@ -2384,12 +2388,11 @@ static ErrorCode IP(void) {
     s = getNextValue(operandField, &val, &err);
     if (*s != '\0') err = Err_OperandField;
     if (err != Err_None) (void)registerError(err);
-    if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 1)) {
-        emit_gh_ijk(currentSection, 001, val.intValue == 0 ? 0402 : 0401);
-    }
-    else {
+    if (isSimpleInteger(&val) == FALSE || isIntegerRange(&val, 0, 1) == FALSE) {
+        val = zeroIntVal;
         err = Err_OperandField;
     }
+    emit_gh_ijk(currentSection, 001, val.intValue == 0 ? 0402 : 0401);
     return err;
 }
 
@@ -2813,12 +2816,10 @@ static ErrorCode Si__Si_left_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &i2));
     err = registerError(getRegisterNumber(instArgv[2], &k));
-    if (i == i2) {
-        emit_gh_i_j_k(currentSection, 056, i, 0, k);
-    }
-    else {
+    if (i != i2) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 056, i, 0, k);
     return err;
 }
 
@@ -2836,12 +2837,10 @@ static ErrorCode Si__SiSj_left_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[1], &i2));
     err = registerError(getRegisterNumber(instArgv[2], &j));
     err = registerError(getRegisterNumber(instArgv[3], &k));
-    if (i == i2) {
-        emit_gh_i_j_k(currentSection, 056, i, j, k);
-    }
-    else {
+    if (i != i2) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 056, i, j, k);
     return err;
 }
 
@@ -2859,12 +2858,10 @@ static ErrorCode Si__SiSj_left_X(void) {
     err = registerError(getRegisterNumber(instArgv[1], &i2));
     err = registerError(getRegisterNumber(instArgv[2], &j));
     err = registerError(evaluateExpression(instArgv[3], &val));
-    if (i == i2 && isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 056, i, j, 0);
-    }
-    else {
+    if (i != i2 || isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 056, i, j, 0);
     return err;
 }
 
@@ -2899,10 +2896,12 @@ static ErrorCode Si__Si_left_X(void) {
             }
         }
         else {
+            emit_gh_ijk(currentSection, 053, 0);
             err = Err_OperandField;
         }
     }
     else {
+        emit_gh_ijk(currentSection, 053, 0);
         err = Err_OperandField;
     }
     return err;
@@ -2920,12 +2919,10 @@ static ErrorCode Si__Si_right_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &i2));
     err = registerError(getRegisterNumber(instArgv[2], &k));
-    if (i == i2) {
-        emit_gh_i_j_k(currentSection, 057, i, 0, k);
-    }
-    else {
+    if (i != i2) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 057, i, 0, k);
     return err;
 }
 
@@ -2943,12 +2940,10 @@ static ErrorCode Si__SjSi_right_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(getRegisterNumber(instArgv[2], &i2));
     err = registerError(getRegisterNumber(instArgv[3], &k));
-    if (i == i2) {
-        emit_gh_i_j_k(currentSection, 057, i, j, k);
-    }
-    else {
+    if (i != i2) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 057, i, j, k);
     return err;
 }
 
@@ -2966,12 +2961,10 @@ static ErrorCode Si__SjSi_right_X(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(getRegisterNumber(instArgv[2], &i2));
     err = registerError(evaluateExpression(instArgv[3], &val));
-    if (i == i2 && isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 057, i, j, 0);
-    }
-    else {
+    if (i != i2 || isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 057, i, j, 0);
     return err;
 }
 
@@ -3006,10 +2999,12 @@ static ErrorCode Si__Si_right_X(void) {
             }
         }
         else {
+            emit_gh_ijk(currentSection, 052, 0);
             err = Err_OperandField;
         }
     }
     else {
+        emit_gh_ijk(currentSection, 052, 0);
         err = Err_OperandField;
     }
     return err;
@@ -3069,6 +3064,7 @@ static ErrorCode Si__CmplMaskLeft(void) {
         }
     }
     else {
+        emit_gh_i_jk(currentSection, 042, i, 0);
         err = Err_OperandField;
     }
     return err;
@@ -3093,6 +3089,7 @@ static ErrorCode Si__CmplMaskRight(void) {
         }
     }
     else {
+        emit_gh_i_jk(currentSection, 043, i, 0);
         err = Err_OperandField;
     }
     return err;
@@ -3124,6 +3121,7 @@ static ErrorCode Si__MaskLeft(void) {
         }
     }
     else {
+        emit_gh_i_jk(currentSection, 042, i, 0);
         err = Err_OperandField;
     }
     return err;
@@ -3148,6 +3146,7 @@ static ErrorCode Si__MaskRight(void) {
         }
     }
     else {
+        emit_gh_i_jk(currentSection, 043, i, 0);
         err = Err_OperandField;
     }
     return err;
@@ -3249,6 +3248,7 @@ static ErrorCode Si__X(void) {
         emit_gh_i_jk(currentSection, 071, i, 030);
     }
     else {
+        emit_gh_i_jk(currentSection, 043, i, 0);
         err = Err_OperandField;
     }
     return err;
@@ -3266,12 +3266,11 @@ static ErrorCode Si__X_Ah(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     err = registerError(getRegisterNumber(instArgv[2], &h));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
-        emit_g_h_i_jkm(currentSection, 012, h, i, &val);
-    }
-    else {
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val)) {
         err = Err_OperandField;
+        val = zeroIntVal;
     }
+    emit_g_h_i_jkm(currentSection, 012, h, i, &val);
     return err;
 }
 
@@ -3289,12 +3288,11 @@ static ErrorCode Si__X_X(void) {
     err = registerError(evaluateExpression(instArgv[1], &val1));
     err = registerError(evaluateExpression(instArgv[2], &val2));
     if (isZero(&val2) == FALSE) err = registerError(Err_OperandField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
-        emit_gh_i_jkm(currentSection, 0120, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val1)) {
+        err  = Err_OperandField;
+        val1 = zeroIntVal;
     }
-    else {
-        err = Err_OperandField;
-    }
+    emit_gh_i_jkm(currentSection, 0120, i, &val1);
     return err;
 }
 
@@ -3327,12 +3325,11 @@ static ErrorCode SIPI(void) {
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
-    if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 3)) {
-        emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 1);
-    }
-    else {
+    if (isSimpleInteger(&val) == FALSE || isIntegerRange(&val, 0, 3) == FALSE) {
+        val = zeroIntVal;
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 1);
     return err;
 }
 
@@ -3365,6 +3362,7 @@ static ErrorCode SMjk__X(void) {
         emit_gh_i_jk(currentSection, 003, 7, jk);
     }
     else {
+        emit_gh_i_jk(currentSection, 003, 6, jk);
         err = Err_OperandField;
     }
     return err;
@@ -3381,20 +3379,16 @@ static ErrorCode SMjk__X_X(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &jk));
     err = registerError(evaluateExpression(instArgv[1], &val));
-    if (isOne(&val)) {
-        arg2 = instArgv[2];
-        if (arg2->type == TokenType_Name
-            && arg2->details.name.len == 2
-            && strncasecmp(arg2->details.name.ptr, "TS", 2) == 0) {
-            emit_gh_i_jk(currentSection, 003, 4, jk);
-        }
-        else {
-            err = Err_OperandField;
-        }
-    }
-    else {
+    if (isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    arg2 = instArgv[2];
+    if (arg2->type != TokenType_Name
+        || arg2->details.name.len != 2
+        || strncasecmp(arg2->details.name.ptr, "TS", 2) != 0) {
+        err = Err_OperandField;
+    }
+    emit_gh_i_jk(currentSection, 003, 4, jk);
     return err;
 }
 
@@ -3440,12 +3434,10 @@ static ErrorCode Tjk_Ai__X_A0(void) {
     err = registerError(getRegisterNumber(instArgv[1], &i));
     err = registerError(evaluateExpression(instArgv[2], &val));
     err = registerError(getRegisterNumber(instArgv[3], &z));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(currentSection, 036, i, jk);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_jk(currentSection, 036, i, jk);
     return err;
 }
 
@@ -3580,12 +3572,10 @@ static ErrorCode Vi__Vj_left_1(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
-    if (isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 0150, i, j, 0);
-    }
-    else {
+    if (isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0150, i, j, 0);
     return err;
 }
 
@@ -3608,12 +3598,10 @@ static ErrorCode Vi__Vj_right_1(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &j));
     err = registerError(evaluateExpression(instArgv[2], &val));
-    if (isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 0151, i, j, 0);
-    }
-    else {
+    if (isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0151, i, j, 0);
     return err;
 }
 
@@ -3631,12 +3619,10 @@ static ErrorCode Vi__VjVj_left_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j1));
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(getRegisterNumber(instArgv[3], &k));
-    if (j1 == j2) {
-        emit_gh_i_j_k(currentSection, 0152, i, j1, k);
-    }
-    else {
+    if (j1 != j2) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0152, i, j1, k);
     return err;
 }
 
@@ -3654,12 +3640,10 @@ static ErrorCode Vi__VjVj_left_1(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j1));
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(evaluateExpression(instArgv[3], &val));
-    if (j1 == j2 && isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 0152, i, j1, 0);
-    }
-    else {
+    if (j1 != j2 || isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0152, i, j1, 0);
     return err;
 }
 
@@ -3677,12 +3661,10 @@ static ErrorCode Vi__VjVj_right_Ak(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j1));
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(getRegisterNumber(instArgv[3], &k));
-    if (j1 == j2) {
-        emit_gh_i_j_k(currentSection, 0153, i, j1, k);
-    }
-    else {
+    if (j1 != j2) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0153, i, j1, k);
     return err;
 }
 
@@ -3700,12 +3682,10 @@ static ErrorCode Vi__VjVj_right_1(void) {
     err = registerError(getRegisterNumber(instArgv[1], &j1));
     err = registerError(getRegisterNumber(instArgv[2], &j2));
     err = registerError(evaluateExpression(instArgv[3], &val));
-    if (j1 == j2 && isOne(&val)) {
-        emit_gh_i_j_k(currentSection, 0153, i, j1, 0);
-    }
-    else {
+    if (j1 != j2 || isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0153, i, j1, 0);
     return err;
 }
 
@@ -3838,12 +3818,10 @@ static ErrorCode Vi__0(void) {
 
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
-    if (isZero(&val)) {
-        emit_gh_i_j_k(currentSection, 0145, i, i, i);
-    }
-    else {
+    if (isZero(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0145, i, i, i);
     return err;
 }
 
@@ -3861,12 +3839,10 @@ static ErrorCode Vi__0_A0_Ak(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     err = registerError(getRegisterNumber(instArgv[2], &z));
     err = registerError(getRegisterNumber(instArgv[3], &k));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(currentSection, 0176, i, 0, k);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0176, i, 0, k);
     return err;
 }
 
@@ -3884,12 +3860,10 @@ static ErrorCode Vi__0_A0_Vk(void) {
     err = registerError(evaluateExpression(instArgv[1], &val));
     err = registerError(getRegisterNumber(instArgv[2], &z));
     err = registerError(getRegisterNumber(instArgv[3], &k));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(currentSection, 0176, i, 1, k);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 0176, i, 1, k);
     return err;
 }
 
@@ -3907,12 +3881,10 @@ static ErrorCode Vi__0_A0_1(void) {
     err = registerError(evaluateExpression(instArgv[1], &val1));
     err = registerError(getRegisterNumber(instArgv[2], &z));
     err = registerError(evaluateExpression(instArgv[3], &val2));
-    if (z == 0 && isZero(&val1) && isOne(&val2)) {
-        emit_gh_i_jk(currentSection, 0176, i, 0);
-    }
-    else {
+    if (z != 0 || isZero(&val1) == FALSE || isOne(&val2) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_jk(currentSection, 0176, i, 0);
     return err;
 }
 
@@ -3944,12 +3916,10 @@ static ErrorCode Vi_Ak__X(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(getRegisterNumber(instArgv[1], &k));
     err = registerError(evaluateExpression(instArgv[2], &val));
-    if (isZero(&val)) {
-        emit_gh_i_j_k(currentSection, 077, i, 0, k);
-    }
-    else {
+    if (isZero(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_i_j_k(currentSection, 077, i, 0, k);
     return err;
 }
 
@@ -3970,6 +3940,9 @@ static ErrorCode Vi_VM__Vj_ID(void) {
     arg3 = instArgv[3];
     if (arg3->type == TokenType_Name && arg3->details.name.len == 1) {
         switch (*arg3->details.name.ptr) {
+        default:
+            err = Err_OperandField;
+            // fall through
         case 'Z':
             emit_gh_i_j_k(currentSection, 0175, i, j, 4);
             break;
@@ -3982,12 +3955,10 @@ static ErrorCode Vi_VM__Vj_ID(void) {
         case 'M':
             emit_gh_i_j_k(currentSection, 0175, i, j, 7);
             break;
-        default:
-            err = Err_OperandField;
-            break;
         }
     }
     else {
+        emit_gh_i_j_k(currentSection, 0175, i, j, 4);
         err = Err_OperandField;
     }
     return err;
@@ -4013,12 +3984,10 @@ static ErrorCode VL__X(void) {
     Value val;
 
     err = registerError(evaluateExpression(instArgv[1], &val));
-    if (isOne(&val)) {
-        emit_gh_ijk(currentSection, 002, 0);
-    }
-    else {
+    if (isOne(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_ijk(currentSection, 002, 0);
     return err;
 }
 
@@ -4042,12 +4011,10 @@ static ErrorCode VM__X(void) {
     Value val;
 
     err = registerError(evaluateExpression(instArgv[1], &val));
-    if (isZero(&val)) {
-        emit_gh_ijk(currentSection, 003, 0);
-    }
-    else {
+    if (isZero(&val) == FALSE) {
         err = Err_OperandField;
     }
+    emit_gh_ijk(currentSection, 003, 0);
     return err;
 }
 
@@ -4066,6 +4033,9 @@ static ErrorCode VM__Vj_ID(void) {
     arg2 = instArgv[2];
     if (arg2->type == TokenType_Name && arg2->details.name.len == 1) {
         switch (*arg2->details.name.ptr) {
+        default:
+            err = Err_OperandField;
+            // fall through
         case 'Z':
             emit_gh_i_j_k(currentSection, 0175, 0, j, 0);
             break;
@@ -4078,12 +4048,10 @@ static ErrorCode VM__Vj_ID(void) {
         case 'M':
             emit_gh_i_j_k(currentSection, 0175, 0, j, 3);
             break;
-        default:
-            err = Err_OperandField;
-            break;
         }
     }
     else {
+        emit_gh_i_j_k(currentSection, 0175, 0, j, 0);
         err = Err_OperandField;
     }
     return err;
@@ -4115,12 +4083,10 @@ static ErrorCode X_Ah__Bjk_Ai(void) {
     err = registerError(getRegisterNumber(instArgv[1], &z));
     err = registerError(getRegisterNumber(instArgv[2], &jk));
     err = registerError(getRegisterNumber(instArgv[3], &i));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(currentSection, 035, i, jk);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
         err = Err_ResultField;
     }
+    emit_gh_i_jk(currentSection, 035, i, jk);
     return err;
 }
 
@@ -4138,12 +4104,10 @@ static ErrorCode X_Ah__Tjk_Ai(void) {
     err = registerError(getRegisterNumber(instArgv[1], &z));
     err = registerError(getRegisterNumber(instArgv[2], &jk));
     err = registerError(getRegisterNumber(instArgv[3], &i));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_jk(currentSection, 037, i, jk);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
         err = Err_ResultField;
     }
+    emit_gh_i_jk(currentSection, 037, i, jk);
     return err;
 }
 
@@ -4160,12 +4124,11 @@ static ErrorCode X_Ah__Ai(void) {
     err = registerError(evaluateExpression(instArgv[0], &val));
     err = registerError(getRegisterNumber(instArgv[1], &h));
     err = registerError(getRegisterNumber(instArgv[2], &i));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
-        emit_g_h_i_jkm(currentSection, 011, h, i, &val);
-    }
-    else {
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val)) {
+        val = zeroIntVal;
         err = Err_ResultField;
     }
+    emit_g_h_i_jkm(currentSection, 011, h, i, &val);
     return err;
 }
 
@@ -4183,12 +4146,11 @@ static ErrorCode X_X__Ai(void) {
     err = registerError(evaluateExpression(instArgv[1], &val2));
     err = registerError(getRegisterNumber(instArgv[2], &i));
     if (isZero(&val2) == FALSE) err = registerError(Err_ResultField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
-        emit_gh_i_jkm(currentSection, 0110, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val1)) {
+        val1 = zeroIntVal;
+        err  = Err_ResultField;
     }
-    else {
-        err = Err_ResultField;
-    }
+    emit_gh_i_jkm(currentSection, 0110, i, &val1);
     return err;
 }
 
@@ -4205,12 +4167,11 @@ static ErrorCode X_Ah__Si(void) {
     err = registerError(evaluateExpression(instArgv[0], &val));
     err = registerError(getRegisterNumber(instArgv[1], &h));
     err = registerError(getRegisterNumber(instArgv[2], &i));
-    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val) == FALSE) {
-        emit_g_h_i_jkm(currentSection, 013, h, i, &val);
-    }
-    else {
+    if (isIntegerRange(&val, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val)) {
+        val = zeroIntVal;
         err = Err_ResultField;
     }
+    emit_g_h_i_jkm(currentSection, 013, h, i, &val);
     return err;
 }
 
@@ -4228,12 +4189,11 @@ static ErrorCode X_X__Si(void) {
     err = registerError(evaluateExpression(instArgv[1], &val2));
     err = registerError(getRegisterNumber(instArgv[2], &i));
     if (isZero(&val2) == FALSE) err = registerError(Err_ResultField);
-    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) && isParcelAddress(&val1) == FALSE) {
-        emit_gh_i_jkm(currentSection, 0130, i, &val1);
+    if (isIntegerRange(&val1, INT_22_LOWER, INT_22_UPPER) == FALSE || isNotWordAddress(&val1)) {
+        val1 = zeroIntVal;
+        err  = Err_ResultField;
     }
-    else {
-        err = Err_ResultField;
-    }
+    emit_gh_i_jkm(currentSection, 0130, i, &val1);
     return err;
 }
 
@@ -4251,12 +4211,10 @@ static ErrorCode X_A0_Ak__Vj(void) {
     err = registerError(getRegisterNumber(instArgv[1], &z));
     err = registerError(getRegisterNumber(instArgv[2], &k));
     err = registerError(getRegisterNumber(instArgv[3], &j));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(currentSection, 0177, 0, j, k);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
         err = Err_ResultField;
     }
+    emit_gh_i_j_k(currentSection, 0177, 0, j, k);
     return err;
 }
 
@@ -4274,12 +4232,10 @@ static ErrorCode X_A0_Vk__Vj(void) {
     err = registerError(getRegisterNumber(instArgv[1], &z));
     err = registerError(getRegisterNumber(instArgv[2], &k));
     err = registerError(getRegisterNumber(instArgv[3], &j));
-    if (z == 0 && isZero(&val)) {
-        emit_gh_i_j_k(currentSection, 0177, 1, j, k);
-    }
-    else {
+    if (z != 0 || isZero(&val) == FALSE) {
         err = Err_ResultField;
     }
+    emit_gh_i_j_k(currentSection, 0177, 1, j, k);
     return err;
 }
 
@@ -4297,57 +4253,11 @@ static ErrorCode X_A0_1__Vj(void) {
     err = registerError(getRegisterNumber(instArgv[1], &z));
     err = registerError(evaluateExpression(instArgv[2], &val2));
     err = registerError(getRegisterNumber(instArgv[3], &j));
-    if (z == 0 && isZero(&val1) && isOne(&val2)) {
-        emit_gh_i_j_k(currentSection, 0177, 0, j, 0);
-    }
-    else {
+    if (z != 0 || isZero(&val1) == FALSE || isOne(&val2) == FALSE) {
         err = Err_ResultField;
     }
+    emit_gh_i_j_k(currentSection, 0177, 0, j, 0);
     return err;
-}
-
-/*
-**  addEntryPoint - add an entry point definition to a module's chain of them
-*/
-static void addEntryPoint(Module *module, Symbol *symbol) {
-    Symbol *currentEntryPoint;
-
-    if (module->entryPoints == NULL) {
-        module->entryPoints = symbol;
-        return;
-    }
-    currentEntryPoint = module->entryPoints;
-    while (TRUE) {
-        if (strcmp(currentEntryPoint->id, symbol->id) == 0) return;
-        if (currentEntryPoint->next == NULL) {
-            currentEntryPoint->next = symbol;
-            return;
-        }
-        currentEntryPoint = currentEntryPoint->next;
-    }
-}
-
-/*
-**  addExternal - add an external definition to a module's chain of them
-*/
-static void addExternal(Module *module, Symbol *symbol) {
-    Symbol *currentExternal;
-
-    if (module->externals == NULL) {
-        symbol->externalIndex = 0;
-        module->externals = symbol;
-        return;
-    }
-    currentExternal = module->externals;
-    while (TRUE) {
-        if (strcmp(currentExternal->id, symbol->id) == 0) return;
-        if (currentExternal->next == NULL) {
-            symbol->externalIndex = currentExternal->externalIndex + 1;
-            currentExternal->next = symbol;
-            return;
-        }
-        currentExternal = currentExternal->next;
-    }
 }
 
 /*
@@ -4662,17 +4572,40 @@ static ErrorCode defineSymbol(u16 attributes) {
         s = getNextToken(s + 1, &token);
         if (token.type == TokenType_Name && token.details.name.len == 1) {
             switch (*token.details.name.ptr) {
+            case 'O':
+            case 'o':
+                if (isWordAddress(&val)) {
+                    val.intValue *= 8;
+                }
+                else if (isParcelAddress(&val)) {
+                    val.intValue *= 2;
+                }
+                val.attributes = SYM_PARCEL_ADDRESS;
+                break;
             case 'P':
-                if (isWordAddress(&val)) val.intValue *= 4;
+            case 'p':
+                if (isWordAddress(&val)) {
+                    val.intValue *= 4;
+                }
+                else if (isByteAddress(&val)) {
+                    val.intValue /= 2;
+                }
                 val.attributes = SYM_PARCEL_ADDRESS;
                 break;
             case 'V':
+            case 'v':
                 if (isRelocatable(&val)) err = registerError(Err_OperandField);
                 val.attributes = 0;
                 val.section = NULL;
                 break;
             case 'W':
-                if (isParcelAddress(&val)) val.intValue /= 4;
+            case 'w':
+                if (isParcelAddress(&val)) {
+                    val.intValue /= 4;
+                }
+                else if (isByteAddress(&val)) {
+                    val.intValue /= 8;
+                }
                 val.attributes = SYM_WORD_ADDRESS;
                 break;
             default:
@@ -4739,12 +4672,12 @@ static MacroParam *findMacroParam(MacroDefn *defn, char *name, int len) {
     MacroParam *pp;
 
     if (defn->locationParam != NULL
-        && strncmp(defn->locationParam->name, name, len) == 0
+        && strncasecmp(defn->locationParam->name, name, len) == 0
         && defn->locationParam->name[len] == '\0')
         return defn->locationParam;
     pp = defn->params;
     while (pp != NULL) {
-        if (strncmp(pp->name, name, len) == 0 && pp->name[len] == '\0')
+        if (strncasecmp(pp->name, name, len) == 0 && pp->name[len] == '\0')
             return pp;
         pp = pp->next;
     }
@@ -5000,6 +4933,9 @@ static ErrorCode handleBranch(u16 opCode) {
     if (isWordAddress(&val)) {
         val.intValue <<= 2;
         val.attributes = (val.attributes & ~SYM_WORD_ADDRESS) | SYM_PARCEL_ADDRESS;
+    }
+    else if (isByteAddress(&val)) {
+        err = Err_OperandField;
     }
     emit_gh_ijkm(currentSection, opCode, &val);
     return err;
@@ -5992,7 +5928,7 @@ static void skipLines(Token *locationFieldToken, int count) {
                 if (isUnqualifiedName(&token)
                     && *s == ' '
                     && condToken->details.name.len == token.details.name.len
-                    && strncmp(condToken->details.name.ptr, token.details.name.ptr, token.details.name.len) == 0)
+                    && strncasecmp(condToken->details.name.ptr, token.details.name.ptr, token.details.name.len) == 0)
                     break;
             }
         }

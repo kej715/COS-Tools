@@ -146,14 +146,15 @@ typedef struct name {
 #define SYM_REDEFINABLE     0x001
 #define SYM_WORD_ADDRESS    0x002
 #define SYM_PARCEL_ADDRESS  0x004
-#define SYM_LITERAL         0x008
-#define SYM_RELOCATABLE     0x010
-#define SYM_IMMOBILE        0x020
-#define SYM_EXTERNAL        0x040
-#define SYM_ENTRY           0x080
-#define SYM_COUNTER         0x100
-#define SYM_UNDEFINED       0x200
-#define SYM_DEFINED_P2      0x400
+#define SYM_BYTE_ADDRESS    0x008
+#define SYM_LITERAL         0x010
+#define SYM_RELOCATABLE     0x020
+#define SYM_IMMOBILE        0x040
+#define SYM_EXTERNAL        0x080
+#define SYM_ENTRY           0x100
+#define SYM_COUNTER         0x200
+#define SYM_UNDEFINED       0x400
+#define SYM_DEFINED_P2      0x800
 
 /*
  *  Data types of numeric values
@@ -323,6 +324,7 @@ typedef enum operatorType {
     Op_CmplMaskRight,
     Op_MaskLeft,
     Op_CmplMaskLeft,
+    Op_Byte,
     Op_Parcel,
     Op_Word,
     Op_Literal,
@@ -354,6 +356,7 @@ typedef enum operatorType {
 #define PRECEDENCE_CMPL_MASK_RIGHT 1
 #define PRECEDENCE_MASK_LEFT       1
 #define PRECEDENCE_CMPL_MASK_LEFT  1
+#define PRECEDENCE_BYTE            1
 #define PRECEDENCE_PARCEL          1
 #define PRECEDENCE_WORD            1
 #define PRECEDENCE_LITERAL         1
