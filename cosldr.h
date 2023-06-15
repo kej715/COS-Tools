@@ -468,7 +468,7 @@
 #define LDR_SMT_BO      12  /*    1  34-63  Bit offset                                 */
 
 /*----------------------------------------------------------------------------
-    The dimension descriptor portion fo the Subroutine or Common Block Table
+    The dimension descriptor portion of the Subroutine or Common Block Table
     contains a dimension descriptor for each dimensioned variable symbol. Each
     descriptor consists of an n-word entry, where n is the dimension of the 
     variable.
