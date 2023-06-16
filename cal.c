@@ -369,6 +369,7 @@ static void usage(void) {
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - object file\n", stderr);
     fputs("  -t tfile - external text file\n", stderr);
+    fputs("  -w       - exit with error status on warning indications\n", stderr);
     fputs("  -x       - enable implicit external symbols\n", stderr);
     fputs("  sfile - source file(s)\n", stderr);
     exit(1);
