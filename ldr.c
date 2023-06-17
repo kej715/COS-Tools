@@ -255,7 +255,7 @@ static u64 loadModules(Dataset *ds, int pass) {
             return 0;
         }
         else if (n == 0) {
-            cw = cosDsReadCW(sourceFile);
+            cw = cosDsReadCW(ds);
             return cw;
         }
         hdr = getWord(buf);
