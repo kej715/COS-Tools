@@ -28,6 +28,7 @@
 #define FALSE                    0
 #define IMAGE_INCREMENT          4096
 #define MAX_FILE_PATH_LENGTH     256
+#define MAX_LIBRARIES            64
 #define RELOC_TABLE_INCREMENT    200
 #define TRUE                     1
 

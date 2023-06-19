@@ -682,7 +682,7 @@ static int writeName(char *name, Dataset *ds) {
             word |= ((u64)*name++) << shiftCount;
         }
         else {
-            word |= (u64)' ' << shiftCount;
+            break;
         }
     }
     if (cosDsWriteWord(ds, word) == -1) return -1;
@@ -756,7 +756,7 @@ static int writePDT(Module *module, Dataset *ds) {
         pdtLen += (strlen(module->comment) + 7) / 8;
     }
     //
-    //  Write headser word
+    //  Write header word
     //
     word = ((u64)LDR_TT_PDT << 60)
          | (pdtLen << 36)
@@ -805,7 +805,7 @@ static int writeProgramEntry(Module *module, Dataset *ds) {
     u64 word;
 
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-         if (block->type == SectionType_Mixed) break;
+         if (block->type == SectionType_Mixed || block->type == SectionType_Code) break;
     }
     if (block == NULL) {
         return (writeName(" ", ds) == -1 || cosDsWriteWord(ds, 0) == -1) ? -1 : 0;

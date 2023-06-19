@@ -35,6 +35,12 @@ typedef struct block {
     bool isExtMem;
 } Block;
 
+typedef struct libraryModule {
+    struct libraryModule *next;
+    char *libraryPath;
+    u8 id[8];
+} LibraryModule;
+
 typedef struct module {
     struct module *next;
     char *id;
@@ -47,14 +53,14 @@ typedef struct module {
     Block *firstBlock;
     Block *lastBlock;
     int externalRefCount;
-    char *externalRefTable;
+    u8 *externalRefTable;
     char *comment;
 } Module;
 
 typedef struct symbol {
     struct symbol *left;
     struct symbol *right;
-    char *id;
+    u8 id[8];
     Block *block;
     bool isParcelAddress;
     u64 value;
