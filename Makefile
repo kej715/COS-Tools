@@ -54,16 +54,31 @@ LDRHDRS = basetypes.h    \
           ldrtypes.h     \
           services.h
 
+LIBHDRS = basetypes.h    \
+          cosdataset.h   \
+          cosldr.h       \
+          libconst.h     \
+          libproto.h     \
+          libtypes.h     \
+          services.h
+
 LDROBJS = ldr.o          \
           cosdataset.o   \
           services.o
 
-all: cal ldr
+LIBOBJS = lib.o          \
+          cosdataset.o   \
+          services.o
+
+all: cal ldr lib
 
 cal: $(CALOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+
 
 ldr: $(LDROBJS)
+	$(CC) $(LDFLAGS) -o $@ $+
+
+lib: $(LIBOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+
 
 clean:
