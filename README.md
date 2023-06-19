@@ -4,3 +4,4 @@ currently including:
 
 - cal. A cross-assembler supporting Cray Assembly Language v2.
 - ldr. A cross-loader producing executables from relocatables.
+- lib. A cross-library manager
