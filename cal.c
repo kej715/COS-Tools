@@ -36,12 +36,13 @@ static void parseOptions(int argc, char *argv[]);
 static void resetDefaultModule(void);
 static void resetLocalSymbols(void);
 static void resetQualifierStack(void);
-static int  runPass(int passNo);
+static int  runPass(int passNo, bool isExtText);
 static void timeInit(void);
 static void usage(void);
 static void writeObjectCode(void);
 
 static u16 defaultListControl = LIST_ON|LIST_XRF|LIST_XNS|LIST_WEM|LIST_WMR;
+static char *explicitIdent = NULL;
 static char *lFile = NULL;
 static char *oFile = NULL;
 
@@ -75,13 +76,13 @@ int main(int argc, char *argv[]) {
             savedSyntaxIndicator = isFlexibleSyntax;
             isFlexibleSyntax = FALSE;
         }
-        runPass(1);
+        runPass(1, isExtText);
         for (module = firstModule; module != NULL; module = module->next) {
             emitLiterals(module);
             createObjectBlocks(module);
             adjustSymbolValues(module);
         }
-        runPass(2);
+        runPass(2, isExtText);
         for (module = firstModule; module != NULL; module = module->next) {
             emitLiterals(module);
         }
@@ -238,7 +239,7 @@ static void parseOptions(int argc, char *argv[]) {
                 hash = fnv32a(sp, len, FNV1_32A_INIT);
                 sprintf(sp + 4, "%04x", hash & 0xffff);
             }
-            defaultModule = addModule(sp, strlen(sp));
+            explicitIdent = sp;
         }
         else if (strcmp(argv[i], "-l") == 0) {
             i += 1;
@@ -299,9 +300,6 @@ void resetBase(void) {
 
 static void resetDefaultModule(void) {
     currentModule = defaultModule;
-    if (currentModule->id[0] != '\0') {
-        firstModule = lastModule = currentModule;
-    }
     resetModule(currentModule);
     currentQualifier = findQualifier("");
     currentSection = currentModule->firstSection;
@@ -323,8 +321,9 @@ static void resetQualifierStack(void) {
     currentQualifier = findQualifier("");
 }
 
-static int runPass(int passNo) {
+static int runPass(int passNo, bool isExtText) {
     ErrorCode err;
+    Module *module;
 
     pass = passNo;
     listControlStackPtr = 0;
@@ -337,6 +336,26 @@ static int runPass(int passNo) {
     if (fseek(sourceFile, 0L, SEEK_SET) != 0) {
         fputs("Failed to rewind source file\n", stderr);
         exit(1);
+    }
+    if (explicitIdent != NULL && isExtText == FALSE) {
+        if (pass == 1) {
+            currentModule = addModule(explicitIdent, strlen(explicitIdent));
+        }
+        else { // pass == 2
+            module = findModule(explicitIdent, strlen(explicitIdent));
+            if (module == NULL) {
+                fprintf(stderr, "Module vanished in pass 2: %s\n", explicitIdent);
+                exit(1);
+            }
+            resetModule(module);
+            currentModule = module;
+        }
+        currentQualifier = findQualifier("");
+        currentSection = currentModule->firstSection;
+        sectionStackPtr = 0;
+        macroStackPtr = 0;
+        qualifierStackPtr = 0;
+        listEject();
     }
     while (isEof() == FALSE) {
         listControlMask = LIST_ON;
