@@ -700,7 +700,7 @@ int writeObjectRecord(Module *module, Dataset *ds) {
      *  Write a Text Table (TXT) for each object block
      */
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-         if (writeTXT(block, block->type == SectionType_Mixed && module->isAbsolute, ds) == -1)
+         if (writeTXT(block, (block->type == SectionType_Mixed || block->type == SectionType_Code) && module->isAbsolute, ds) == -1)
              return -1;
     }
     /*

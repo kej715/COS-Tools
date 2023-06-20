@@ -1279,7 +1279,7 @@ static int writePDT(Dataset *ds) {
     //  Write starting entry point
     //
     if (startSymbol != NULL) {
-        id = startSymbol->id;
+        id = (char *)startSymbol->id;
         isParcelRelocation = startSymbol->isParcelAddress;
         startAddress = startSymbol->value;
     }

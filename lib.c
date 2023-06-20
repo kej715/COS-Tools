@@ -38,11 +38,11 @@ static void addBlock(Module *module, char *id);
 static void addEntry(Module *module, char *id);
 static void addExternal(Module *module, char *id);
 static Module *addModule(char *id);
+static void addSuffix(char *inPath, char *suffix, char *outPath);
 static Module *findModule(char *id);
 static u64 getWord(u8 *bytes);
 static bool isOmittedName(char *id, char *argv[]);
 static u64 copyModules(Dataset *ds, char *argv[]);
-static void openNextSource(int argi, char *argv[]);
 static int parseOptions(int argc, char *argv[]);
 static void printListing(FILE *listingFile);
 static void printModules(Module *module, FILE *listingFile);
@@ -70,12 +70,18 @@ static char    *lFile = NULL;
 static Module  *modules = NULL;
 static char    *oFile = NULL;
 static Dataset *outputFile = NULL;
-static Dataset *sourceFile = NULL;
 
 int main(int argc, char *argv[]) {
     time_t clock;
     u64 cw;
+    char *dp;
+    Dataset *ds;
     int fileIndex;
+    char outputPath[MAX_FILE_PATH_LENGTH+1];
+    char *op;
+    char sourcePath[MAX_FILE_PATH_LENGTH+1];
+    char *sp;
+    char tempPath[MAX_FILE_PATH_LENGTH+1];
     struct tm *tmp;
 
     clock = time(NULL);
@@ -85,6 +91,25 @@ int main(int argc, char *argv[]) {
 
     firstSourceFileIdx = parseOptions(argc, argv);
 
+    if (oFile != NULL) {
+        dp = NULL;
+        op = tempPath;
+        sp = oFile;
+        while (*sp != '\0') {
+            if (*sp == '/' || *sp == '\\')
+                dp = NULL;
+            else if (*sp == '.')
+                dp = op;
+            *op++ = *sp++;
+        }
+        strcpy(dp != NULL ? dp : op, ".tmp");
+        outputFile = cosDsCreate(tempPath);
+        if (outputFile == NULL) {
+            perror(tempPath);
+            exit(1);
+        }
+    }
+
     //
     //  Traverse source files, distinguishing libraries from plain object files, and build
     //  a tree of modules with their entrypoint and external reference symbols. Copy each unique
@@ -92,27 +117,42 @@ int main(int argc, char *argv[]) {
     //  
     fileIndex = firstSourceFileIdx;
     while (fileIndex < argc) {
-        openNextSource(fileIndex, argv);
+        addSuffix(argv[fileIndex], ".obj", sourcePath);
+        ds = cosDsOpen(sourcePath);
+        if (ds == NULL) {
+            fprintf(stderr, "Failed to open %s\n", sourcePath);
+            exit(1);
+        }
         while (TRUE) {
-            cw = copyModules(sourceFile, argv);
+            cw = copyModules(ds, argv);
             if (cw == -1) {
-                fprintf(stderr, "Failed to copy modules from %s\n", argv[fileIndex]);
+                fprintf(stderr, "Failed to copy modules from %s\n", sourcePath);
                 exit(1);
             }
             else if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) {
                 break;
             }
         }
-        cosDsClose(sourceFile);
+        cosDsClose(ds);
         fileIndex += 1;
     }
-    if (writeDirectory(outputFile) == -1
-        || cosDsWriteEOR(outputFile) == -1
-        || cosDsWriteEOF(outputFile) == -1
-        || cosDsWriteEOD(outputFile) == -1
-        || cosDsClose(outputFile) == -1) {
-        fprintf(stderr, "Failed to write output file %s\n", oFile);
-        unlink(oFile);
+    if (outputFile != NULL) {
+        if (writeDirectory(outputFile) == -1
+            || cosDsWriteEOR(outputFile) == -1
+            || cosDsWriteEOF(outputFile) == -1
+            || cosDsWriteEOD(outputFile) == -1
+            || cosDsClose(outputFile) == -1) {
+            fprintf(stderr, "Failed to write output file %s\n", tempPath);
+            unlink(tempPath);
+            exit(1);
+        }
+        addSuffix(oFile, ".lib", outputPath);
+        unlink(outputPath);
+        if (rename(tempPath, outputPath) == -1) {
+            perror(outputPath);
+            fprintf(stderr, "Failed to rename %s to %s\n", tempPath, outputPath);
+            exit(1);
+        }
     }
     if (listingFile != NULL) {
         printListing(listingFile);
@@ -295,6 +335,39 @@ static Module *addModule(char *id) {
     return new;
 }
 
+static void addSuffix(char *inPath, char *suffix, char *outPath) {
+    char *ip;
+    char *dp;
+    char *limit;
+    char *op;
+
+    op = outPath;
+    limit = outPath + MAX_FILE_PATH_LENGTH;
+    dp = NULL;
+    for (ip = inPath; *ip != '\0'; ip++) {
+        if (*ip == '/' || *ip == '\\')
+            dp = NULL;
+        else if (*ip == '.')
+            dp = ip;
+        if (op >= limit) {
+            fprintf(stderr, "Path too long: %s\n", inPath);
+            exit(1);
+        }
+        *op++ = *ip;
+    }
+    if (dp == NULL) {
+        ip = suffix;
+        while (*ip != '\0' && op < limit) {
+            *op++ = *ip++;
+        }
+        if (op >= limit) {
+            fprintf(stderr, "Path too long: %s\n", inPath);
+            exit(1);
+        }
+    }
+    *op = '\0';
+}
+
 static u64 copyModules(Dataset *ds, char *argv[]) {
     u8 buf[512*8];
     u64 cw;
@@ -307,6 +380,7 @@ static u64 copyModules(Dataset *ds, char *argv[]) {
     while (TRUE) {
         n = cosDsRead(ds, buf, 8);
         if (n == -1) {
+            fputs("Failed to read source file\n", stderr);
             return -1;
         }
         else if (n == 0) {
@@ -325,16 +399,25 @@ static u64 copyModules(Dataset *ds, char *argv[]) {
         tableLength = (wc - 1) * 8;
         switch (tableType) {
         case LDR_TT_PDT:
-            if (processPDT(ds, hdr, tableLength, argv) == -1) return -1;
+            if (processPDT(ds, hdr, tableLength, argv) == -1) {
+                fputs("Failed to process PDT\n", stderr);
+                return -1;
+            }
             break;
         case LDR_TT_DFT:
-            if (skipBytes(ds, tableLength) == -1) return -1;
+            if (skipBytes(ds, tableLength) == -1) {
+                fputs("Failed to skip DFT\n", stderr);
+                return -1;
+            }
             break;
         default:
             if (writeWord(outputFile, hdr) == -1) return -1;
             while (tableLength > 0) {
                 n = (tableLength > sizeof(buf)) ? sizeof(buf) : tableLength;
-                if (cosDsRead(ds, buf, n) != n) return -1;
+                if (cosDsRead(ds, buf, n) != n) {
+                    fprintf(stderr, "Failed to read table type %02o from source file\n", tableType);
+                    return -1;
+                }
                 if (writeBytes(outputFile, buf, n) != n) return -1;
                 tableLength -= n;
             }
@@ -390,50 +473,6 @@ static bool isOmittedName(char *id, char *argv[]) {
     return FALSE;
 }
 
-static void openNextSource(int argi, char *argv[]) {
-    char *cp;
-    char *dp;
-    char filePath[MAX_FILE_PATH_LENGTH+5];
-    char *fp;
-    char *limit;
-    static char objFilePath[MAX_FILE_PATH_LENGTH+5];
-
-    fp = filePath;
-    limit = fp + MAX_FILE_PATH_LENGTH;
-    dp = NULL;
-    for (cp = argv[argi]; *cp != '\0'; cp++) {
-         if (*cp == '/' || *cp == '\\')
-             dp = NULL;
-         else if (*cp == '.')
-             dp = fp;
-         if (fp >= limit) {
-             fprintf(stderr, "Path too long: %s\n", argv[argi]);
-             exit(1);
-         }
-         *fp++ = *cp;
-    }
-    *fp = '\0';
-    if (dp == NULL) {
-        dp = fp;
-        strcpy(dp, ".obj");
-    }
-    sourceFile = cosDsOpen(filePath);
-    if (sourceFile == NULL) {
-        fprintf(stderr, "Failed to open %s\n", filePath);
-        exit(1);
-    }
-    if (outputFile == NULL) {
-        strcpy(dp, ".abs");
-        strcpy(objFilePath, filePath);
-        oFile = objFilePath;
-        outputFile = cosDsCreate(filePath);
-        if (outputFile == NULL) {
-            perror(filePath);
-            exit(1);
-        }
-    }
-}
-
 static int parseOptions(int argc, char *argv[]) {
     int i;
     int firstSrcIndex;
@@ -466,11 +505,6 @@ static int parseOptions(int argc, char *argv[]) {
                 usage();
             }
             oFile = argv[i];
-            outputFile = cosDsCreate(oFile);
-            if (outputFile == NULL) {
-                perror(oFile);
-                exit(1);
-            }
         }
         else if (strcmp(argv[i], "-r") == 0) {
             i += 1;
@@ -520,17 +554,17 @@ static void printModules(Module *module, FILE *listingFile) {
     if (module->blocks != NULL) {
         fputs("  Blocks:\n   ", listingFile);
         ordinal = printSymbols(module->blocks, 0, listingFile);
-        if (ordinal != 3) fputs("\n ", listingFile);
+        if (ordinal != 7) fputs("\n ", listingFile);
     }
     if (module->entries != NULL) {
         fputs("  Entry points:\n   ", listingFile);
         ordinal = printSymbols(module->entries, 0, listingFile);
-        if (ordinal != 3) fputs("\n  ", listingFile);
+        if (ordinal != 7) fputs("\n  ", listingFile);
     }
     if (module->externals != NULL) {
         fputs("  External references:\n   ", listingFile);
         ordinal = printSymbols(module->externals, 0, listingFile);
-        if (ordinal != 3) fputs("\n ", listingFile);
+        if (ordinal != 7) fputs("\n ", listingFile);
     }
     printModules(module->right, listingFile);
 }
@@ -538,9 +572,9 @@ static void printModules(Module *module, FILE *listingFile) {
 static int printSymbols(Symbol *symbol, int ordinal, FILE *listingFile) {
     if (symbol == NULL) return ordinal;
     ordinal = printSymbols(symbol->left, ordinal, listingFile);
-    fprintf(listingFile, "   %s", symbol->id);
+    fprintf(listingFile, "   %-8.8s", symbol->id);
     ordinal += 1;
-    if ((ordinal % 4) == 3) fputs("\n  ", listingFile);
+    if ((ordinal % 8) == 0) fputs("\n   ", listingFile);
     return printSymbols(symbol->right, ordinal, listingFile);
 }
 
@@ -695,7 +729,13 @@ static int writeDirectory(Dataset *ds) {
 }
 
 static int writeEOR(Dataset *ds) {
-    return (ds != NULL) ? cosDsWriteEOR(ds) : 0;
+    if (ds != NULL) {
+        if (cosDsWriteEOR(ds) == -1) {
+            fputs("Failed to write EOR to output file\n", stderr);
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static int writeName(char *name, Dataset *ds) {
@@ -713,7 +753,10 @@ static int writeName(char *name, Dataset *ds) {
                 break;
             }
         }
-        if (cosDsWriteWord(ds, word) == -1) return -1;
+        if (cosDsWriteWord(ds, word) == -1) {
+            fprintf(stderr, "Failed to write name '%s' to output file\n", name);
+            return -1;
+        }
     }
     return 0;
 }
@@ -728,9 +771,28 @@ static int writeNames(Symbol *symbol, Dataset *ds) {
 }
 
 static int writeWord(Dataset *ds, u64 word) {
-    return (ds != NULL) ? cosDsWriteWord(ds, word) : 0;
+    if (ds != NULL) {
+        if (cosDsWriteWord(ds, word) == -1) {
+            fputs("Failed to write word output file\n", stderr);
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static int writeBytes(Dataset *ds, u8 *buf, int len) {
-    return (ds != NULL) ? cosDsWrite(ds, buf, len) : len;
+    int n;
+
+    if (ds == NULL) return len;
+
+    n = cosDsWrite(ds, buf, len);
+    if (n != len) {
+        if (n == -1) {
+            fputs("Failed to write output file\n", stderr);
+        }
+        else {
+            fprintf(stderr, "Truncated write to output file, %d != %d\n", len, n);
+        }
+    }
+    return n;
 }
