@@ -241,6 +241,7 @@ typedef struct objectBlock {
     SectionLocation location;
     u8 *image;
     u32 imageSize;
+    u32 offset;
     u32 lowestParcelAddress;
     u32 highestParcelAddress;
     RelocationTableEntry *relocationTable;

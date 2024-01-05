@@ -139,6 +139,9 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
         if (strcmp(argv[argi], "-f") == 0) {
             argi += 1;
         }
+        else if (strcmp(argv[argi], "-s") == 0) {
+            argi += 1;
+        }
         else if (strcmp(argv[argi], "-t") == 0) {
             argi += 1;
             if (argi >= argc) break;
@@ -270,6 +273,9 @@ static void parseOptions(int argc, char *argv[]) {
                 exit(1);
             }
         }
+        else if (strcmp(argv[i], "-s") == 0) {
+            isSectionStackingEnabled = FALSE;
+        }
         else if (strcmp(argv[i], "-t") == 0) {
             i += 1;
             if (i >= argc || *argv[i] == '-') {
@@ -387,6 +393,7 @@ static void usage(void) {
     fputs("  -i ident - default module identifier\n", stderr);
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - object file\n", stderr);
+    fputs("  -s       - disable section stacking\n", stderr);
     fputs("  -t tfile - external text file\n", stderr);
     fputs("  -w       - exit with error status on warning indications\n", stderr);
     fputs("  -x       - enable implicit external symbols\n", stderr);

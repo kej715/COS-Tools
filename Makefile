@@ -49,6 +49,7 @@ CALOBJS = cal.o          \
 LDRHDRS = basetypes.h    \
           cosdataset.h   \
           cosldr.h       \
+          fnv.h          \
           ldrconst.h     \
           ldrproto.h     \
           ldrtypes.h     \
@@ -57,6 +58,7 @@ LDRHDRS = basetypes.h    \
 LIBHDRS = basetypes.h    \
           cosdataset.h   \
           cosldr.h       \
+          fnv.h          \
           libconst.h     \
           libproto.h     \
           libtypes.h     \
@@ -64,10 +66,12 @@ LIBHDRS = basetypes.h    \
 
 LDROBJS = ldr.o          \
           cosdataset.o   \
+          fnv32a.o       \
           services.o
 
 LIBOBJS = lib.o          \
           cosdataset.o   \
+          fnv32a.o       \
           services.o
 
 all: cal ldr lib

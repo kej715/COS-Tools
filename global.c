@@ -48,6 +48,7 @@ Module *firstModule = NULL;
 bool isFatalWarnings = FALSE;
 bool isFlexibleSyntax = FALSE;
 bool isImplicitExternals = FALSE;
+bool isSectionStackingEnabled = TRUE;
 Module *lastModule = NULL;
 u16 listControlMask = LIST_ON;
 u16 listControlStack[LIST_CONTROL_STACK_SIZE];

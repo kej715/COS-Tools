@@ -29,24 +29,28 @@
 #include <unistd.h>
 #include "cosdataset.h"
 #include "cosldr.h"
+#include "fnv.h"
 #include "ldrconst.h"
 #include "ldrproto.h"
 #include "ldrtypes.h"
 #include "services.h"
 
-static void addLibraryModule(char *libraryPath, u8 *module);
+static void addBlock(Module *module, Block *block);
+static LibraryModule *addLibraryModule(char *libraryPath, u8 *module, u8 pdtOrdinal);
 static Symbol *addSymbol(u8 *id, Block *block, u64 value, bool isParcelAddress);
 static void addSuffix(char *inPath, char *suffix, char *outPath);
 static void adjustEntryPoints(Symbol *symbol);
-static char currentDate[9];
-static char currentTime[9];
+static void calculateBaseAddresses(Block *block);
+static void calculateModuleName(char *path, u8 *name);
 static Block *findBlock(Module *module, int blockIndex);
 static Symbol *findSymbol(u8 *id);
+static char *getTableType(u8 type);
 static u64 getWord(u8 *bytes);
-static int hasDirectory(Dataset *ds, int pass, char *sourcePath);
-static int loadLibraryModule(Dataset *ds, u8 *module, int pass);
-static u64 loadModules(Dataset *ds, int pass);
-static int locateDirectory(Dataset *ds, u64 *hdr);
+static int idcmp(u8 *id1, u8*id2, int len);
+static int isLibrary(Dataset *ds, int pass, char *sourcePath);
+static int loadLibraryModule(Dataset *ds, LibraryModule *module, int pass);
+static u64 loadModules(Dataset *ds, u8 *moduleId, int pass);
+static int locateTable(Dataset *ds, u8 tableType, u64 *hdr, int *tableLength, char *sourcePath);
 static int parseOptions(int argc, char *argv[]);
 static void printAddress(u32 address, bool isParcelAddress);
 static void printLoadMap(void);
@@ -54,13 +58,13 @@ static void printModuleSummary(Module *module);
 static void printSymbol(Symbol *symbol, bool doDisplayModule);
 static void printSymbols(Module *module, Symbol *symbol);
 static int processBRT(Dataset *ds, u64 hdr, int tableLength);
-static int processPDT(Dataset *ds, u64 hdr, u8 *table, int tableLength);
+static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLength);
 static int processTXT(Dataset *ds, u64 hdr, int tableLength);
 static int processXRT(Dataset *ds, u64 hdr, int tableLength);
 static int readWord(Dataset *ds, u64 *word);
 static int resolveExternal(u8 *id);
 static int resolveExternals(void);
-static int searchLibrary(Dataset *ds, u8 *id, u64 hdr, u8 *module);
+static int searchLibrary(Dataset *ds, u8 *id, u8 *module, u8 *pdtOrdinal, char *sourcePath);
 static int skipBytes(Dataset *ds, int count);
 static void usage(void);
 static int writeExecutable(Dataset *ds);
@@ -69,12 +73,15 @@ static int writePDT(Dataset *ds);
 static int writeString(char *s, Dataset *ds);
 static int writeTXT(Dataset *ds);
 
+static char          currentDate[9];
+static char          currentTime[9];
 static u32           blockLimit = 0200;
 static Module        *currentModule = NULL;
 static int           errorCount = 0;
 static LibraryModule *firstLibraryModule = NULL;
+static Block         *firstBlocks[BlockTypes] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 static Module        *firstModule = NULL;
-static bool          hasErrorFlag = 0;
+static bool          hasErrorFlag = FALSE;
 static u8            *image = NULL;
 static int           imageSize = 0;
 static LibraryModule *lastLibraryModule = NULL;
@@ -98,6 +105,7 @@ int main(int argc, char *argv[]) {
     int firstFileIndex;
     int fileIndex;
     LibraryModule *lm;
+    u8 moduleId[9];
     char objectPath[MAX_FILE_PATH_LENGTH+1];
     int pass;
     char sourcePath[MAX_FILE_PATH_LENGTH+1];
@@ -114,7 +122,7 @@ int main(int argc, char *argv[]) {
 
     //
     //  Execute the load in two passes. In pass one, process PDT's
-    //  to build a module chain, create symbol table of entry points,
+    //  to build a module chain, create a symbol table of entry points,
     //  and calculate total image size. In pass two, process TXT's
     //  to load code and data into the image, process BRT's to perform
     //  relocation, and process XRT's to resolve external references.
@@ -129,13 +137,14 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Failed to open %s\n", sourcePath);
                 exit(1);
             }
-            status = hasDirectory(ds, pass, sourcePath);
+            status = isLibrary(ds, pass, sourcePath);
             if (status == -1) {
                 fprintf(stderr, "Failed to read %s\n", sourcePath);
                 exit(1);
             }
             else if (status == 0) {
-                if (loadModules(ds, pass) == -1) {
+                calculateModuleName(sourcePath, moduleId);
+                if (loadModules(ds, moduleId, pass) == -1) {
                     fprintf(stderr, "Failed to load modules from %s\n", sourcePath);
                     exit(1);
                 }
@@ -148,6 +157,17 @@ int main(int argc, char *argv[]) {
                 fputs("Failed to resolve external references\n", stderr);
                 exit(1);
             }
+            //
+            //  Traverse the block lists and calculate the base address of
+            //  each block based upon the load order
+            //
+            calculateBaseAddresses(firstBlocks[BlockType_Code]);
+            calculateBaseAddresses(firstBlocks[BlockType_Mixed]);
+            calculateBaseAddresses(firstBlocks[BlockType_Const]);
+            calculateBaseAddresses(firstBlocks[BlockType_Common]);
+            calculateBaseAddresses(firstBlocks[BlockType_TaskCom]);
+            calculateBaseAddresses(firstBlocks[BlockType_Data]);
+            calculateBaseAddresses(firstBlocks[BlockType_Dynamic]);
             imageSize *= 8;
             image = (u8 *)allocate(imageSize);
             adjustEntryPoints(symbolTable);
@@ -159,7 +179,7 @@ int main(int argc, char *argv[]) {
                     fprintf(stderr, "Failed to open %s\n", lm->libraryPath);
                     exit(1);
                 }
-                status = loadLibraryModule(ds, lm->id, pass);
+                status = loadLibraryModule(ds, lm, pass);
                 cosDsClose(ds);
                 if (status != 1) {
                     fprintf(stderr, "Failed to load %.8s from %s\n", lm->id, lm->libraryPath);
@@ -203,15 +223,66 @@ int main(int argc, char *argv[]) {
     }
 }
 
-static void addLibraryModule(char *libraryPath, u8 *module) {
+static void addBlock(Module *module, Block *block) {
+    BlockType blockType;
+    Block *bp;
+    Block *nbp;
+
+    if (module->firstBlock == NULL) {
+        module->firstBlock = block;
+    }
+    else {
+        module->lastBlock->nextInModule = block;
+    }
+    module->lastBlock = block;
+
+    blockType = block->type;
+    bp = firstBlocks[blockType];
+    if (bp == NULL) {
+        firstBlocks[blockType] = block;
+        return;
+    }
+    //
+    //  Find first block with the same id
+    //
+    while (strncasecmp(bp->id, block->id, 8) != 0) {
+        if (bp->nextInImage == NULL) {
+            //
+            //  The chain doesn't have any blocks with this id yet,
+            //  so add it to the end
+            //
+            bp->nextInImage = block;
+            return;
+        }
+        bp = bp->nextInImage;
+    }
+    //
+    //  Find the last block in the chain with the same id,
+    //  and add this one after that one
+    //
+    while (TRUE) {
+        nbp = bp->nextInImage;
+        if (nbp == NULL || strncasecmp(bp->id, nbp->id, 8) != 0) {
+            bp->nextInImage = block;
+            block->nextInImage = nbp;
+            return;
+        }
+        bp = nbp;
+    }
+}
+
+static LibraryModule *addLibraryModule(char *libraryPath, u8 *module, u8 pdtOrdinal) {
     LibraryModule *lm;
 
     for (lm = firstLibraryModule; lm != NULL; lm = lm->next) {
-        if (strcmp(libraryPath, lm->libraryPath) == 0 && memcmp(module, lm->id, 8) == 0) return;
+        if (strcmp(libraryPath, lm->libraryPath) == 0
+            && idcmp(module, lm->id, 8) == 0
+            && pdtOrdinal == lm->pdtOrdinal) return lm;
     }
     lm = (LibraryModule *)allocate(sizeof(LibraryModule));
     lm->libraryPath = libraryPath;
     memcpy(lm->id, module, 8);
+    lm->pdtOrdinal = pdtOrdinal;
     if (firstLibraryModule == NULL) {
         firstLibraryModule = lm;
     }
@@ -219,6 +290,8 @@ static void addLibraryModule(char *libraryPath, u8 *module) {
         lastLibraryModule->next = lm;
     }
     lastLibraryModule = lm;
+
+    return lm;
 }
 
 static void addSuffix(char *inPath, char *suffix, char *outPath) {
@@ -270,7 +343,7 @@ static Symbol *addSymbol(u8 *id, Block *block, u64 value, bool isParcelAddress) 
     }
     current = symbolTable;
     while (current != NULL) {
-        valence = memcmp(current->id, new->id, 8);
+        valence = idcmp(current->id, new->id, 8);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -311,11 +384,60 @@ static void adjustEntryPoints(Symbol *symbol) {
     adjustEntryPoints(symbol->right);
 }
 
+static void calculateBaseAddresses(Block *block) {
+    u32 limit;
+
+    while (block != NULL) {
+        if (block->isAbsolute) {
+            block->baseAddress = 0;
+            limit = block->origin + block->length;
+            if (limit > blockLimit) blockLimit = limit;
+        }
+        else {
+            block->baseAddress = blockLimit;
+            blockLimit = blockLimit + block->length;
+        }
+        if (blockLimit > imageSize) imageSize = blockLimit;
+        block = block->nextInImage;
+    }
+}
+
+static void calculateModuleName(char *path, u8 *name) {
+    char *cp;
+    Fnv32_t hash;
+    char *lastPeriod;
+    char *lastSlash;
+    int len;
+    char *limit;
+    char *start;
+
+    lastPeriod = NULL;
+    lastSlash = NULL;
+    for (cp = path; *cp != '\0'; cp++) {
+        if (*cp == '/' || *cp == '\\')
+            lastSlash = cp;
+        else if (*cp == '.')
+            lastPeriod = cp;
+    }
+    start = (lastSlash != NULL) ? lastSlash + 1 : path;
+    limit = (lastPeriod > lastSlash) ? lastPeriod : path + strlen(path);
+    memset(name, 0, 9);
+    len = limit - start;
+    if (len < 9) {
+        memcpy(name, start, len);
+    }
+    else {
+        hash = fnv32a((char *)name, len, FNV1_32A_INIT);
+        memcpy(name, start, 4);
+        sprintf((char *)(name + 4), "%04x", hash & 0xffff);
+    }
+}
+
 static Block *findBlock(Module *module, int blockIndex) {
     Block *block;
 
     block = module->firstBlock;
-    while (blockIndex-- > 0 && block != NULL) block = block->next;
+    while (blockIndex-- > 0 && block != NULL) block = block->nextInModule;
     return block;
 }
 
@@ -325,7 +447,7 @@ static Symbol *findSymbol(u8 *id) {
 
     current = symbolTable;
     while (current != NULL) {
-        valence = memcmp(current->id, id, 8);
+        valence = idcmp(current->id, id, 8);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -334,6 +456,36 @@ static Symbol *findSymbol(u8 *id) {
             break;
     }
     return current;
+}
+
+static char *getBlockType(BlockType type) {
+    switch (type) {
+    case BlockType_Common : return "Common";
+    case BlockType_Mixed  : return "Mixed";
+    case BlockType_Code   : return "Code";
+    case BlockType_Data   : return "Data";
+    case BlockType_Const  : return "Const";
+    case BlockType_Dynamic: return "Dynamic";
+    case BlockType_TaskCom: return "TaskCom";
+    default: break;
+    }
+    return "Unknown";
+}
+
+static char *getTableType(u8 type) {
+    switch (type) {
+    case LDR_TT_PWT: return "PWT";
+    case LDR_TT_DMT: return "DMT";
+    case LDR_TT_DFT: return "DFT";
+    case LDR_TT_SMT: return "SMT";
+    case LDR_TT_DPT: return "DPT";
+    case LDR_TT_XRT: return "XRT";
+    case LDR_TT_BRT: return "BRT";
+    case LDR_TT_TXT: return "TXT";
+    case LDR_TT_PDT: return "PDT";
+    default: break;
+    }
+    return "???";
 }
 
 static u64 getWord(u8 *bytes) {
@@ -346,23 +498,33 @@ static u64 getWord(u8 *bytes) {
     return word;
 }
 
-static int hasDirectory(Dataset *ds, int pass, char *sourcePath) {
+static int idcmp(u8 *id1, u8*id2, int len) {
+    return strncasecmp((char *)id1, (char *)id2, len);
+}
+
+static int isLibrary(Dataset *ds, int pass, char *sourcePath) {
+    u8 buf[8];
     u64 hdr;
     int i;
+    int n;
     int status;
-    int tableLength;
-    u64 wc;
+    u8 tableType;
 
     status = 0;
     if (pass == 1) {
-        status = locateDirectory(ds, &hdr);
-        if (status == 1) {
+        n = cosDsRead(ds, buf, 8);
+        cosDsRewind(ds);
+        if (n != 8) return -1;
+        hdr = getWord(buf);
+        tableType = hdr >> 60;
+        if (tableType == LDR_TT_DFT) {
             if (libraryCount >= MAX_LIBRARIES) {
                 fprintf(stderr, "Too many libraries specified, max is %d\n", MAX_LIBRARIES);
                 exit(1);
             }
             libraryPaths[libraryCount] = (char *)allocate(strlen(sourcePath) + 1);
             strcpy(libraryPaths[libraryCount++], sourcePath);
+            status = 1;
         }
     }
     else {
@@ -373,70 +535,83 @@ static int hasDirectory(Dataset *ds, int pass, char *sourcePath) {
     return status;
 }
 
-static int loadLibraryModule(Dataset *ds, u8 *module, int pass) {
-    int blockWordCount;
+static int loadLibraryModule(Dataset *ds, LibraryModule *module, int pass) {
     u8 buf[8];
-    u64 cw;
+    int ewc;
     u64 hdr;
-    int hdrLen;
+    bool isFound;
     int n;
     int offset;
+    int pdtOrdinal;
+    int status;
     u8 *table;
     int tableLength;
     u8 tableType;
     u64 wc;
+    u64 word;
+
+    if (module->isLoaded && pass == 1) return 1;
 
     cosDsRewind(ds);
     //
-    //  Find PDT with specified module name
+    //  Find DFT with specified module name
     //
-    while (TRUE) {
-        n = cosDsRead(ds, buf, 8);
-        if (n == -1) return -1;
-        if (n == 0) {
-            cw = cosDsReadCW(ds);
-            if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) return 0;
-            continue; // EOR
-        }
-        hdr = getWord(buf);
-        tableType = hdr >> 60;
-        wc = (hdr >> 36) & 0xffffff; // word count for most table types
-        tableLength = (wc - 1) * 8;
-        if (tableType == LDR_TT_PDT) {
-            blockWordCount = hdr & 0xff;
-            table = (u8 *)allocate(tableLength);
-            n = cosDsRead(ds, table, tableLength);
-            if (n != tableLength) {
-                free(table);
-                return -1;
-            }
-            hdrLen = getWord(table) & 0x3fff;
-            offset = hdrLen * 8;
-            if (blockWordCount > 0) {
-                //
-                //  Normally, a module has at least one block, the first block
-                //  is a program block, and its name is also the module name.
-                //
-                if (memcmp(module, table + offset, 8) == 0) break;
-                free(table);
-                continue;
-            }
-        }
-        else if (tableType == LDR_TT_DFT) {
-            wc = (hdr >> 24) & 0xffffff;
-            tableLength = (wc - 1) * 8;
-        }
-        if (skipBytes(ds, tableLength) == -1) return -1;
-    }
-    if (pass == 1) {
-        if (processPDT(ds, hdr, table, tableLength) == -1) {
+    isFound = FALSE;
+    while (isFound == FALSE) {
+        status = locateTable(ds, LDR_TT_DFT, &hdr, &tableLength, module->libraryPath);
+        if (status == -1 || status == 0) return status;
+        table = (u8 *)allocate(tableLength);
+        n = cosDsRead(ds, table, tableLength);
+        if (n != tableLength) {
+            fprintf(stderr, "Failed to read DFT in %s\n", module->libraryPath);
             free(table);
             return -1;
         }
+        offset = 0;
+        while (offset < tableLength && isFound == FALSE) {
+            word = getWord(table + offset);
+            ewc = (word >> 39) & 0x1fffff;
+            if (idcmp(module->id, table + offset + 8, 8) == 0) {
+                isFound = TRUE;
+                break;
+            }
+            offset += ewc * 8;
+        }
+        free(table);
+    }
+    //
+    //  Position to registered PDT
+    //
+    pdtOrdinal = 0;
+    while (TRUE) {
+        status = locateTable(ds, LDR_TT_PDT, &hdr, &tableLength, module->libraryPath);
+        if (status == -1 || status == 0) return status;
+        if (pdtOrdinal == module->pdtOrdinal) break;
+        pdtOrdinal += 1;
+    }
+
+    if (pass == 1) {
+        table = (u8 *)allocate(tableLength);
+        n = cosDsRead(ds, table, tableLength);
+        if (n != tableLength) {
+            fprintf(stderr, "Failed to read PDT in %s\n", module->libraryPath);
+            free(table);
+            return -1;
+        }
+        if (processPDT(ds, module->id, hdr, table, tableLength) == -1) {
+            free(table);
+            return -1;
+        }
+        module->module = lastModule;
+        module->isLoaded = TRUE;
         free(table);
     }
     else { // pass 2
-        free(table);
+        if (skipBytes(ds, tableLength) == -1) {
+            fprintf(stderr, "Failed to skip over PDT in %s\n", module->libraryPath);
+            return -1;
+        }
+        currentModule = module->module;
         while (TRUE) {
             n = cosDsRead(ds, buf, 8);
             if (n == -1) return -1;
@@ -456,9 +631,7 @@ static int loadLibraryModule(Dataset *ds, u8 *module, int pass) {
                 if (processTXT(ds, hdr, tableLength) == -1) return -1;
                 break;
             case LDR_TT_DFT:
-                wc = (hdr >> 24) & 0xffffff;
-                tableLength = (wc - 1) * 8;
-                // fall through
+                return 1;
             default:
                 if (skipBytes(ds, tableLength) == -1) return -1;
                 break;
@@ -469,7 +642,7 @@ static int loadLibraryModule(Dataset *ds, u8 *module, int pass) {
     return 1;
 }
 
-static u64 loadModules(Dataset *ds, int pass) {
+static u64 loadModules(Dataset *ds, u8 *moduleId, int pass) {
     u8 buf[8];
     u64 cw;
     u64 hdr;
@@ -518,7 +691,7 @@ static u64 loadModules(Dataset *ds, int pass) {
                     free(table);
                     return -1;
                 }
-                if (processPDT(ds, hdr, table, tableLength) == -1) {
+                if (processPDT(ds, moduleId, hdr, table, tableLength) == -1) {
                     free(table);
                     return -1;
                 }
@@ -545,35 +718,46 @@ static u64 loadModules(Dataset *ds, int pass) {
     }
 }
 
-static int locateDirectory(Dataset *ds, u64 *hdr) {
+static int locateTable(Dataset *ds, u8 tableType, u64 *hdr, int *tableLength, char *sourcePath) {
     u8 buf[8];
     u64 cw;
     int n;
-    int tableLength;
-    u8 tableType;
+    int tl;
+    u8 tt;
     u64 word;
     u64 wc;
 
     while (TRUE) {
         n = cosDsRead(ds, buf, 8);
-        if (n == -1) return -1;
+        if (n == -1) {
+            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            return -1;
+        }
         if (n == 0) {
             cw = cosDsReadCW(ds);
-            if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) break;
+            if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) return 0;
             continue;
         }
         word = getWord(buf);
-        tableType = word >> 60;
-        if (tableType == LDR_TT_DFT) {
+        tt = word >> 60;
+        if (tt == LDR_TT_DFT) {
+            if (tableType != LDR_TT_DFT) return 0;
+            wc = (word >> 24) & 0xffffff;
+        }
+        else {
+            wc = (word >> 36) & 0xffffff;
+        }
+        tl = (wc - 1) * 8;
+        if (tt == tableType) {
             *hdr = word;
+            *tableLength = tl;
             return 1;
         }
-        wc = (word >> 36) & 0xffffff;
-        tableLength = (wc - 1) * 8;
-        if (skipBytes(ds, tableLength) == -1) return -1;
+        if (skipBytes(ds, tl) == -1) {
+            fprintf(stderr, "Failed to skip %s in %s\n", getTableType(tableType), sourcePath);
+            return -1;
+        }
     }
-    cosDsRewind(ds);
-    return 0;
 }
 
 static int parseOptions(int argc, char *argv[]) {
@@ -638,7 +822,7 @@ static void printAddress(u32 address, bool isParcelAddress) {
     else {
         parcelNumber = 0;
     }
-    fprintf(loadMap, "%o%c", address, 'a' + parcelNumber);
+    fprintf(loadMap, "%8o%c", address, 'a' + parcelNumber);
 }
 
 static void printLoadMap(void) {
@@ -665,13 +849,20 @@ static void printLoadMap(void) {
 }
 
 static void printModuleSummary(Module *module) {
+    Block *block;
     int i;
     u8 *id;
     Symbol *symbol;
 
     fprintf(loadMap, " \n Module: %s", module->id);
-    if (module->hasErrorFlag)
-        fputs(" (Warning: error flag set)", loadMap);
+    fputs("\n   Section   Type     Idx  Address    Length\n", loadMap);
+      fputs("   --------  -------  ---  ---------  ------\n", loadMap);
+    for (block = module->firstBlock; block != NULL; block = block->nextInModule) {
+        fprintf(loadMap, "   %-8.8s  %-7.7s  %3d  ", block->id, getBlockType(block->type), block->index);
+        printAddress(block->baseAddress, FALSE);
+        fprintf(loadMap, "  %6d", block->length);
+        fputs("\n", loadMap);
+    }
     fputs("\n   Entry     Section   Address\n", loadMap);
     fputs("   --------  --------  ---------\n", loadMap);
     printSymbols(module, symbolTable);
@@ -805,14 +996,16 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
     return 0;
 }
 
-static int processPDT(Dataset *ds, u64 hdr, u8 *table, int tableLength) {
+static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLength) {
     Block *block;
     int blockIndex;
+    int blockType;
     int blockWordCount;
     int entryWordCount;
     int externalWordCount;
     int hdrLen;
     int i;
+    int idx;
     bool isPrimary;
     bool isParcelAddress;
     bool isParcelRelocation;
@@ -830,6 +1023,8 @@ static int processPDT(Dataset *ds, u64 hdr, u8 *table, int tableLength) {
     //  Append new module to module list
     //
     module = (Module *)allocate(sizeof(Module));
+    module->id = (char *)allocate(9);
+    memcpy(module->id, moduleId, 8);
     hdrLen = getWord(table) & 0x3fff;
     word = getWord(table + 8);
     module->hasMachineTypeExt = isSet(word, 4);
@@ -843,59 +1038,44 @@ static int processPDT(Dataset *ds, u64 hdr, u8 *table, int tableLength) {
     //
     //  Build chain of blocks, if the module has any.
     //
-    if (blockWordCount > 0) {
-        //
-        //  Normally, a module has at least one block, and the first
-        //  block is a program block.
-        //
-        module->id = (char *)allocate(9);
-        memcpy(module->id, table + offset, 8);
+    idx = 0;
+    for (i = 0; i < blockWordCount; i += 2) {
+        block = (Block *)allocate(sizeof(Block));
+        block->module = module;
+        block->index = idx++;
+        block->id = (char *)allocate(9);
+        memcpy(block->id, table + offset, 8);
         offset += 8;
         word = getWord(table + offset);
         offset += 8;
-        module->isAbsolute = isSet(word, 0);
-        module->hasErrorFlag = isSet(word, 1);
-        if (module->hasErrorFlag) {
-            fprintf(stderr, "Warning: Module %s has error flag set\n", module->id);
-            hasErrorFlag = 1;
+        if (isSet(word, 1)) {
+            fprintf(stderr, "Warning: Section %s in module %s has error flag set\n", block->id, module->id);
+            block->hasErrorFlag = hasErrorFlag = TRUE;
         }
-        module->origin = (word >> 24) & 0xffffff;
-        module->length = word & 0xffffff;
-        block = (Block *)allocate(sizeof(Block));
-        block->module = module;
-        block->id = module->id;
-        block->length = module->length;
-        if (module->isAbsolute) {
-            block->baseAddress = 0;
-            if (module->origin + block->length > blockLimit)
-                blockLimit = module->origin + block->length;
+        if (isSet(word, 0)) {
+            block->isAbsolute = 1;
+            block->origin = (word >> 24) & 0xffffff;
+            if (isSet(word, 4))
+                block->type = BlockType_Code;
+            else if (isSet(word, 2))
+                block->type = BlockType_Common;
+            else
+                block->type = BlockType_Mixed;
+            block->length = word & 0xffffff;
         }
         else {
-            block->baseAddress = blockLimit;
-            blockLimit = block->baseAddress + block->length;
-        }
-        if (blockLimit > imageSize) imageSize = blockLimit;
-        module->firstBlock = module->lastBlock = block;
-        //
-        //  The second through last blocks are common blocks.
-        //
-        for (i = 2; i < blockWordCount; i += 2) {
-            block = (Block *)allocate(sizeof(Block));
-            block->module = module;
-            block->index = module->lastBlock->index + 1;
-            block->id = (char *)allocate(9);
-            memcpy(block->id, table + offset, 8);
-            offset += 8;
-            word = getWord(table + offset);
-            offset += 8;
+            blockType = (word >> 54) & 0x3ff;
+            if (blockType < BlockTypes) {
+                block->type = (BlockType)blockType;
+            }
+            else {
+                fprintf(stderr, "Warning: Section %s in module %s has unknown block type %d\n", block->id, module->id, blockType);
+                block->type = BlockType_Mixed;
+            }
             block->isExtMem = ((word >> 48) & 0x3f) == 2;
             block->length = word & 0xffffff;
-            block->baseAddress = blockLimit;
-            blockLimit = blockLimit + block->length;
-            if (blockLimit > imageSize) imageSize = blockLimit;
-            module->lastBlock->next = block;
-            module->lastBlock = block;
         }
+        addBlock(module, block);
     }
     //
     //  Process entry point definitions, if any
@@ -1067,9 +1247,10 @@ static int readWord(Dataset *ds, u64 *word) {
 
 static int resolveExternal(u8 *id) {
     Dataset *ds;
-    u64 hdr;
     int i;
+    LibraryModule *lm;
     u8 module[8];
+    u8 pdtOrdinal;
     int status;
 
     for (i = 0; i < libraryCount; i++) {
@@ -1078,15 +1259,10 @@ static int resolveExternal(u8 *id) {
             fprintf(stderr, "Failed to open %s\n", libraryPaths[i]);
             return -1;
         }
-        if (locateDirectory(ds, &hdr) != 1) {
-            fprintf(stderr, "Failed to locate directory in %s\n", libraryPaths[i]);
-            cosDsClose(ds);
-            return -1;
-        }
-        status = searchLibrary(ds, id, hdr, module);
+        status = searchLibrary(ds, id, module, &pdtOrdinal, libraryPaths[i]);
         if (status == 1) {
-            addLibraryModule(libraryPaths[i], module);
-            status = loadLibraryModule(ds, module, 1);
+            lm = addLibraryModule(libraryPaths[i], module, pdtOrdinal);
+            status = loadLibraryModule(ds, lm, 1);
         }
         cosDsClose(ds);
         if (status != 0) return status;
@@ -1112,60 +1288,94 @@ static int resolveExternals(void) {
     return 0;
 }
 
-static int searchLibrary(Dataset *ds, u8 *id, u64 hdr, u8 *module) {
+static int searchLibrary(Dataset *ds, u8 *id, u8 *module, u8 *pdtOrdinal, char *sourcePath) {
     int blockWordCount;
-    u8 buf[8];
-    int byteCount;
-    u8 *dirEntry;
-    int dirEntryLength;
     int entryWordCount;
-    int ewc;
+    int externWordCount;
+    u64 hdr;
+    int hdrLen;
     int i;
+    bool isFound;
     int n;
+    u8 *name;
     int offset;
+    int status;
+    u8 *table;
     int tableLength;
     u64 word;
-    int wc;
 
-    wc = (hdr >> 24) & 0xffffff;
-    tableLength = (wc - 1) * 8;
-    dirEntryLength = 0;
-    dirEntry = NULL;
-
-    while (tableLength > 0) {
-        n = cosDsRead(ds, buf, 8);
-        if (n != 8) return -1;
-        tableLength -= 8;
-        word = getWord(buf);
-        ewc = (word >> 39) & 0x1fffff;
-        entryWordCount = (word >> 9) & 0x7fff;
-        blockWordCount = word & 0x1ff;
-        byteCount = (ewc - 1) * 8;
-        if (dirEntry == NULL) {
-            dirEntry = (u8 *)allocate(n);
-            dirEntryLength = byteCount;
-        }
-        else if (byteCount > dirEntryLength) {
-            dirEntry = (u8 *)reallocate(dirEntry, dirEntryLength, byteCount);
-            dirEntryLength = byteCount;
-        }
-        n = cosDsRead(ds, dirEntry, byteCount);
-        if (n != byteCount) {
-            free(dirEntry);
+    isFound = FALSE;
+    //
+    //  Locate DFT with entry entry referencing the id sought
+    //
+    while (isFound == FALSE) {
+        status = locateTable(ds, LDR_TT_DFT, &hdr, &tableLength, sourcePath);
+        if (status == -1 || status == 0) return status;
+        //
+        //  Process a DFT
+        //
+        table = (u8 *)allocate(tableLength);
+        n = cosDsRead(ds, table, tableLength);
+        if (n != tableLength) {
+            fprintf(stderr, "Failed to read DFT in %s\n", sourcePath);
+            free(table);
             return -1;
         }
-        tableLength -= byteCount;
-        memcpy(module, dirEntry, 8);
-        offset = (blockWordCount * 8) + 16;
-        for (i = 0; i < entryWordCount; i++) {
-            if (memcmp(id, dirEntry + offset, 8) == 0) {
-                free(dirEntry);
-                return 1;
-            }
+        offset = 0;
+        while (offset < tableLength && isFound == FALSE) {
+            word = getWord(table + offset);
             offset += 8;
+            externWordCount = (word >> 24) & 0x7fff;
+            entryWordCount  = (word >> 9) & 0x7fff;
+            blockWordCount  = word & 0x1ff;
+            memcpy(module, table + offset, 8);
+            offset += (blockWordCount * 8) + 16;
+            for (i = 0; i < entryWordCount; i++) {
+                if (idcmp(id, table + offset, 8) == 0) {
+                    isFound = TRUE;
+                    break;
+                }
+                offset += 8;
+            }
+            if (isFound == FALSE) offset += externWordCount * 8;
         }
+        free(table);
     }
-    if (dirEntry != NULL) free(dirEntry);
+    //
+    //  DFT found; locate the first PDT with an entry defining the id sought
+    //
+    *pdtOrdinal = 0;
+    isFound = FALSE;
+
+    while (TRUE) {
+        status = locateTable(ds, LDR_TT_PDT, &hdr, &tableLength, sourcePath);
+        if (status == -1 || status == 0) return status;
+        table = (u8 *)allocate(tableLength);
+        n = cosDsRead(ds, table, tableLength);
+        if (n != tableLength) {
+            fprintf(stderr, "Failed to read PDT from %s\n", sourcePath);
+            return -1;
+        }
+        blockWordCount = hdr & 0xff;
+        entryWordCount = (hdr >> 8) & 0x3fff;
+        hdrLen = getWord(table) & 0x3fff;
+        offset = (hdrLen + blockWordCount) * 8;
+        //
+        //  Process entry point definitions, if any
+        //
+        for (i = 0; i < entryWordCount; i += 3) {
+            name = table + offset;
+            offset += 24;
+            if (idcmp(name, id, 8) == 0) {
+                isFound = TRUE;
+                break;
+            }
+        }
+        free(table);
+        if (isFound) return 1;
+        *pdtOrdinal += 1;
+    }
+
     return 0;
 }
 

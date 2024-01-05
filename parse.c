@@ -2028,6 +2028,12 @@ ErrorCode parseSourceLine(void) {
         return err;
     }
     getFields();
+    if (isFlexibleSyntax
+        && (locationField[0] == '#'
+            || (locationField[0] == '\0' && resultField[0] == '#'))) {
+        listFlush(currentSection);
+        return err;
+    }
     //
     //  Process the location field. It may have at most one token,
     //  and the one token must be an unqualified name.

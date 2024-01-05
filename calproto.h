@@ -52,6 +52,7 @@ extern Module *firstModule;
 extern bool isFatalWarnings;
 extern bool isFlexibleSyntax;
 extern bool isImplicitExternals;
+extern bool isSectionStackingEnabled;
 extern Module *lastModule;
 extern u16 listControlMask;
 extern u16 listControlStack[];

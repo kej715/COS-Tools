@@ -271,8 +271,10 @@ static ErrorCode BLOCK(void) {
             exit(1);
         }
     }
-    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
-    sectionStack[sectionStackPtr++] = currentSection;
+    if (isSectionStackingEnabled) {
+        if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+        sectionStack[sectionStackPtr++] = currentSection;
+    }
     currentSection = section;
     return err;
 }
@@ -412,8 +414,10 @@ static ErrorCode COMMON(void) {
     else if (section->type != SectionType_Common || section->location != SectionLocation_CM) {
         return Err_DoubleDefinition;
     }
-    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
-    sectionStack[sectionStackPtr++] = currentSection;
+    if (isSectionStackingEnabled) {
+        if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+        sectionStack[sectionStackPtr++] = currentSection;
+    }
     currentSection = section;
     return err;
 }
@@ -1711,8 +1715,10 @@ static ErrorCode SECTION(void) {
             }
         }
     }
-    if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
-    sectionStack[sectionStackPtr++] = currentSection;
+    if (isSectionStackingEnabled) {
+        if (sectionStackPtr >= BLOCK_STACK_SIZE) return Err_TooManyEntries;
+        sectionStack[sectionStackPtr++] = currentSection;
+    }
     currentSection = section;
     return Err_None;
 }

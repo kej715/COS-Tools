@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include "cosdataset.h"
 #include "cosldr.h"
+#include "fnv.h"
 #include "libconst.h"
 #include "libproto.h"
 #include "libtypes.h"
@@ -39,19 +40,24 @@ static void addEntry(Module *module, char *id);
 static void addExternal(Module *module, char *id);
 static Module *addModule(char *id);
 static void addSuffix(char *inPath, char *suffix, char *outPath);
+static void appendLibrary(Dataset *ods, Dataset *ids, char *argv[], char *sourcePath);
+static void appendObjectFile(Dataset *ods, Dataset *ids, char *argv[], char *sourcePath);
+static void calculateModuleName(char *path, char *name);
+static int copyBytes(Dataset *ods, Dataset *ids, int count, char *sourcePath);
 static Module *findModule(char *id);
+static char *getTableType(u8 type);
 static u64 getWord(u8 *bytes);
+static bool isLibrary(Dataset *ds);
 static bool isOmittedName(char *id, char *argv[]);
-static u64 copyModules(Dataset *ds, char *argv[]);
 static int parseOptions(int argc, char *argv[]);
 static void printListing(FILE *listingFile);
 static void printModules(Module *module, FILE *listingFile);
 static int printSymbols(Symbol *symbol, int ordinal, FILE *listingFile);
-static int processPDT(Dataset *ds, u64 hdr, int tableLength, char *argv[]);
+static void processPDT(Module *module, u64 hdr, u8 *table, int tableLength);
 static int skipBytes(Dataset *ds, int count);
 static void usage(void);
 static int writeBytes(Dataset *ds, u8 *buf, int len);
-static int writeDirectory(Dataset *ds);
+static int writeDFT(Dataset *ds, Module *module);
 static int writeEOR(Dataset *ds);
 static int writeName(char *name, Dataset *ds);
 static int writeNames(Symbol *symbol, Dataset *ds);
@@ -111,9 +117,9 @@ int main(int argc, char *argv[]) {
     }
 
     //
-    //  Traverse source files, distinguishing libraries from plain object files, and build
-    //  a tree of modules with their entrypoint and external reference symbols. Copy each unique
-    //  module to the output file and append a directory record at the end.
+    //  Traverse source files, distinguishing libraries from plain object files. The first table
+    //  in a library is a DFT table. Copy each unique module to the output file, prefacing each
+    //  with a DFT table.
     //  
     fileIndex = firstSourceFileIdx;
     while (fileIndex < argc) {
@@ -123,22 +129,17 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Failed to open %s\n", sourcePath);
             exit(1);
         }
-        while (TRUE) {
-            cw = copyModules(ds, argv);
-            if (cw == -1) {
-                fprintf(stderr, "Failed to copy modules from %s\n", sourcePath);
-                exit(1);
-            }
-            else if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) {
-                break;
-            }
+        if (isLibrary(ds)) {
+            appendLibrary(outputFile, ds, argv, sourcePath);
+        }
+        else {
+            appendObjectFile(outputFile, ds, argv, sourcePath);
         }
         cosDsClose(ds);
         fileIndex += 1;
     }
     if (outputFile != NULL) {
-        if (writeDirectory(outputFile) == -1
-            || cosDsWriteEOR(outputFile) == -1
+        if (cosDsWriteEOR(outputFile) == -1
             || cosDsWriteEOF(outputFile) == -1
             || cosDsWriteEOD(outputFile) == -1
             || cosDsClose(outputFile) == -1) {
@@ -175,7 +176,7 @@ static void addBlock(Module *module, char *id) {
         return;
     }
     while (current != NULL) {
-        valence = strcmp(current->id, new->id);
+        valence = strcasecmp(current->id, new->id);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -219,7 +220,7 @@ static void addEntry(Module *module, char *id) {
         return;
     }
     while (current != NULL) {
-        valence = strcmp(current->id, new->id);
+        valence = strcasecmp(current->id, new->id);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -263,7 +264,7 @@ static void addExternal(Module *module, char *id) {
         return;
     }
     while (current != NULL) {
-        valence = strcmp(current->id, new->id);
+        valence = strcasecmp(current->id, new->id);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -306,7 +307,7 @@ static Module *addModule(char *id) {
         return new;
     }
     while (current != NULL) {
-        valence = strcmp(current->id, new->id);
+        valence = strcasecmp(current->id, new->id);
         if (valence > 0) {
             if (current->left != NULL) {
                 current = current->left;
@@ -368,25 +369,136 @@ static void addSuffix(char *inPath, char *suffix, char *outPath) {
     *op = '\0';
 }
 
-static u64 copyModules(Dataset *ds, char *argv[]) {
+static void appendLibrary(Dataset *ods, Dataset *ids, char *argv[], char *sourcePath) {
     u8 buf[512*8];
     u64 cw;
     u64 hdr;
+    bool isSkipping;
+    Module *module;
+    char moduleName[9];
     int n;
+    u8 *table;
     int tableLength;
     u8 tableType;
     u64 wc;
 
+    memset(moduleName, 0, 9);
+    module = NULL;
+    isSkipping = TRUE;
+
     while (TRUE) {
-        n = cosDsRead(ds, buf, 8);
+        n = cosDsRead(ids, buf, 8);
         if (n == -1) {
-            fputs("Failed to read source file\n", stderr);
-            return -1;
+            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            exit(1);
         }
         else if (n == 0) {
-            cw = cosDsReadCW(ds);
-            if (cosDsIsEOR(cw) && writeEOR(outputFile) == -1) return -1;
-            return cw;
+            cw = cosDsReadCW(ids);
+            if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) return;
+            if (ods != NULL && isSkipping == FALSE && writeEOR(ods) == -1) {
+                fputs("Failed to write output file\n", stderr);
+                exit(1);
+            }
+            continue;
+        }
+        hdr = getWord(buf);
+        tableType = hdr >> 60;
+        if (tableType == LDR_TT_DFT) {
+            wc = (hdr >> 24) & 0xffffff;
+            if (cosDsRead(ids, buf, 16) != 16) {
+                fprintf(stderr, "Failed to read DFT module name from %s\n", sourcePath);
+                exit(1);
+            }
+            tableLength = (wc - 3) * 8;
+            memset(moduleName, 0, 9);
+            memcpy(moduleName, buf + 8, 8);
+            if (isOmittedName(moduleName, argv) || findModule(moduleName) != NULL) {
+                fprintf(stderr, "Warning: duplicate module %s ignored in %s\n", moduleName, sourcePath);
+                isSkipping = TRUE;
+            }
+            else {
+                module = addModule(moduleName);
+                isSkipping = FALSE;
+            }
+        }
+        else {
+            wc = (hdr >> 36) & 0xffffff;
+            tableLength = (wc - 1) * 8;
+        }
+        if (isSkipping) {
+            if (skipBytes(ids, tableLength) == -1) {
+                fprintf(stderr, "Failed to skip over %s in %s\n", getTableType(tableType), sourcePath);
+                exit(1);
+            }
+            continue;
+        }
+        switch (tableType) {
+        case LDR_TT_PDT:
+            table = (u8 *)allocate(tableLength);
+            n = cosDsRead(ids, table, tableLength);
+            if (n != tableLength) {
+                fprintf(stderr, "Failed to read PDT from %s\n", sourcePath);
+                exit(1);
+            }
+            processPDT(module, hdr, table, tableLength);
+            if (writeWord(ods, hdr) == -1
+                || writeBytes(ods, table, tableLength) == -1) {
+                exit(1);
+            }
+            free(table);
+            break;
+        case LDR_TT_DFT:
+            if (writeWord(ods, hdr) == -1
+                || writeBytes(ods, buf, 16) == -1
+                || copyBytes(ods, ids, tableLength, sourcePath) == -1) {
+                exit(1);
+            }
+            break;
+        default:
+            if (writeWord(ods, hdr) == -1
+                || copyBytes(ods, ids, tableLength, sourcePath) == -1) {
+                exit(1);
+            }
+            break;
+        }
+    }
+}
+
+static void appendObjectFile(Dataset *ods, Dataset *ids, char *argv[], char *sourcePath) {
+    u8 buf[512*8];
+    u64 cw;
+    u64 hdr;
+    Module *module;
+    char moduleName[9];
+    int n;
+    u8 *table;
+    int tableLength;
+    u8 tableType;
+    u64 wc;
+
+    calculateModuleName(sourcePath, moduleName);
+
+    if (isOmittedName(moduleName, argv) || findModule(moduleName) != NULL) {
+        fprintf(stderr, "Warning: duplicate module %s ignored in %s\n", moduleName, sourcePath);
+        return;
+    }
+
+    module = addModule(moduleName);
+
+    //
+    //  Pass 1. Find and process all PDT's to collect all of the symbols
+    //          associated with the module.
+    //
+    while (TRUE) {
+        n = cosDsRead(ids, buf, 8);
+        if (n == -1) {
+            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            exit(1);
+        }
+        else if (n == 0) {
+            cw = cosDsReadCW(ids);
+            if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) break;
+            continue;
         }
         hdr = getWord(buf);
         tableType = hdr >> 60;
@@ -397,35 +509,115 @@ static u64 copyModules(Dataset *ds, char *argv[]) {
             wc = (hdr >> 36) & 0xffffff;
         }
         tableLength = (wc - 1) * 8;
-        switch (tableType) {
-        case LDR_TT_PDT:
-            if (processPDT(ds, hdr, tableLength, argv) == -1) {
-                fputs("Failed to process PDT\n", stderr);
-                return -1;
+        if (tableType == LDR_TT_PDT) {
+            table = (u8 *)allocate(tableLength);
+            n = cosDsRead(ids, table, tableLength);
+            if (n != tableLength) {
+                fprintf(stderr, "Failed to read PDT from %s\n", sourcePath);
+                exit(1);
             }
-            break;
-        case LDR_TT_DFT:
-            if (skipBytes(ds, tableLength) == -1) {
-                fputs("Failed to skip DFT\n", stderr);
-                return -1;
-            }
-            break;
-        default:
-            if (writeWord(outputFile, hdr) == -1) return -1;
-            while (tableLength > 0) {
-                n = (tableLength > sizeof(buf)) ? sizeof(buf) : tableLength;
-                if (cosDsRead(ds, buf, n) != n) {
-                    fprintf(stderr, "Failed to read table type %02o from source file\n", tableType);
-                    return -1;
-                }
-                if (writeBytes(outputFile, buf, n) != n) return -1;
-                tableLength -= n;
-            }
-            break;
+            processPDT(module, hdr, table, tableLength);
+            free(table);
         }
+        else if (skipBytes(ids, tableLength) == -1) {
+            fprintf(stderr, "Failed to skip over %s in %s\n", getTableType(tableType), sourcePath);
+            exit(1);
+        }
+    }
+
+    //
+    //  Pass 2. Write the DFT for the module and copy all tables to the
+    //          the output file.
+    //
+    cosDsRewind(ids);
+    writeDFT(ods, module);
+    while (TRUE) {
+        n = cosDsRead(ids, buf, 8);
+        if (n == -1) {
+            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            exit(1);
+        }
+        else if (n == 0) {
+            cw = cosDsReadCW(ids);
+            if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) break;
+            continue;
+        }
+        hdr = getWord(buf);
+        tableType = hdr >> 60;
+        if (tableType == LDR_TT_DFT) {
+            //
+            // An object file shouldn't contain any DFT's, so if
+            // we find any, ignore them.
+            //
+            fprintf(stderr, "Warning: DFT ignored in object file %s\n", sourcePath);
+            wc = (hdr >> 24) & 0xffffff;
+            tableLength = (wc - 1) * 8;
+            if (skipBytes(ids, tableLength) == -1) {
+                fprintf(stderr, "Failed to skip over %s in %s\n", getTableType(tableType), sourcePath);
+                exit(1);
+            }
+        }
+        else {
+            wc = (hdr >> 36) & 0xffffff;
+            tableLength = (wc - 1) * 8;
+            if (writeWord(ods, hdr) == -1
+                || copyBytes(ods, ids, tableLength, sourcePath) == -1) {
+                exit(1);
+            }
+        }
+    }
+}
+
+static void calculateModuleName(char *path, char *name) {
+    char *cp;
+    Fnv32_t hash;
+    char *lastPeriod;
+    char *lastSlash;
+    int len;
+    char *limit;
+    char *start;
+
+    lastPeriod = NULL;
+    lastSlash = NULL;
+    for (cp = path; *cp != '\0'; cp++) {
+        if (*cp == '/' || *cp == '\\')
+            lastSlash = cp;
+        else if (*cp == '.')
+            lastPeriod = cp;
+    }
+    start = (lastSlash != NULL) ? lastSlash + 1 : path;
+    limit = (lastPeriod > lastSlash) ? lastPeriod : path + strlen(path);
+    memset(name, 0, 9);
+    len = limit - start;
+    if (len < 9) {
+        memcpy(name, start, len);
+    }
+    else {
+        hash = fnv32a(name, len, FNV1_32A_INIT);
+        memcpy(name, start, 4);
+        sprintf(name + 4, "%04x", hash & 0xffff);
+    }
+}
+
+static int copyBytes(Dataset *ods, Dataset *ids, int count, char *sourcePath) {
+    u8 buf[512*8];
+    int n;
+
+    while (count > 0) {
+        n = (count > sizeof(buf)) ? sizeof(buf) : count;
+        if (cosDsRead(ids, buf, n) != n) {
+            fprintf(stderr, "Failed to read %s\n", sourcePath);
+            return -1;
+        }
+        if (writeBytes(ods, buf, n) != n) {
+            fputs("Failed to write output file\n", stderr);
+            return -1;
+        }
+        count -= n;
     }
     return 0;
 }
+
 
 static Module *findModule(char *id) {
     Module *current;
@@ -433,7 +625,7 @@ static Module *findModule(char *id) {
 
     current = modules;
     while (current != NULL) {
-        valence = strncmp(current->id, id, 8);
+        valence = strncasecmp(current->id, id, 8);
         if (valence > 0)
             current = current->left;
         else if (valence < 0)
@@ -444,6 +636,22 @@ static Module *findModule(char *id) {
     return current;
 }
 
+static char *getTableType(u8 type) {
+    switch (type) {
+    case LDR_TT_PWT: return "PWT";
+    case LDR_TT_DMT: return "DMT";
+    case LDR_TT_DFT: return "DFT";
+    case LDR_TT_SMT: return "SMT";
+    case LDR_TT_DPT: return "DPT";
+    case LDR_TT_XRT: return "XRT";
+    case LDR_TT_BRT: return "BRT";
+    case LDR_TT_TXT: return "TXT";
+    case LDR_TT_PDT: return "PDT";
+    default: break;
+    }
+    return "???";
+}
+
 static u64 getWord(u8 *bytes) {
     int i;
     u64 word;
@@ -452,6 +660,20 @@ static u64 getWord(u8 *bytes) {
     for (i = 0; i < 8; i++)
         word = (word << 8) | *bytes++;
     return word;
+}
+
+static bool isLibrary(Dataset *ds) {
+    u8 buf[8];
+    u64 hdr;
+    int n;
+    u8 tableType;
+
+    n = cosDsRead(ds, buf, 8);
+    cosDsRewind(ds);
+    if (n != 8) return FALSE;
+    hdr = getWord(buf);
+    tableType = hdr >> 60;
+    return tableType == LDR_TT_DFT;
 }
 
 static bool isOmittedName(char *id, char *argv[]) {
@@ -578,84 +800,45 @@ static int printSymbols(Symbol *symbol, int ordinal, FILE *listingFile) {
     return printSymbols(symbol->right, ordinal, listingFile);
 }
 
-static int processPDT(Dataset *ds, u64 hdr, int tableLength, char *argv[]) {
+static void processPDT(Module *module, u64 hdr, u8 *table, int tableLength) {
     int blockWordCount;
     int entryWordCount;
     int externalWordCount;
     int hdrLen;
     int i;
-    Module *module;
-    char moduleId[9];
     int n;
     char *name;
     int offset;
-    Symbol *symbol;
-    u8 *table;
 
     blockWordCount = hdr & 0xff;
     entryWordCount = (hdr >> 8) & 0x3fff;
     externalWordCount = (hdr >> 22) & 0x3fff;
-    table = (u8 *)allocate(tableLength);
-    n = cosDsRead(ds, table, tableLength);
-    if (n != tableLength) {
-        free(table);
-        return -1;
-    }
-    //
-    //  Append new module to module list
-    //
     hdrLen = getWord(table) & 0x3fff;
     offset = hdrLen * 8;
     //
-    //  Traverse chain of blocks, if the module has any.
+    //  Process block names
     //
-    if (blockWordCount > 0) {
-        //
-        //  Normally, a module has at least one block, and the first
-        //  block is a program block.
-        //
-        memcpy(moduleId, table + offset, 8);
-        moduleId[8] = '\0';
-        module = findModule(moduleId);
-        if (module == NULL && isOmittedName(moduleId, argv) == FALSE) {
-            module = addModule(moduleId);
-            //
-            //  Process block names
-            //
-            for (i = 0; i < blockWordCount; i += 2) {
-                name = (char *)(table + offset);
-                offset += 16;
-                addBlock(module, name);
-            }
-            //
-            //  Process entry point definitions, if any
-            //
-            for (i = 0; i < entryWordCount; i += 3) {
-                name = (char *)(table + offset);
-                offset += 24;
-                addEntry(module, name);
-            }
-            //
-            //  Process external reference declarations, if any
-            //
-            for (i = 0; i < externalWordCount; i++) {
-                name = (char *)(table + offset);
-                offset += 8;
-                addExternal(module, name);
-            }
-            //
-            //  Write PDT of new module to output file
-            //
-            if (writeWord(outputFile, hdr) == -1
-                || writeBytes(outputFile, table, tableLength) != tableLength) {
-                free(table);
-                return -1;
-            }
-        }
+    for (i = 0; i < blockWordCount; i += 2) {
+        name = (char *)(table + offset);
+        offset += 16;
+        addBlock(module, name);
     }
-
-    free(table);
-    return 0;
+    //
+    //  Process entry point definitions, if any
+    //
+    for (i = 0; i < entryWordCount; i += 3) {
+        name = (char *)(table + offset);
+        offset += 24;
+        addEntry(module, name);
+    }
+    //
+    //  Process external reference declarations, if any
+    //
+    for (i = 0; i < externalWordCount; i++) {
+        name = (char *)(table + offset);
+        offset += 8;
+        addExternal(module, name);
+    }
 }
 
 static int skipBytes(Dataset *ds, int count) {
@@ -680,50 +863,35 @@ static void usage(void) {
     exit(1);
 }
 
-static int writeDirectory(Dataset *ds) {
-    int i;
-    char *id;
-    u64 dirLen;
-    Module *module;
-    int size;
-    u32 startAddress;
+static int writeDFT(Dataset *ods, Module *module) {
+    u64 fwa;
+    u64 hdr;
+    u64 dftLen;
     u64 word;
 
-    if (ds == NULL) return 0;
+    if (ods == NULL) return 0;
 
-    //
-    //  Calculate directory size
-    //
-    dirLen = 1; // header word
-    for (module = modules; module != NULL; module = module->next) {
-         dirLen += module->blockCount + module->entryCount + module->externalCount + 3;
-    }
-    //
-    //  Write directory header word
-    //
-    word = ((u64)LDR_TT_DFT << 60)
-         | (dirLen << 24)
+    dftLen = module->blockCount + module->entryCount + module->externalCount + 4;
+
+    hdr  = ((u64)LDR_TT_DFT << 60)
+         | (dftLen << 24)
          | ('D' << 16)
          | ('0' << 8)
          | '1';
-    if (cosDsWriteWord(ds, word) == -1) return -1;
-    //
-    //  Write module entries
-    //
-    for (module = modules; module != NULL; module = module->next) {
-        word = ((u64)1 << 60)
-             | ((u64)(module->blockCount + module->entryCount + module->externalCount + 3) << 39)
-             | (module->externalCount << 24)
-             | (module->entryCount    <<  9)
-             | module->blockCount;
-        if (cosDsWriteWord(ds, word) == -1) return -1;
-        if (writeName(module->id, ds) == -1) return -1;
-        word = 0; // TODO: set FWA of module
-        if (cosDsWriteWord(ds, word) == -1) return -1;
-        if (writeNames(module->blocks, ds) == -1
-            || writeNames(module->entries, ds) == -1
-            || writeNames(module->externals, ds) == -1) return -1;
-    }
+    word = ((u64)1 << 60)
+         | ((u64)(module->blockCount + module->entryCount + module->externalCount + 3) << 39)
+         | (module->externalCount << 24)
+         | (module->entryCount    <<  9)
+         | module->blockCount;
+    fwa = 0; // TODO: set FWA of module
+    if (writeWord(ods, hdr) == -1
+        || writeWord(ods, word) == -1
+        || writeName(module->id, ods) == -1
+        || writeWord(ods, word) == -1
+        || writeNames(module->blocks, ods) == -1
+        || writeNames(module->entries, ods) == -1
+        || writeNames(module->externals, ods) == -1)
+        return -1;
 
     return 0;
 }

@@ -47,11 +47,11 @@ static int writeExtBRT(ObjectBlock *block, Dataset *ds);
 static int writeExternalEntries(Module *module, Dataset *ds);
 static int writeName(char *name, Dataset *ds);
 static int writePDT(Module *module, Dataset *ds);
-static int writeProgramEntry(Module *module, Dataset *ds);
+static int writeProgramEntry(ObjectBlock *block, Dataset *ds);
 static int writeStdBRT(ObjectBlock *block, Dataset *ds);
 static int writeString(char *s, Dataset *ds);
 static int writeTrailer(Module *module, Dataset *ds);
-static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds);
+static int writeTXT(ObjectBlock *block, u8 index, bool isAbsolute, Dataset *ds);
 static int writeXRT(Module *module, Dataset *ds);
 
 /*
@@ -623,12 +623,33 @@ static int writeEntryEntries(Module *module, Dataset *ds) {
 static int writeCommonBlockEntry(ObjectBlock *block, Dataset *ds) {
     u64 blockOrigin;
     u64 blockSize;
+    u64 blockType;
     u64 word;
 
     if (writeName(block->id, ds) == -1) return -1;
     word = 0;
-    if (block->location == SectionLocation_EM)
-        word |= (u64)2 << 48;
+    switch (block->type) {
+    case SectionType_Common:
+        blockType = 0;
+        break;
+    case SectionType_Mixed:
+        blockType = 1;
+        break;
+    case SectionType_Code:
+        blockType = 2;
+        break;
+    case SectionType_Dynamic:
+        blockType = 5;
+        break;
+    case SectionType_TaskCom:
+        blockType = 6;
+        break;
+    default:
+        blockType = 3; // data
+        break;
+    }
+    word |= blockType << 54;
+    if (block->location == SectionLocation_EM) word |= (u64)2 << 48;
     blockOrigin = block->lowestParcelAddress & 0xfffffc;
     blockSize = (((block->highestParcelAddress + 4) & 0xfffffc) - blockOrigin) >> 2;
     word |= blockSize;
@@ -691,6 +712,7 @@ static int writeName(char *name, Dataset *ds) {
 
 int writeObjectRecord(Module *module, Dataset *ds) {
     ObjectBlock *block;
+    u8 index;
 
     /*
      *  Write the Program Description Table (PDT)
@@ -699,8 +721,9 @@ int writeObjectRecord(Module *module, Dataset *ds) {
     /*
      *  Write a Text Table (TXT) for each object block
      */
+    index = 0;
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-         if (writeTXT(block, (block->type == SectionType_Mixed || block->type == SectionType_Code) && module->isAbsolute, ds) == -1)
+         if (writeTXT(block, index++, (block->type == SectionType_Mixed || block->type == SectionType_Code) && module->isAbsolute, ds) == -1)
              return -1;
     }
     /*
@@ -782,11 +805,13 @@ static int writePDT(Module *module, Dataset *ds) {
     if (cosDsWrite(ds, machineType, sizeof(machineType)) == -1) return -1;
     if (cosDsWriteWord(ds, 0) == -1) return -1; // machine characteristics flags
 
-    if (writeProgramEntry(module, ds) == -1) return -1;
-
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-         if (block->type != SectionType_Mixed
-             && writeCommonBlockEntry(block, ds) == -1) return -1;
+         if ((block->type == SectionType_Code || block->type == SectionType_Mixed) && module->isAbsolute) {
+             if (writeProgramEntry(block, ds) == -1) return -1;
+         }
+         else {
+             if (writeCommonBlockEntry(block, ds) == -1) return -1;
+         }
     }
 
     if (writeEntryEntries(module, ds) == -1) return -1;
@@ -798,29 +823,15 @@ static int writePDT(Module *module, Dataset *ds) {
     return 0;
 }
 
-static int writeProgramEntry(Module *module, Dataset *ds) {
-    ObjectBlock *block;
+static int writeProgramEntry(ObjectBlock *block, Dataset *ds) {
     u64 programOrigin;
     u64 programSize;
     u64 word;
 
-    for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-         if (block->type == SectionType_Mixed || block->type == SectionType_Code) break;
-    }
-    if (block == NULL) {
-        return (writeName(" ", ds) == -1 || cosDsWriteWord(ds, 0) == -1) ? -1 : 0;
-    }
-    if (writeName(module->id, ds) == -1) return -1;
-    word = 0;
-    if (module->isAbsolute) {
-        word |= (u64)1 << 63;
-        programOrigin = block->lowestParcelAddress >> 2;
-        programSize = ((block->highestParcelAddress + 4) >> 2) - programOrigin;
-    }
-    else {
-        programOrigin = 0;
-        programSize = (block->highestParcelAddress + 4) >> 2;
-    }
+    if (writeName(block->id, ds) == -1) return -1;
+    word = (u64)1 << 63;
+    programOrigin = block->lowestParcelAddress >> 2;
+    programSize = ((block->highestParcelAddress + 4) >> 2) - programOrigin;
     if (getErrorCount() > 0) word |= (u64)1 << 62;
     word |= programOrigin << 24;
     word |= programSize;
@@ -904,7 +915,7 @@ static int writeTrailer(Module *module, Dataset *ds) {
     return 0;
 }
 
-static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds) {
+static int writeTXT(ObjectBlock *block, u8 index, bool isAbsolute, Dataset *ds) {
     int byteCount;
     u32 firstParcelAddress;
     u32 loadAddress;
@@ -914,16 +925,16 @@ static int writeTXT(ObjectBlock *block, bool isAbsolute, Dataset *ds) {
     u64 imageLength;
 
     //
-    //  Write headser word
+    //  Write header word
     //
     if (block->lowestParcelAddress != block->highestParcelAddress) { // block not empty
         firstParcelAddress = block->lowestParcelAddress & 0xfffffc;
         parcelCount = ((block->highestParcelAddress + 4) & 0xfffffc) - firstParcelAddress;
         loadAddress = isAbsolute ? firstParcelAddress : 0;
-        word = ((u64)LDR_TT_TXT << 60) | (((parcelCount >> 2) + 1) << 36) | (loadAddress >> 2);
+        word = ((u64)LDR_TT_TXT << 60) | (((parcelCount >> 2) + 1) << 36) | (index << 25) | (loadAddress >> 2);
     }
     else {
-        word = ((u64)LDR_TT_TXT << 60) | ((u64)1 << 36);
+        word = ((u64)LDR_TT_TXT << 60) | ((u64)1 << 36) | (index << 25);
     }
     if (cosDsWriteWord(ds, word) == -1) return -1;
     byteCount = parcelCount * 2;

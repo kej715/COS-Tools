@@ -170,7 +170,7 @@ Module *addModule(char *id, int len) {
     savedModule = currentModule;
     currentModule = module;
     section = addSection(module, "",  0, SectionType_Mixed, SectionLocation_CM);
-    section = addSection(module, "=", 1, SectionType_Mixed, SectionLocation_CM);
+    section = addSection(module, "=", 1, SectionType_Data,  SectionLocation_CM);
     module->qualifiers = qualifier = addQualifier("", 0);
     val.type = NumberType_Integer;
     val.attributes = SYM_PARCEL_ADDRESS|SYM_COUNTER;
@@ -416,38 +416,20 @@ static Symbol *allocSymbol(char *id, int len, Value *value) {
 
 void createObjectBlocks(Module *module) {
     u16 index;
-    ObjectBlock *localObjectBlock;
     ObjectBlock *objectBlock;
-    u32 offset;
     Section *section;
 
-    localObjectBlock = NULL;
     index = 0;
-    offset = 0;
     for (section = module->firstSection; section != NULL; section = section->next) {
-        switch (section->type) {
-        case SectionType_Mixed:
-        case SectionType_Code:
-        case SectionType_Data:
-            if (localObjectBlock == NULL) {
-                localObjectBlock = (ObjectBlock *)allocate(sizeof(ObjectBlock));
-                localObjectBlock->id = module->id;
-                localObjectBlock->index = index++;
-                localObjectBlock->type = SectionType_Mixed;
-                localObjectBlock->location = section->location;
-                if (module->lastObjectBlock != NULL) {
-                    module->lastObjectBlock->next = localObjectBlock;
-                }
-                else {
-                    module->firstObjectBlock = localObjectBlock;
-                }
-                module->lastObjectBlock = localObjectBlock;
-            }
-            section->originOffset = section->originCounter = section->locationCounter = offset;
-            section->objectBlock = localObjectBlock;
-            offset = (offset + section->size + 3) & 0xfffffc;
-            break;
-        case SectionType_Common:
+        if (section->size < 1
+            && (strcmp(section->id, "") == 0 || strcmp(section->id, "=") == 0))
+            continue;
+        for (objectBlock = module->firstObjectBlock; objectBlock != NULL; objectBlock = objectBlock->next) {
+            if (objectBlock->type == section->type && objectBlock->location == section->location
+                && strcasecmp(objectBlock->id, section->id) == 0)
+                break;
+        }
+        if (objectBlock == NULL) {
             objectBlock = (ObjectBlock *)allocate(sizeof(ObjectBlock));
             objectBlock->id = section->id;
             objectBlock->index = index++;
@@ -459,17 +441,11 @@ void createObjectBlocks(Module *module) {
             else {
                 module->firstObjectBlock = objectBlock;
             }
-            module->lastObjectBlock = section->objectBlock = objectBlock;
-            // fall through
-        case SectionType_Stack:
-        case SectionType_Dynamic:
-        case SectionType_TaskCom:
-            section->originOffset = section->originCounter = section->locationCounter = 0;
-            break;
-        default:
-            fprintf(stderr, "Unknown section type: %d\n", section->type);
-            exit(1);
+            module->lastObjectBlock = objectBlock;
         }
+        section->originOffset = section->originCounter = section->locationCounter = objectBlock->offset;
+        section->objectBlock = objectBlock;
+        objectBlock->offset = (objectBlock->offset + section->size + 3) & 0xfffffc;
     }
 }
 
