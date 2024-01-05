@@ -2,6 +2,8 @@
          SUBTITLE  'Miscellaneous utility functions'
          IDENT     UTIL
          COMMENT   'UTIL - Miscellaneous utility functions'
+
+UTIL     SECTION   MIXED
 **
 *  $DMP - Dump block of memory to log file
 *
@@ -167,5 +169,7 @@ HEX      BSS       0
          CON       'D'R
          CON       'E'R
          CON       'F'R
+
+         SECTION   *
 
          END

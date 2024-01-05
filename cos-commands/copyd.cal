@@ -10,6 +10,8 @@ NB       =         D'10
 UDASZ    =         NB*D'512
 BUFSZ    =         NB*D'512
 
+DATA     SECTION   DATA
+
 IDSP     DSP       IN$,IBUF,NB
 IODN     DATA      'IN$'L
          VWD       6/4,30/0,4/OSTSA,24/IDSP ; system managed/resident
@@ -19,6 +21,10 @@ ODSP     DSP       OUT$,OBUF,NB
 OODN     DATA      'OUT$'L
          VWD       6/4,30/0,4/OSTSA,24/ODSP ; system managed/resident
 *        VWD       36/0,4/OSTSA,24/ODSP     ; system managed/resident
+
+         SECTION   *
+
+TEXT     SECTION   CODE
 
 COPYD    =         *
          A1        ARGS           ; parse command line arguments
@@ -98,6 +104,10 @@ COP8     S1        ARGO,
          MESSAGE   COPD,US
          ABORT
 
+         SECTION   *
+
+DATA     SECTION   DATA
+
 COPA     DATA      'Copy complete. Records: '
 COPB     DATA      0
          DATA      ' Files: '
@@ -120,5 +130,7 @@ FCOUNT   CON       0
 IBUF     BSS       BUFSZ
 OBUF     BSS       BUFSZ
 UDA      BSS       UDASZ
+
+         SECTION   *
 
          END

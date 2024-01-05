@@ -14,6 +14,9 @@ COMMA    SET       2
 EQUAL    SET       3
 STOP     SET       4
 JCAWRD   SET       5
+
+SYSIO    SECTION   MIXED
+
          ENTRY     $PARGS
 $PARGS   SUBR
          S.COMMA   ARGCOMMA
@@ -335,5 +338,7 @@ $WEFD4   RECALL    A1
          J         $WEFD1
 
 $REWD    =         *              ; Rewind
+
+         SECTION   *
 
          END
