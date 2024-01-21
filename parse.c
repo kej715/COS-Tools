@@ -639,6 +639,20 @@ static ErrorCode executeOperator(OperatorType opType) {
         if (rightArg.section == NULL) rightArg.section = currentSection;
         pushArg(&rightArg);
         break;
+    case Op_ByteOffset:
+        if (isByteAddress(&rightArg)) {
+            rightArg.intValue &= 0x07;
+        }
+        else if (isParcelAddress(&rightArg)) {
+            rightArg.intValue = (rightArg.intValue & 0x03) * 2;
+        }
+        else if (isWordAddress(&rightArg)) {
+            rightArg.intValue = 0;
+        }
+        rightArg.attributes = SYM_BYTE_ADDRESS;
+        if (rightArg.section == NULL) rightArg.section = currentSection;
+        pushArg(&rightArg);
+        break;
     case Op_Parcel:
         if (isWordAddress(&rightArg)) {
             rightArg.intValue *= 4;
@@ -1184,6 +1198,8 @@ char *getNextToken(char *s, Token *token) {
                         return parseNumber(start + 2, 8, token);
                     }
                     // fall through for possible "O."
+                case 'I':
+                case 'i':
                 case 'P':
                 case 'p':
                 case 'W':
@@ -1198,9 +1214,13 @@ char *getNextToken(char *s, Token *token) {
                             token->details.operator.type = Op_Word;
                             token->details.operator.precedence = PRECEDENCE_WORD;
                         }
-                        else {
+                        else if (*start == 'O' || *start == 'o') {
                             token->details.operator.type = Op_Byte;
                             token->details.operator.precedence = PRECEDENCE_BYTE;
+                        }
+                        else {
+                            token->details.operator.type = Op_ByteOffset;
+                            token->details.operator.precedence = PRECEDENCE_BYTE_OFFSET;
                         }
                         return s + 1;
                     }
@@ -1896,7 +1916,7 @@ static char *parseFloat(char *s, int base, Token *token) {
      *  Process power of 10 indication
      */
     if ((*s == 'E' || *s == 'e')
-        && (((*s + 1) >= '0' && (*s + 1) <= '9')
+        && ((*(s + 1) >= '0' && *(s + 1) <= '9')
             || ((*(s + 1) == '+' || *(s + 1) == '-') && *(s + 2) >= '0' && *(s + 2) <= '9'))) {
         s = parseInteger(s + 1, base, &valE);
         while (valE > 0) {
