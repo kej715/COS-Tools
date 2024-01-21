@@ -296,7 +296,7 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
         }
     }
     fieldAttributes |= val->attributes;
-    bits = (val->type == NumberType_Integer) ? val->intValue : toCrayFloat(val->floatValue);
+    bits = (val->type == NumberType_Integer) ? val->intValue : toCrayFloat(val->intValue);
     currentWord = getWord(section, section->originCounter);
     emptyBitCount = 64 - section->wordBitPosCounter;
     while (len > emptyBitCount) {
