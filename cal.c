@@ -31,8 +31,10 @@
 #include "cosdataset.h"
 #include "fnv.h"
 
+static FILE *openExtText(char *fileName);
 static int  openNextSource(int argi, int argc, char *argv[], bool *isExtText);
 static void parseOptions(int argc, char *argv[]);
+static void readEnvars(char *envp[]);
 static void resetDefaultModule(void);
 static void resetLocalSymbols(void);
 static void resetQualifierStack(void);
@@ -45,8 +47,9 @@ static u16 defaultListControl = LIST_ON|LIST_XRF|LIST_XNS|LIST_WEM|LIST_WMR;
 static char *explicitIdent = NULL;
 static char *lFile = NULL;
 static char *oFile = NULL;
+static char *textPath = NULL;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[], char *envp[]) {
     ErrorCode code;
     int errCount;
     bool isExtText;
@@ -58,6 +61,7 @@ int main(int argc, char *argv[]) {
     int warnCount;
 
     defaultModule = addModule("", 0);
+    readEnvars(envp);
     parseOptions(argc, argv);
     instInit();
     errCount = 0;
@@ -126,6 +130,31 @@ int main(int argc, char *argv[]) {
     exit(errCount > 0 || (warnCount > 0 && isFatalWarnings));
 }
 
+static FILE *openExtText(char *fileName) {
+    char *cp;
+    char filePath[MAX_FILE_PATH_LENGTH+1];
+    FILE *fp;
+    int len;
+    char *sp;
+
+    if (textPath == NULL || *fileName == '.' || *fileName == '/' || *fileName == '\\') return NULL;
+    sp = cp = textPath;
+    while (TRUE) {
+        while (*cp != '\0' && *cp != ':' && *cp != ';') cp += 1;
+        len = cp - sp;
+        if (len > 0) {
+            memcpy(filePath, sp, len);
+            filePath[len] = '/';
+            strcpy(filePath + len + 1, fileName);
+            fp = fopen(filePath, "r");
+            if (fp != NULL) return fp;
+        }
+        if (*cp == '\0') return NULL;
+        cp += 1;
+        sp = cp;
+    }
+}
+
 static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     char *cp;
     char *dp;
@@ -182,8 +211,11 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     }
     sourceFile = fopen(filePath, "r");
     if (sourceFile == NULL) {
-        perror(filePath);
-        exit(1);
+        if (*isExtText) sourceFile = openExtText(filePath);
+        if (sourceFile == NULL) {
+            perror(filePath);
+            exit(1);
+        }
     }
     if (*isExtText) return argi;
     if (lFile == NULL) {
@@ -276,6 +308,13 @@ static void parseOptions(int argc, char *argv[]) {
         else if (strcmp(argv[i], "-s") == 0) {
             isSectionStackingEnabled = FALSE;
         }
+        else if (strcmp(argv[i], "-T") == 0) {
+            i += 1;
+            if (i >= argc || *argv[i] == '-') {
+                usage();
+            }
+            textPath = argv[i];
+        }
         else if (strcmp(argv[i], "-t") == 0) {
             i += 1;
             if (i >= argc || *argv[i] == '-') {
@@ -297,6 +336,22 @@ static void parseOptions(int argc, char *argv[]) {
         i += 1;
     }
     if (sourceCount < 1) usage();
+}
+
+static void readEnvars(char *envp[]) {
+    char *cp;
+    char *env;
+    int i;
+
+    for (i = 0; envp[i] != NULL; i++) {
+        env = envp[i];
+        cp  = env;
+        while (*cp != '\0' && *cp != '=') cp += 1;
+        if (strncmp(env, "TEXTPATH", cp - env) == 0) {
+            textPath = cp + 1;
+            break;
+        }
+    }
 }
 
 void resetBase(void) {
@@ -388,12 +443,13 @@ static void timeInit(void) {
 }
 
 static void usage(void) {
-    fputs("Usage: cal [-f][-i ident][-l lfile][-o ofile][-t tfile]...[-x] sfile ...\n", stdout);
+    fputs("Usage: cal [-f][-i ident][-l lfile][-o ofile][-T dlist][-t tfile]...[-x] sfile ...\n", stdout);
     fputs("  -f       - enable flexible syntax\n", stderr);
     fputs("  -i ident - default module identifier\n", stderr);
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - object file\n", stderr);
     fputs("  -s       - disable section stacking\n", stderr);
+    fputs("  -T dlist - text file directory list\n", stderr);
     fputs("  -t tfile - external text file\n", stderr);
     fputs("  -w       - exit with error status on warning indications\n", stderr);
     fputs("  -x       - enable implicit external symbols\n", stderr);
