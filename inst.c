@@ -786,6 +786,10 @@ static bool hasAttrABS(Token *expression, ErrorCode *err) {
     *err = evaluateExpression(expression, &val);
     return isDefined(&val) && isAbsolute(&val);
 }
+static bool hasAttrSYM(Token *expression, ErrorCode *err) {
+
+    return expression->type == TokenType_Name;
+}
 static bool hasAttrIMM(Token *expression, ErrorCode *err) {
     Value val;
 
@@ -896,6 +900,7 @@ static AttrEvalDefn attrEvalDefns[] = {
     {"PA",      2, hasAttrPA},
     {"WA",      2, hasAttrWA},
     {"ABS",     3, hasAttrABS},
+    {"SYM",     3, hasAttrSYM},
     {"IMM",     3, hasAttrIMM},
     {"REL",     3, hasAttrREL},
     {"EXT",     3, hasAttrEXT},
@@ -5317,7 +5322,7 @@ static bool isOne(Value *val) {
 
 static bool isSimpleInteger(Value *val) {
     return val->type == NumberType_Integer
-        && (val->attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_IMMOBILE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
+        && (val->attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_IMMOBILE|SYM_LITERAL|SYM_UNDEFINED|SYM_BYTE_ADDRESS|SYM_PARCEL_ADDRESS|SYM_WORD_ADDRESS)) == 0;
 }
 
 static bool isZero(Value *val) {
