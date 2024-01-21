@@ -326,6 +326,7 @@ typedef enum operatorType {
     Op_MaskLeft,
     Op_CmplMaskLeft,
     Op_Byte,
+    Op_ByteOffset,
     Op_Parcel,
     Op_Word,
     Op_Literal,
@@ -358,6 +359,7 @@ typedef enum operatorType {
 #define PRECEDENCE_MASK_LEFT       1
 #define PRECEDENCE_CMPL_MASK_LEFT  1
 #define PRECEDENCE_BYTE            1
+#define PRECEDENCE_BYTE_OFFSET     1
 #define PRECEDENCE_PARCEL          1
 #define PRECEDENCE_WORD            1
 #define PRECEDENCE_LITERAL         1
