@@ -18,7 +18,7 @@ UTIL     SECTION   MIXED
 $DMP     SUBR
 $DMP1    A0        A7-A6
          JAZ       $DMP2          ; if done
-         S1        ,A6            ; concert top 32 bits to hex
+         S1        ,A6            ; convert top 32 bits to hex
          S1        S1>D'32
          R         $I2X@32
          $DMPA,    S7
