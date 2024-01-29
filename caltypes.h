@@ -101,7 +101,8 @@ typedef struct macroParam {
 
 typedef enum macroFragType {
     MacroFragType_Text = 0,
-    MacroFragType_ParamRef
+    MacroFragType_ParamRef,
+    MacroFragType_Regex
 } MacroFragType;
 
 typedef struct macroFragment {

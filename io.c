@@ -36,6 +36,10 @@ static void generateMacroLine(void) {
     MacroFragment *frag;
     char *limit;
     MacroLine *line;
+    int rc;
+    char *reCaptures[10];
+    int reCaptureLens[10];
+    int reCaptureN;
     char *sp;
     char *tp;
 
@@ -51,6 +55,15 @@ static void generateMacroLine(void) {
         }
         else {
             tp = getMacroParamValue(call, frag->text);
+            if (frag->next != NULL && frag->next->type == MacroFragType_Regex) {
+                frag = frag->next;
+                rc = applyRE(frag->text, strlen(frag->text), tp, strlen(tp), reCaptures, reCaptureLens, 10, &reCaptureN);
+                if (rc == 1 && reCaptureN > 0) {
+                    tp = reCaptures[0];
+                    while (sp < limit && reCaptureLens[0]-- > 0) *sp++ = *tp++;
+                }
+                tp = "";
+            }
         }
         while (*tp != '\0' && sp < limit) *sp++ = *tp++;
         frag = frag->next;

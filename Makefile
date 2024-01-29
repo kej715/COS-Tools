@@ -43,6 +43,7 @@ CALOBJS = cal.o          \
           list.o         \
           object.o       \
           parse.o        \
+          re.o           \
           services.o     \
           trees.o
 
@@ -109,6 +110,8 @@ list.o: list.c $(CALHDRS)
 object.o: object.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
 parse.o: parse.c $(CALHDRS)
+	$(CC) $(CFLAGS) -c $<
+re.o:   re.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
 services.o: services.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<

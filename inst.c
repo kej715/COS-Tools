@@ -427,6 +427,7 @@ static ErrorCode CON(void) {
     ErrorCode err;
     char *s;
     Value val;
+    Value zero;
 
     if (*operandField == '\0') return Err_OperandField;
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
@@ -449,7 +450,23 @@ static ErrorCode CON(void) {
             if (err != Err_None) (void)registerError(err);
         }
         emitFieldStart(currentSection);
-        emitFieldBits(currentSection, &val, 64, FALSE);
+        if (isRelocatable(&val) || isExternal(&val)) {
+            zero.type = NumberType_Integer;
+            zero.attributes = 0;
+            zero.section = NULL;
+            zero.intValue = 0;
+            if (isParcelAddress(&val)) {
+                emitFieldBits(currentSection, &zero, 40, FALSE);
+                emitFieldBits(currentSection, &val, 24, FALSE);
+            }
+            else {
+                emitFieldBits(currentSection, &zero, 42, FALSE);
+                emitFieldBits(currentSection, &val, 22, FALSE);
+            }
+        }
+        else {
+            emitFieldBits(currentSection, &val, 64, FALSE);
+        }
         emitFieldEnd(currentSection);
         if (*s == ',') {
             listFlush(currentSection);
@@ -465,6 +482,7 @@ static ErrorCode DATA(void) {
     Token *expression;
     char *s;
     Value val;
+    Value zero;
 
     if (*operandField == '\0') return Err_OperandField;
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
@@ -492,7 +510,23 @@ static ErrorCode DATA(void) {
         default:
             err = evaluateExpression(expression, &val);
             emitFieldStart(currentSection);
-            emitFieldBits(currentSection, &val, 64, FALSE);
+            if (isRelocatable(&val) || isExternal(&val)) {
+                zero.type = NumberType_Integer;
+                zero.attributes = 0;
+                zero.section = NULL;
+                zero.intValue = 0;
+                if (isParcelAddress(&val)) {
+                    emitFieldBits(currentSection, &zero, 40, FALSE);
+                    emitFieldBits(currentSection, &val, 24, FALSE);
+                }
+                else {
+                    emitFieldBits(currentSection, &zero, 42, FALSE);
+                    emitFieldBits(currentSection, &val, 22, FALSE);
+                }
+            }
+            else {
+                emitFieldBits(currentSection, &val, 64, FALSE);
+            }
             emitFieldEnd(currentSection);
             break;
         }
@@ -1033,22 +1067,32 @@ static ErrorCode IFC(void) {
     else if (locationFieldToken == NULL) {
         return Err_OperandField;
     }
-    valence = compareStrings(s1, s1Len, s2, s2Len);
+
     op = opToken.details.name.ptr;
-    if (strncasecmp(op, "LT", 2) == 0)
-        cond = valence < 0;
-    else if (strncasecmp(op, "LE", 2) == 0)
-        cond = valence <= 0;
-    else if (strncasecmp(op, "GT", 2) == 0)
-        cond = valence > 0;
-    else if (strncasecmp(op, "GE", 2) == 0)
-        cond = valence >= 0;
-    else if (strncasecmp(op, "EQ", 2) == 0)
-        cond = valence == 0;
-    else if (strncasecmp(op, "NE", 2) == 0)
-        cond = valence != 0;
-    else
-        return Err_OperandField;
+
+    if (strncasecmp(op, "RE", 2) == 0) {
+        valence = applyRE(s2, s2Len, s1, s1Len, NULL, NULL, 0, NULL);
+        if (valence == -1) return Err_OperandField;
+        cond = valence == 1;
+    }
+    else {
+        valence = compareStrings(s1, s1Len, s2, s2Len);
+        if (strncasecmp(op, "LT", 2) == 0)
+            cond = valence < 0;
+        else if (strncasecmp(op, "LE", 2) == 0)
+            cond = valence <= 0;
+        else if (strncasecmp(op, "GT", 2) == 0)
+            cond = valence > 0;
+        else if (strncasecmp(op, "GE", 2) == 0)
+            cond = valence >= 0;
+        else if (strncasecmp(op, "EQ", 2) == 0)
+            cond = valence == 0;
+        else if (strncasecmp(op, "NE", 2) == 0)
+            cond = valence != 0;
+        else
+            return Err_OperandField;
+    }
+
     if (cond == FALSE) skipLines(locationFieldToken, count.intValue);
 
     return Err_None;
@@ -1218,6 +1262,7 @@ static ErrorCode MACRO(void) {
     int macroNameLen;
     Name *name;
     MacroParam *pp;
+    char *re;
     char *s;
     char *start;
     char *value;
@@ -1357,6 +1402,14 @@ static ErrorCode MACRO(void) {
                 if (pp != NULL) {
                     addMacroLineFragment(line, MacroFragType_Text, start, id - start);
                     addMacroLineFragment(line, MacroFragType_ParamRef, id, s - id);
+                    if (*s == '{') {
+                        s += 1;
+                        re = s;
+                        while (*s != '\0' && *s != '}') s += 1;
+                        if (*s != '}') return Err_Syntax;
+                        addMacroLineFragment(line, MacroFragType_Regex, re, s - re);
+                        s += 1;
+                    }
                     start = s;
                 }
             }

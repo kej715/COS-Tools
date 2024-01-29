@@ -29,6 +29,7 @@
 #include "caltypes.h"
 #include "cosdataset.h"
 
+extern int applyRE(char *re, int reLen, char *s, int sLen, char **captures, int *lenCaptures, int maxCaptures, int *nCaptures);
 extern int baseStack[];
 extern int baseStackPtr;
 extern char *calName;
