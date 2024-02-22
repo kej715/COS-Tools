@@ -44,6 +44,8 @@ static void calculateBaseAddresses(Block *block);
 static void calculateModuleName(char *path, u8 *name);
 static Block *findBlock(Module *module, int blockIndex);
 static Symbol *findSymbol(u8 *id);
+static u64 formMask(int len);
+static u64 getField(u8 *bytes, u32 rightmostBit, u16 fieldLength);
 static char *getTableType(u8 type);
 static u64 getWord(u8 *bytes);
 static int idcmp(u8 *id1, u8*id2, int len);
@@ -61,6 +63,8 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength);
 static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLength);
 static int processTXT(Dataset *ds, u64 hdr, int tableLength);
 static int processXRT(Dataset *ds, u64 hdr, int tableLength);
+static void putField(u8 *bytes, u32 rightmostBit, u16 fieldLength, u64 field);
+static void putWord(u8 *bytes, u64 word);
 static int readWord(Dataset *ds, u64 *word);
 static int resolveExternal(u8 *id);
 static int resolveExternals(void);
@@ -458,6 +462,39 @@ static Symbol *findSymbol(u8 *id) {
     return current;
 }
 
+static u64 formMask(int len) {
+    u64 mask;
+
+    switch (len) {
+    case 8:
+        mask = 0xff;
+        break;
+    case 16:
+        mask = 0xffff;
+        break;
+    case 22:
+        mask = 0x3fffff;
+        break;
+    case 24:
+        mask = 0xffffff;
+        break;
+    case 32:
+        mask = 0xffffffff;
+        break;
+    case 64:
+        mask = 0xffffffffffffffff;
+        break;
+    default:
+        mask = 0;
+        while (len-- > 0) {
+            mask = (mask << 1) | 1;
+        }
+        break;
+    }
+
+    return mask;
+}
+
 static char *getBlockType(BlockType type) {
     switch (type) {
     case BlockType_Common : return "Common";
@@ -470,6 +507,28 @@ static char *getBlockType(BlockType type) {
     default: break;
     }
     return "Unknown";
+}
+
+static u64 getField(u8 *bytes, u32 rightmostBit, u16 fieldLength) {
+    u32 byteOffset;
+    u64 field;
+    u64 mask;
+    int shiftCount;
+
+    byteOffset = (rightmostBit >> 3) - 7;
+    mask = formMask(fieldLength);
+    if ((rightmostBit & 7) == 7) { /* byte-aligned */
+        field = getWord(bytes + byteOffset);
+    }
+    else {
+        field = getWord(bytes + byteOffset);
+        shiftCount = 7 - (rightmostBit & 7);
+        field >>= shiftCount;
+        if (fieldLength >= 56) {
+            field = field | ((u64)bytes[byteOffset - 1] << (64 - shiftCount));
+        }
+    }
+    return field & mask;
 }
 
 static char *getTableType(u8 type) {
@@ -899,23 +958,21 @@ static void printSymbols(Module *module, Symbol *symbol) {
 static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
     u32 baseAddress;
     u32 bitAddress;
-    u32 bitAddrOffset;
     Block *block;
     int blockIndex;
-    int byteCount;
+    u64 field;
     int fieldLength;
-    int i;
     u32 imageBytes;
     int imageOffset;
     bool isParcelRelocation;
     u32 parcelAddress;
     int shiftBias;
-    int shiftCount;
+    Block *targetBlock;
     u64 word;
 
     blockIndex = (hdr >> 25) & 0x7f;
-    block = findBlock(currentModule, blockIndex);
-    if (block == NULL) {
+    targetBlock = findBlock(currentModule, blockIndex);
+    if (targetBlock == NULL) {
         fprintf(stderr, "Failed to find block %d referenced by BRT of module %s\n", blockIndex, currentModule->id);
         errorCount += 1;
         return skipBytes(ds, tableLength);
@@ -924,12 +981,12 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
         //
         //  Process extended format table
         //
-        bitAddrOffset = block->baseAddress;
         while (tableLength > 0) {
             if (readWord(ds, &word)) return -1;
             tableLength -= 8;
             blockIndex = (word >> 38) & 0x7f;
             fieldLength = (word >> 32) & 0x3f;
+            if (fieldLength == 0) fieldLength = 64;
             isParcelRelocation = (word >> 31) & 1;
             bitAddress = word & 0x3fffffff;
             block = findBlock(currentModule, blockIndex);
@@ -939,28 +996,17 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
                 errorCount += 1;
                 continue;
             }
-            baseAddress = block->baseAddress;
-            imageOffset = (bitAddrOffset * 8) + (bitAddress >> 3);
-            shiftCount = 7 - (bitAddress & 7);
-            byteCount = (fieldLength + 7) / 8;
-            if (shiftCount != 0) byteCount += 1;
-            imageBytes = 0;
-            for (i = byteCount - 1; i >= 0; i--) imageBytes = (imageBytes << 8) | image[imageOffset - i];
-            if (isParcelRelocation)
-                imageBytes += baseAddress << 2;
-            else
-                imageBytes += baseAddress;
-            for (i = 0; i < byteCount; i++) {
-                image[imageOffset--] = imageBytes & 0xff;
-                imageBytes >>= 8;
-            }
+            bitAddress += targetBlock->baseAddress << 6;
+            field = getField(image, bitAddress, fieldLength);
+            field += isParcelRelocation ? block->baseAddress << 2 : block->baseAddress;
+            putField(image, bitAddress, fieldLength, field);
         }
     }
     else {
         //
         //  Process standard format table
         //
-        baseAddress = block->baseAddress;
+        baseAddress = targetBlock->baseAddress;
         while (tableLength > 0) {
             if (readWord(ds, &word)) return -1;
             tableLength -= 8;
@@ -976,16 +1022,18 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
                     errorCount += 1;
                     continue;
                 }
-                parcelAddress += block->baseAddress << 2;
+                parcelAddress += baseAddress << 2;
                 imageOffset = parcelAddress * 2;
                 imageBytes = (image[imageOffset  ] << 24)
                            | (image[imageOffset+1] << 16)
                            | (image[imageOffset+2] <<  8)
                            |  image[imageOffset+3];
-                if (isParcelRelocation)
-                    imageBytes += baseAddress << 2;
-                else
-                    imageBytes += baseAddress;
+                if (isParcelRelocation) {
+                    imageBytes += block->baseAddress << 2;
+                }
+                else {
+                    imageBytes += block->baseAddress;
+                }
                 image[imageOffset  ] =  imageBytes >> 24;
                 image[imageOffset+1] = (imageBytes >> 16) & 0xff;
                 image[imageOffset+2] = (imageBytes >>  8) & 0xff;
@@ -1162,20 +1210,15 @@ static int processTXT(Dataset *ds, u64 hdr, int tableLength) {
 }
 
 static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
-    u32 baseAddress;
     u32 bitAddress;
     Block *block;
     int blockIndex;
-    int byteCount;
     int extIndex;
+    u64 field;
     u8 fieldLength;
-    int i;
     u8 *id;
-    u32 imageBytes;
-    int imageOffset;
     bool isParcelRelocation;
     u32 parcelAddress;
-    int shiftCount;
     Symbol *symbol;
     u64 word;
 
@@ -1194,7 +1237,6 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
             errorCount += 1;
             continue;
         }
-        baseAddress = block->baseAddress;
         if (extIndex >= currentModule->externalRefCount) {
             fprintf(stderr, "Invalid external reference index %d in XRT of module %s\n", blockIndex, currentModule->id);
             errorCount += 1;
@@ -1207,30 +1249,57 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
             errorCount += 1;
             continue;
         }
-        imageOffset = (baseAddress * 8) + (bitAddress >> 3);
-        shiftCount = 7 - (bitAddress & 7);
-        byteCount = (fieldLength + 7) / 8;
-        if (shiftCount != 0) byteCount += 1;
-        word = 0;
-        for (i = byteCount - 1; i >= 0; i--) word = (word << 8) | image[imageOffset - i];
+        bitAddress += block->baseAddress << 6;
+        field = getField(image, bitAddress, fieldLength);
         if (isParcelRelocation) {
             if (symbol->isParcelAddress)
-                word += symbol->value << shiftCount;
+                field += symbol->value;
             else
-                word += symbol->value << (shiftCount + 2);
+                field += symbol->value << 2;
         }
         else if (symbol->isParcelAddress) {
-            word += (symbol->value >> 2) << shiftCount;
+            field += symbol->value >> 2;
         }
         else {
-            word += symbol->value << shiftCount;
+            field += symbol->value;
         }
-        for (i = 0; i < byteCount; i++) {
-            image[imageOffset--] = word & 0xff;
-            word >>= 8;
-        }
+        putField(image, bitAddress, fieldLength, field);
     }
     return 0;
+}
+
+static void putField(u8 *bytes, u32 rightmostBit, u16 fieldLength, u64 field) {
+    u32 byteOffset;
+    u64 mask;
+    int shiftCount;
+    u64 word;
+
+    mask = formMask(fieldLength);
+    field &= mask;
+    byteOffset = (rightmostBit >> 3) - 7;
+    if ((rightmostBit & 7) == 7) { /* byte-aligned */
+        word = (getWord(bytes + byteOffset) & ~mask) | field;
+        putWord(bytes + byteOffset, word);
+    }
+    else {
+        shiftCount = 7 - (rightmostBit & 7);
+        word = (getWord(bytes + byteOffset) & ~(mask << shiftCount)) | (field << shiftCount);
+        putWord(bytes + byteOffset, word);
+        if (fieldLength >= 56) {
+            byteOffset -= 1;
+            mask = formMask(shiftCount);
+            bytes[byteOffset] = (bytes[byteOffset] & ~mask) | (field >> (64 - shiftCount));
+        }
+    }
+}
+
+static void putWord(u8 *bytes, u64 word) {
+    int i;
+
+    for (i = 7; i >= 0; i--) {
+        *(bytes + i) = word & 0xff;
+        word >>= 8;
+    }
 }
 
 static int readWord(Dataset *ds, u64 *word) {
