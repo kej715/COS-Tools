@@ -427,7 +427,6 @@ static ErrorCode CON(void) {
     ErrorCode err;
     char *s;
     Value val;
-    Value zero;
 
     if (*operandField == '\0') return Err_OperandField;
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
@@ -451,16 +450,12 @@ static ErrorCode CON(void) {
         }
         emitFieldStart(currentSection);
         if (isRelocatable(&val) || isExternal(&val)) {
-            zero.type = NumberType_Integer;
-            zero.attributes = 0;
-            zero.section = NULL;
-            zero.intValue = 0;
             if (isParcelAddress(&val)) {
-                emitFieldBits(currentSection, &zero, 40, FALSE);
+                emitFieldBits(currentSection, &zeroIntVal, 40, FALSE);
                 emitFieldBits(currentSection, &val, 24, FALSE);
             }
             else {
-                emitFieldBits(currentSection, &zero, 42, FALSE);
+                emitFieldBits(currentSection, &zeroIntVal, 42, FALSE);
                 emitFieldBits(currentSection, &val, 22, FALSE);
             }
         }
@@ -482,7 +477,6 @@ static ErrorCode DATA(void) {
     Token *expression;
     char *s;
     Value val;
-    Value zero;
 
     if (*operandField == '\0') return Err_OperandField;
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
@@ -511,16 +505,12 @@ static ErrorCode DATA(void) {
             err = evaluateExpression(expression, &val);
             emitFieldStart(currentSection);
             if (isRelocatable(&val) || isExternal(&val)) {
-                zero.type = NumberType_Integer;
-                zero.attributes = 0;
-                zero.section = NULL;
-                zero.intValue = 0;
                 if (isParcelAddress(&val)) {
-                    emitFieldBits(currentSection, &zero, 40, FALSE);
+                    emitFieldBits(currentSection, &zeroIntVal, 40, FALSE);
                     emitFieldBits(currentSection, &val, 24, FALSE);
                 }
                 else {
-                    emitFieldBits(currentSection, &zero, 42, FALSE);
+                    emitFieldBits(currentSection, &zeroIntVal, 42, FALSE);
                     emitFieldBits(currentSection, &val, 22, FALSE);
                 }
             }
@@ -1983,7 +1973,15 @@ static ErrorCode VWD(void) {
         }
         if (err != Err_None) break;
         s = getNextValue(s, &val, &err);
-        if (err != Err_None) (void)registerError(err);
+        if (err != Err_None) {
+            if (pass == 1) {
+                val = zeroIntVal;
+                err = Err_None;
+            }
+            else {
+                (void)registerError(err);
+            }
+        }
         emitFieldBits(currentSection, &val, fieldWidth, FALSE);
         if (*s == ',') {
             s += 1;
