@@ -110,7 +110,7 @@ static void addStdRelocationEntry(Section *section, Value *val, bool isParcelRel
     u16 targetBlockIndex;
 
     if (pass == 1) return;
-    baseBlock = val->section->objectBlock;
+    baseBlock = section->objectBlock;
     if (baseBlock->relocationTableIndex >= baseBlock->relocationTableSize) {
         baseBlock->relocationTable = (RelocationTableEntry *)reallocate(baseBlock->relocationTable,
             baseBlock->relocationTableSize * sizeof(RelocationTableEntry),
@@ -119,7 +119,7 @@ static void addStdRelocationEntry(Section *section, Value *val, bool isParcelRel
     }
     entry = &baseBlock->relocationTable[baseBlock->relocationTableIndex++];
     entry->type = RelocEntryType_Standard;
-    entry->blockIndex = section->objectBlock->index;
+    entry->blockIndex = val->section->objectBlock->index;
     entry->offset = section->originCounter;
     entry->isParcelRelocation = isParcelRelocation;
 }
