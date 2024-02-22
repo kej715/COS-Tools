@@ -67,6 +67,7 @@ int main(int argc, char *argv[], char *envp[]) {
     errCount = 0;
     srcIndex = 1;
     warnCount = 0;
+
     while (srcIndex < argc) {
         srcIndex = openNextSource(srcIndex, argc, argv, &isExtText);
         timeInit();
@@ -111,7 +112,7 @@ int main(int argc, char *argv[], char *envp[]) {
             isFlexibleSyntax = savedSyntaxIndicator;
         }
     }
-    if (lFile != NULL) fclose(listingFile);
+    if (lFile != NULL && listingFile != NULL) fclose(listingFile);
     if (oFile != NULL) {
         if (cosDsWriteEOF(objectFile) == -1
             || cosDsWriteEOD(objectFile) == -1
@@ -285,7 +286,7 @@ static void parseOptions(int argc, char *argv[]) {
             if (strcmp(lFile, "-") == 0) {
                 listingFile = stdout;
             }
-            else {
+            else if (strcmp(lFile, "0") != 0) {
                 listingFile = fopen(lFile, "w");
                 if (listingFile == NULL) {
                     perror(lFile);
