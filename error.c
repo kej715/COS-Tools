@@ -23,8 +23,6 @@
 **--------------------------------------------------------------------------
 */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "calproto.h"
 #include "caltypes.h"

@@ -176,7 +176,7 @@ static int countExternals(Module *module) {
 void emit_g_h_i_jkm(Section *section, u8 g, u8 h, u8 i, Value *jkm) {
     u32 instr;
 
-    instr = (g << 28) | (h << 25) | (i << 22) | (jkm->intValue & MASK22);
+    instr = (g << 28) | (h << 25) | (i << 22) | (jkm->value.intValue & MASK22);
     putHalfWord(section, section->originCounter, instr);
     if (isExternal(jkm)) {
         addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
@@ -234,7 +234,7 @@ void emit_gh_ijk(Section *section, u8 gh, u16 ijk) {
 void emit_gh_i_jkm(Section *section, u8 gh, u8 i, Value *jkm) {
     u32 instr;
 
-    instr = (gh << 25) | (i << 22) | (jkm->intValue & MASK22);
+    instr = (gh << 25) | (i << 22) | (jkm->value.intValue & MASK22);
     putHalfWord(section, section->originCounter, instr);
     if (isExternal(jkm)) {
         addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
@@ -253,7 +253,7 @@ void emit_gh_i_jkm(Section *section, u8 gh, u8 i, Value *jkm) {
 void emit_gh_ijkm(Section *section, u8 gh, Value *ijkm) {
     u32 instr;
 
-    instr = (gh << 25) | (ijkm->intValue & MASK24);
+    instr = (gh << 25) | (ijkm->value.intValue & MASK24);
     putHalfWord(section, section->originCounter, instr);
     if (isExternal(ijkm)) {
         addExternalEntry(section, ijkm, TRUE, section->originCounter * 16 + 31, 24);
@@ -296,7 +296,7 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
         }
     }
     fieldAttributes |= val->attributes;
-    bits = (val->type == NumberType_Integer) ? val->intValue : toCrayFloat(val->intValue);
+    bits = (val->type == NumberType_Integer) ? val->value.intValue : toCrayFloat(val->value.intValue);
     currentWord = getWord(section, section->originCounter);
     emptyBitCount = 64 - section->wordBitPosCounter;
     while (len > emptyBitCount) {
@@ -422,10 +422,10 @@ void emitString(Section *section, char *s, int len, int count, JustifyType justi
     case Justify_LeftBlankFill:
         while (n-- > 0) {
             if (*s == '\'') s += 1;
-            val.intValue = *s++;
+            val.value.intValue = *s++;
             emitFieldBits(section, &val, 8, n > 0 || fillCount > 0);
         }
-        val.intValue = 0x20;
+        val.value.intValue = 0x20;
         while (fillCount-- > 0) emitFieldBits(section, &val, 8, fillCount > 0);
         break;
     case Justify_LeftZeroEnd:
@@ -436,18 +436,18 @@ void emitString(Section *section, char *s, int len, int count, JustifyType justi
     case Justify_LeftZeroFill:
         while (n-- > 0) {
             if (*s == '\'') s += 1;
-            val.intValue = *s++;
+            val.value.intValue = *s++;
             emitFieldBits(section, &val, 8, n > 0 || fillCount > 0);
         }
-        val.intValue = 0;
+        val.value.intValue = 0;
         while (fillCount-- > 0) emitFieldBits(section, &val, 8, fillCount > 0);
         break;
     case Justify_RightZeroFill:
-        val.intValue = 0;
+        val.value.intValue = 0;
         while (fillCount-- > 0) emitFieldBits(section, &val, 8, TRUE);
         while (n-- > 0) {
             if (*s == '\'') s += 1;
-            val.intValue = *s++;
+            val.value.intValue = *s++;
             emitFieldBits(section, &val, 8, n > 0 || n > 0);
         }
         break;
@@ -599,7 +599,7 @@ static int writeEntryEntries(Module *module, Dataset *ds) {
         if ((symbol->value.attributes & SYM_UNDEFINED) != 0) continue;
         if (writeName(symbol->id, ds) == -1) return -1;
         word = 0;
-        symValue = symbol->value.intValue;
+        symValue = symbol->value.value.intValue;
         if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0) {
             word = 1; // parcel recloation mode
         }

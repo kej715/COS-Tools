@@ -22,8 +22,6 @@
 **--------------------------------------------------------------------------
 */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include "calproto.h"
 #include "caltypes.h"
@@ -356,9 +354,9 @@ static void listSymbols(Symbol *symbol) {
             listingLine[col++] = isCommonSection(symbol->value.section) ? 'C' : ' ';
             col += 2;
             if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0)
-                sprintf(&listingLine[col], "%lo%c\n", symbol->value.intValue >> 2, parcelIndicator[symbol->value.intValue & 0x03]);
+                sprintf(&listingLine[col], "%lo%c\n", symbol->value.value.intValue >> 2, parcelIndicator[symbol->value.value.intValue & 0x03]);
             else
-                sprintf(&listingLine[col], "%lo\n", symbol->value.intValue);
+                sprintf(&listingLine[col], "%lo\n", symbol->value.value.intValue);
             listFlush(&dummySection);
         }
         listSymbols(symbol->right);
@@ -380,18 +378,18 @@ void listValue(Value *val) {
     if (isListSuppressed()) return;
     if (val->type == NumberType_Integer) {
         i = COL_CODE + 21;
-        n = (val->intValue < 0) ? -val->intValue : val->intValue;
+        n = (val->value.intValue < 0) ? -val->value.intValue : val->value.intValue;
         listingLine[i--] = '0' + (n & 07);
         n >>= 3;
         while (n != 0) {
             listingLine[i--] = '0' + (n & 07);
             n >>= 3;
         }
-        if (val->intValue < 0) listingLine[i] = '-';
+        if (val->value.intValue < 0) listingLine[i] = '-';
     }
     else { // NumberType_Float
         char buf[20];
-        len = sprintf(buf, "%g", val->floatValue);
+        len = sprintf(buf, "%g", val->value.floatValue);
         memcpy(&listingLine[COL_CODE + 22 - len], buf, len);
     }
 }

@@ -30,6 +30,9 @@
 #include "caltypes.h"
 #include "cosdataset.h"
 #include "fnv.h"
+#if defined(__cos)
+#include <sys/syslog.h>
+#endif
 
 static FILE *openExtText(char *fileName);
 static int  openNextSource(int argi, int argc, char *argv[], bool *isExtText);
@@ -48,6 +51,34 @@ static char *explicitIdent = NULL;
 static char *lFile = NULL;
 static char *oFile = NULL;
 static char *textPath = NULL;
+
+#if defined(__cos)
+#define IS_KEY(s) (*((s) + strlen(s) - 1) == '=')
+#define F_KEY "F"
+#define I_KEY "I="
+#define L_KEY "L="
+#define N_KEY "N="
+#define O_KEY "O="
+#define R_KEY "R="
+#define S_KEY "S"
+#define T_KEY "T="
+#define W_KEY "W"
+#define X_KEY "X"
+#define STDOUT "$OUT"
+#else
+#define IS_KEY(s) (*(s) == '-')
+#define F_KEY "-f"
+#define I_KEY "-i"
+#define L_KEY "-l"
+#define N_KEY "-n"
+#define O_KEY "-o"
+#define R_KEY "-r"
+#define S_KEY "-s"
+#define T_KEY "-t"
+#define W_KEY "-w"
+#define X_KEY "-x"
+#define STDOUT "-"
+#endif
 
 int main(int argc, char *argv[], char *envp[]) {
     ErrorCode code;
@@ -165,25 +196,33 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
 
     *isExtText = FALSE;
     while (argi < argc) {
-        if (*argv[argi] != '-') break;
-        if (strcmp(argv[argi], "-f") == 0) {
+        if (!IS_KEY(argv[argi])) break;
+        if (strcmp(argv[argi], F_KEY) == 0) {
             argi += 1;
         }
-        else if (strcmp(argv[argi], "-s") == 0) {
-            argi += 1;
-        }
-        else if (strcmp(argv[argi], "-t") == 0) {
+        else if (strcmp(argv[argi], I_KEY) == 0) {
             argi += 1;
             if (argi >= argc) break;
-            if (*argv[argi] != '-') {
+            if (!IS_KEY(argv[argi])) {
+                *isExtText = FALSE;
+                break;
+            }
+        }
+        else if (strcmp(argv[argi], S_KEY) == 0) {
+            argi += 1;
+        }
+        else if (strcmp(argv[argi], T_KEY) == 0) {
+            argi += 1;
+            if (argi >= argc) break;
+            if (!IS_KEY(argv[argi])) {
                 *isExtText = TRUE;
                 break;
             }
         }
-        else if (strcmp(argv[argi], "-w") == 0) {
+        else if (strcmp(argv[argi], W_KEY) == 0) {
             argi += 1;
         }
-        else if (strcmp(argv[argi], "-x") == 0) {
+        else if (strcmp(argv[argi], X_KEY) == 0) {
             argi += 1;
         }
         else {
@@ -206,10 +245,12 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     }
     *fp = '\0';
     argi += 1;
+#if !defined(__cos)
     if (dp == NULL) {
         dp = fp;
         strcpy(dp, ".cal");
     }
+#endif
     sourceFile = fopen(filePath, "r");
     if (sourceFile == NULL) {
         if (*isExtText) sourceFile = openExtText(filePath);
@@ -220,15 +261,23 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     }
     if (*isExtText) return argi;
     if (lFile == NULL) {
+#if defined(__cos)
+        listingFile = stdout;
+#else
         strcpy(dp, ".lst");
         listingFile = fopen(filePath, "w");
         if (listingFile == NULL) {
             perror(filePath);
             exit(1);
         }
+#endif
     }
     if (oFile == NULL) {
+#if defined(__cos)
+        strcpy(filePath, "OBJ");
+#else
         strcpy(dp, ".obj");
+#endif
         objectFile = cosDsCreate(filePath);
         if (objectFile == NULL) {
             perror(filePath);
@@ -249,10 +298,35 @@ static void parseOptions(int argc, char *argv[]) {
     sourceCount = 0;
     i = 1;
     while (i < argc) {
-        if (strcmp(argv[i], "-f") == 0) {
+        if (strcmp(argv[i], F_KEY) == 0) {
             isFlexibleSyntax = TRUE;
         }
-        else if (strcmp(argv[i], "-i") == 0) {
+#if defined(__cos)
+        else if (strcmp(argv[i], I_KEY) == 0) {
+            i += 1;
+            if (i >= argc || IS_KEY(argv[i])) {
+                usage();
+            }
+        }
+#endif
+        else if (strcmp(argv[i], L_KEY) == 0) {
+            i += 1;
+            if (i >= argc) {
+                usage();
+            }
+            lFile = argv[i];
+            if (strcmp(lFile, STDOUT) == 0) {
+                listingFile = stdout;
+            }
+            else if (strcmp(lFile, "0") != 0) {
+                listingFile = fopen(lFile, "w");
+                if (listingFile == NULL) {
+                    perror(lFile);
+                    exit(1);
+                }
+            }
+        }
+        else if (strcmp(argv[i], N_KEY) == 0) {
             i += 1;
             if (i >= argc) {
                 usage();
@@ -277,24 +351,7 @@ static void parseOptions(int argc, char *argv[]) {
             }
             explicitIdent = sp;
         }
-        else if (strcmp(argv[i], "-l") == 0) {
-            i += 1;
-            if (i >= argc) {
-                usage();
-            }
-            lFile = argv[i];
-            if (strcmp(lFile, "-") == 0) {
-                listingFile = stdout;
-            }
-            else if (strcmp(lFile, "0") != 0) {
-                listingFile = fopen(lFile, "w");
-                if (listingFile == NULL) {
-                    perror(lFile);
-                    exit(1);
-                }
-            }
-        }
-        else if (strcmp(argv[i], "-o") == 0) {
+        else if (strcmp(argv[i], O_KEY) == 0) {
             i += 1;
             if (i >= argc) {
                 usage();
@@ -306,29 +363,31 @@ static void parseOptions(int argc, char *argv[]) {
                 exit(1);
             }
         }
-        else if (strcmp(argv[i], "-s") == 0) {
+        else if (strcmp(argv[i], S_KEY) == 0) {
             isSectionStackingEnabled = FALSE;
         }
+#if !defined(__cos)
         else if (strcmp(argv[i], "-T") == 0) {
             i += 1;
-            if (i >= argc || *argv[i] == '-') {
+            if (i >= argc || IS_KEY(argv[i])) {
                 usage();
             }
             textPath = argv[i];
         }
-        else if (strcmp(argv[i], "-t") == 0) {
+#endif
+        else if (strcmp(argv[i], T_KEY) == 0) {
             i += 1;
-            if (i >= argc || *argv[i] == '-') {
+            if (i >= argc || IS_KEY(argv[i])) {
                 usage();
             }
         }
-        else if (strcmp(argv[i], "-w") == 0) {
+        else if (strcmp(argv[i], W_KEY) == 0) {
             isFatalWarnings = TRUE;
         }
-        else if (strcmp(argv[i], "-x") == 0) {
+        else if (strcmp(argv[i], X_KEY) == 0) {
             isImplicitExternals = TRUE;
         }
-        else if (*argv[i] == '-') {
+        else if (IS_KEY(argv[i])) {
             usage();
         }
         else {
@@ -444,9 +503,20 @@ static void timeInit(void) {
 }
 
 static void usage(void) {
-    fputs("Usage: cal [-f][-i ident][-l lfile][-o ofile][-T dlist][-t tfile]...[-x] sfile ...\n", stdout);
+#if defined(__cos)
+    syslog("Usage: CAL[,F][,I=sfile][,L=lfile][,N=ident][,O=ofile][,T=tfile]...[,W][,X]", SYSLOG_USER, 1, 1);
+    syslog("  F       - enable flexible syntax", SYSLOG_USER, 1, 1);
+    syslog("  I=sfile - source file", SYSLOG_USER, 1, 1);
+    syslog("  L=lfile - listing file", SYSLOG_USER, 1, 1);
+    syslog("  N=ident - default module identifier", SYSLOG_USER, 1, 1);
+    syslog("  O=ofile - object file", SYSLOG_USER, 1, 1);
+    syslog("  S       - disable section stacking", SYSLOG_USER, 1, 1);
+    syslog("  T=tfile - external text file", SYSLOG_USER, 1, 1);
+    syslog("  W       - exit with error status on warning indications", SYSLOG_USER, 1, 1);
+    syslog("  X       - enable implicit external symbols", SYSLOG_USER, 1, 1);
+#else
+    fputs("Usage: cal [-f][-l lfile][-n ident][-o ofile][-T dlist][-t tfile]...[-w][-x] sfile ...\n", stderr);
     fputs("  -f       - enable flexible syntax\n", stderr);
-    fputs("  -i ident - default module identifier\n", stderr);
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - object file\n", stderr);
     fputs("  -s       - disable section stacking\n", stderr);
@@ -455,6 +525,7 @@ static void usage(void) {
     fputs("  -w       - exit with error status on warning indications\n", stderr);
     fputs("  -x       - enable implicit external symbols\n", stderr);
     fputs("  sfile - source file(s)\n", stderr);
+#endif
     exit(1);
 }
 

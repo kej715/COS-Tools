@@ -25,6 +25,14 @@
 */
 #include "basetypes.h"
 
+#ifdef __cos
+
+#include <sys/files.h>
+
+#define Dataset FtEntry
+
+#else
+
 /*
  *  Segment size
  *
@@ -83,6 +91,8 @@ typedef struct dataset {
     int bytesWritten;
     u8 buffer[COS_BLOCK_SIZE];
 } Dataset;
+
+#endif /* __cos */
 
 /*
  *  Function prototypes

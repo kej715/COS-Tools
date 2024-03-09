@@ -34,6 +34,10 @@
 #include "libproto.h"
 #include "libtypes.h"
 #include "services.h"
+#if defined(__cos)
+#include <sys/files.h>
+#include <sys/syslog.h>
+#endif
 
 static void addBlock(Module *module, char *id);
 static void addEntry(Module *module, char *id);
@@ -77,12 +81,27 @@ static Module  *modules = NULL;
 static char    *oFile = NULL;
 static Dataset *outputFile = NULL;
 
+#if defined(__cos)
+#define IS_KEY(s) (*((s) + strlen(s) - 1) == '=')
+#define L_KEY "L="
+#define O_KEY "O="
+#define R_KEY "R="
+#define STDOUT "$OUT"
+#else
+#define IS_KEY(s) (*(s) == '-')
+#define L_KEY "-l"
+#define O_KEY "-o"
+#define R_KEY "-r"
+#define STDOUT "-"
+#endif
+
 int main(int argc, char *argv[]) {
     time_t clock;
     u64 cw;
     char *dp;
     Dataset *ds;
     int fileIndex;
+    bool isRewrite;
     char outputPath[MAX_FILE_PATH_LENGTH+1];
     char *op;
     char sourcePath[MAX_FILE_PATH_LENGTH+1];
@@ -97,18 +116,21 @@ int main(int argc, char *argv[]) {
 
     firstSourceFileIdx = parseOptions(argc, argv);
 
+    isRewrite = FALSE;
     if (oFile != NULL) {
-        dp = NULL;
-        op = tempPath;
-        sp = oFile;
-        while (*sp != '\0') {
-            if (*sp == '/' || *sp == '\\')
-                dp = NULL;
-            else if (*sp == '.')
-                dp = op;
-            *op++ = *sp++;
+        addSuffix(oFile, ".lib", outputPath);
+        for (fileIndex = firstSourceFileIdx; fileIndex < argc; fileIndex++) {
+            if (strcmp(argv[fileIndex], outputPath) == 0) {
+                isRewrite = TRUE;
+                break;
+            }
         }
-        strcpy(dp != NULL ? dp : op, ".tmp");
+        if (isRewrite) {
+            addSuffix("$LIBTMP", ".tmp", tempPath);
+        }
+        else {
+            strcpy(tempPath, outputPath);
+        }
         outputFile = cosDsCreate(tempPath);
         if (outputFile == NULL) {
             perror(tempPath);
@@ -147,12 +169,64 @@ int main(int argc, char *argv[]) {
             unlink(tempPath);
             exit(1);
         }
-        addSuffix(oFile, ".lib", outputPath);
-        unlink(outputPath);
-        if (rename(tempPath, outputPath) == -1) {
-            perror(outputPath);
-            fprintf(stderr, "Failed to rename %s to %s\n", tempPath, outputPath);
-            exit(1);
+        if (isRewrite) {
+#if defined(__cos)
+            u8 buf[512*8];
+            int n;
+            int rc;
+
+            unlink(outputPath);
+            ds = cosDsOpen(tempPath);
+            if (ds == NULL) {
+                fprintf(stderr, "Failed to open %s\n", tempPath);
+                exit(1);
+            }
+            outputFile = cosDsCreate(outputPath);
+            if (outputFile == NULL) {
+                fprintf(stderr, "Failed to create %s\n", outputPath);
+                exit(1);
+            }
+            for (;;) {
+                n = read(ds->fd, buf, sizeof(buf));
+                if (n == -1) {
+                    perror(tempPath);
+                    exit(1);
+                }
+                if (n > 0 && write(outputFile->fd, buf, n) != n) {
+                    perror(outputPath);
+                    exit(1);
+                }
+                if (ds->status != 0) {
+                    if (ds->status == COS_EOR) {
+                        rc = cosDsWriteEOR(outputFile);
+                    }
+                    else if (ds->status == COS_EOF) {
+                        rc = cosDsWriteEOF(outputFile);
+                    }
+                    else if (ds->status == COS_EOD) {
+                        break;
+                    }
+                    if (rc == -1) {
+                        perror(outputPath);
+                        exit(1);
+                    }
+                    ds->status = 0;
+                }
+            }
+            if (cosDsClose(outputFile) == -1) {
+                fprintf(stderr, "Failed to close %s\n", outputPath);
+                exit(1);
+            }
+            cosDsClose(ds);
+            unlink(tempPath);
+#else
+            unlink(outputPath);
+            if (rename(tempPath, outputPath) == -1) {
+                perror(outputPath);
+                fprintf(stderr, "Failed to rename %s to %s\n", tempPath, outputPath);
+                exit(1);
+            }
+#endif
         }
     }
     if (listingFile != NULL) {
@@ -702,14 +776,14 @@ static int parseOptions(int argc, char *argv[]) {
     firstSrcIndex = argc;
     i = 1;
     while (i < argc) {
-        if (strcmp(argv[i], "-l") == 0) {
+        if (strcmp(argv[i], L_KEY) == 0) {
             if (firstOmittedNameIdx >= 0 && lastOmittedNameIdx < 0) lastOmittedNameIdx = i - 1;
             i += 1;
             if (i >= argc) {
                 usage();
             }
             lFile = argv[i];
-            if (strcmp(lFile, "-") == 0) {
+            if (strcmp(lFile, STDOUT) == 0) {
                 listingFile = stdout;
             }
             else {
@@ -720,7 +794,7 @@ static int parseOptions(int argc, char *argv[]) {
                 }
             }
         }
-        else if (strcmp(argv[i], "-o") == 0) {
+        else if (strcmp(argv[i], O_KEY) == 0) {
             if (firstOmittedNameIdx >= 0 && lastOmittedNameIdx < 0) lastOmittedNameIdx = i - 1;
             i += 1;
             if (i >= argc) {
@@ -728,14 +802,14 @@ static int parseOptions(int argc, char *argv[]) {
             }
             oFile = argv[i];
         }
-        else if (strcmp(argv[i], "-r") == 0) {
+        else if (strcmp(argv[i], R_KEY) == 0) {
             i += 1;
-            if (i >= argc || *argv[i] == '-' || firstOmittedNameIdx >= 0) {
+            if (i >= argc || IS_KEY(argv[i]) || firstOmittedNameIdx >= 0) {
                 usage();
             }
             firstOmittedNameIdx = i;
         }
-        else if (*argv[i] == '-') {
+        else if (IS_KEY(argv[i])) {
             usage();
         }
         else {
@@ -745,7 +819,7 @@ static int parseOptions(int argc, char *argv[]) {
         i += 1;
     }
     while (i < argc) {
-        if (*argv[i] == '-') {
+        if (IS_KEY(argv[i])) {
             usage();
         }
         i += 1;
@@ -855,11 +929,19 @@ static int skipBytes(Dataset *ds, int count) {
 }
 
 static void usage(void) {
-    fputs("Usage: lib [-l lfile][-r name...][-o ofile] sfile...\n", stdout);
+#if defined(__cos)
+    syslog("Usage: LIB[,L=lfile][,O=ofile][,R=name[:name...]],sfile...", SYSLOG_USER, 1, 1);
+    syslog("  L=lfile - listing file", SYSLOG_USER, 1, 1);
+    syslog("  O=ofile - output library file", SYSLOG_USER, 1, 1);
+    syslog("  R=name  - name(s) of modules to omit from output library file", SYSLOG_USER, 1, 1);
+    syslog("  sfile   - source object and library file(s)", SYSLOG_USER, 1, 1);
+#else
+    fputs("Usage: lib [-l lfile][-o ofile][-r name...] sfile...\n", stderr);
     fputs("  -l lfile - listing file\n", stderr);
     fputs("  -o ofile - output library file\n", stderr);
     fputs("  -r name  - name(s) of modules to omit from output library file\n", stderr);
     fputs("  sfile    - source object and library file(s)\n", stderr);
+#endif
     exit(1);
 }
 

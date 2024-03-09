@@ -21,8 +21,10 @@
 #
 #--------------------------------------------------------------------------
 
-CFLAGS  = -O3 -std=gnu99 $(INCL) $(EXTRACFLAGS)
-#CFLAGS  = -O0 -g -std=gnu99 $(INCL) $(EXTRACFLAGS)
+CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
+#CFLAGS  = -O0 -g $(INCL) $(EXTRACFLAGS)
+PREFIX = /usr/local
+COSOBJS = $(PREFIX)/share/ack/cos/boot.o $(PREFIX)/share/ack/cos/c-ansi.o
 
 CALHDRS = basetypes.h    \
           calconst.h     \
@@ -77,17 +79,23 @@ LIBOBJS = lib.o          \
 
 all: cal ldr lib
 
+cos:
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE)
+
 cal: $(CALOBJS)
-	$(CC) $(LDFLAGS) -o $@ $+
+	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
 ldr: $(LDROBJS)
-	$(CC) $(LDFLAGS) -o $@ $+
+	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
 lib: $(LIBOBJS)
-	$(CC) $(LDFLAGS) -o $@ $+
+	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
 clean:
-	rm -f *.o
+	rm -f *.o *.abs cal ldr lib
+
+install: cal ldr lib
+	install -b -g wheel -o root -m 755 cal ldr lib $(PREFIX)/bin
 
 cal.o:  cal.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<

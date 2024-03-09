@@ -29,6 +29,85 @@
 #include <unistd.h>
 #include "cosdataset.h"
 
+#ifdef __cos
+
+int cosDsClose(Dataset *ds) {
+    return ds == NULL ? 0 : close(ds->fd);
+}
+
+Dataset *cosDsCreate(char *pathname) {
+    Dataset *ds;
+    int fd;
+
+    fd = open(pathname, O_WRONLY|O_CREAT|O_TRUNC|O_BINARY);
+
+    return fd == -1 ? NULL : _ftPtr(fd);
+}
+
+bool cosDsIsBCW(u64 cw) {
+    return 0;
+}
+
+bool cosDsIsEOD(u64 cw) {
+    return cw == COS_EOD;
+}
+
+bool cosDsIsEOF(u64 cw) {
+    return cw == COS_EOF;
+}
+
+bool cosDsIsEOR(u64 cw) {
+    return cw == COS_EOR;
+}
+
+Dataset *cosDsOpen(char *pathname) {
+    Dataset *ds;
+    int fd;
+
+    fd = open(pathname, O_RDONLY|O_BINARY);
+
+    return fd == -1 ? NULL : _ftPtr(fd);
+}
+
+int cosDsRead(Dataset *ds, u8 *buffer, int len) {
+    return read(ds->fd, buffer, len);
+}
+
+u64 cosDsReadCW(Dataset *ds) {
+    u64 cw;
+
+    cw = ds->status;
+    ds->status = 0;
+
+    return cw;
+}
+
+int cosDsRewind(Dataset *ds) {
+    return _cosrew(ds);
+}
+
+int cosDsWrite(Dataset *ds, u8 *buffer, int len) {
+    return write(ds->fd, buffer,len);
+}
+
+int cosDsWriteEOD(Dataset *ds) {
+    return _coswed(ds);
+}
+
+int cosDsWriteEOF(Dataset *ds) {
+    return _coswef(ds);
+}
+
+int cosDsWriteEOR(Dataset *ds) {
+    return _coswer(ds);
+}
+
+int cosDsWriteWord(Dataset *ds, u64 word) {
+    return write(ds->fd, &word, 8) == 8 ? 0 : -1;
+}
+
+#else
+
 static int appendCW(Dataset *ds, u64 cw);
 static int flushBuffer(Dataset *ds);
 static u64 getWord(Dataset *ds);
@@ -360,3 +439,5 @@ static void setFWI(Dataset *ds) {
     ds->buffer[cwi + 6] = (ds->buffer[cwi + 6] & 0xfe) | ((fwi >> 8) & 1);
     ds->buffer[cwi + 7] = fwi & 0xff;
 }
+
+#endif /* __cos */

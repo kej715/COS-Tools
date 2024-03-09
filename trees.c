@@ -121,15 +121,15 @@ ErrorCode addLocationSymbol(Section *section, char *id, int len, u16 attributes)
     val.type = NumberType_Integer;
     val.attributes = attributes | getRelativeAttribute(section);
     val.section = section;
-    val.intValue = section->locationCounter;
-    if ((attributes & SYM_WORD_ADDRESS) != 0) val.intValue >>= 2;
+    val.value.intValue = section->locationCounter;
+    if ((attributes & SYM_WORD_ADDRESS) != 0) val.value.intValue >>= 2;
     symbol = findSymbol(id, len, currentQualifier);
     if (symbol != NULL) {
         if (pass == 1) {
             if ((symbol->value.attributes & SYM_UNDEFINED) != 0) {
                 symbol->value.attributes = val.attributes;
                 symbol->value.section = val.section;
-                symbol->value.intValue = val.intValue;
+                symbol->value.value.intValue = val.value.intValue;
             }
             else {
                 err = Err_DoubleDefinition;
@@ -175,7 +175,7 @@ Module *addModule(char *id, int len) {
     val.type = NumberType_Integer;
     val.attributes = SYM_PARCEL_ADDRESS|SYM_COUNTER;
     val.section = NULL;
-    val.intValue = 0;
+    val.value.intValue = 0;
     addSymbol("*",  1, qualifier, &val);
     addSymbol("*A", 2, qualifier, &val);
     addSymbol("*a", 2, qualifier, &val);
@@ -367,11 +367,11 @@ static void adjustSymValsForSyms(Symbol *symbol) {
     if (symbol == NULL) return;
     if (symbol->value.section != NULL) {
         if ((symbol->value.attributes & SYM_WORD_ADDRESS) != 0)
-            symbol->value.intValue += symbol->value.section->originOffset >> 2;
+            symbol->value.value.intValue += symbol->value.section->originOffset >> 2;
         else if ((symbol->value.attributes & SYM_PARCEL_ADDRESS) != 0)
-            symbol->value.intValue += symbol->value.section->originOffset;
+            symbol->value.value.intValue += symbol->value.section->originOffset;
         else if ((symbol->value.attributes & SYM_BYTE_ADDRESS) != 0)
-            symbol->value.intValue += symbol->value.section->originOffset * 2;
+            symbol->value.value.intValue += symbol->value.section->originOffset * 2;
     }
     adjustSymValsForSyms(symbol->left);
     adjustSymValsForSyms(symbol->right);

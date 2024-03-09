@@ -23,6 +23,7 @@
 **
 **--------------------------------------------------------------------------
 */
+
 #include "basetypes.h"
 
 /*
@@ -165,16 +166,18 @@ typedef enum numberType {
     NumberType_Float
 } NumberType;
 
+typedef union numericValue {
+    i64 intValue;
+    f64 floatValue;
+} NumericValue;
+
 typedef struct value {
     NumberType type;
     u16 attributes;
     struct section *section;
     struct symbol *externalSymbol;
     u32 coefficient;
-    union {
-        i64 intValue;
-        f64 floatValue;
-    };
+    NumericValue value;
 } Value;
 
 typedef struct symbol {
@@ -309,10 +312,7 @@ typedef struct nameToken {
 
 typedef struct numberToken {
     NumberType type;
-    union {
-        i64 intValue;
-        f64 floatValue;
-    };
+    NumericValue value;
 } NumberToken;
 
 typedef enum operatorType {

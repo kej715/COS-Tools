@@ -67,6 +67,13 @@
     #else
         #error "Unable to determine sizes of basic data types"
     #endif
+#elif defined(__ACK) && defined(__crayxmp)
+    #include <sys/types.h>
+    typedef signed char i8;
+    typedef signed short i16;
+    typedef signed int i32;
+    typedef signed long i64;
+    typedef unsigned int u32;
 #else
     #error "Unable to determine sizes of basic data types"
 #endif

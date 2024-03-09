@@ -34,6 +34,9 @@
 #include "ldrproto.h"
 #include "ldrtypes.h"
 #include "services.h"
+#if defined(__cos)
+#include <sys/syslog.h>
+#endif
 
 static void addBlock(Module *module, Block *block);
 static LibraryModule *addLibraryModule(char *libraryPath, u8 *module, u8 pdtOrdinal);
@@ -101,6 +104,18 @@ static char          *osDate = "02/28/89";
 static char          *osName = "COS 1.17";
 static Symbol        *startSymbol = NULL;
 static Symbol        *symbolTable = NULL;
+
+#if defined(__cos)
+#define IS_KEY(s) (*((s) + strlen(s) - 1) == '=')
+#define M_KEY "M="
+#define O_KEY "O="
+#define STDOUT "$OUT"
+#else
+#define IS_KEY(s) (*(s) == '-')
+#define M_KEY "-m"
+#define O_KEY "-o"
+#define STDOUT "-"
+#endif
 
 int main(int argc, char *argv[]) {
     time_t clock;
@@ -826,13 +841,13 @@ static int parseOptions(int argc, char *argv[]) {
     firstSrcIndex = argc;
     i = 1;
     while (i < argc) {
-        if (strcmp(argv[i], "-m") == 0) {
+        if (strcmp(argv[i], M_KEY) == 0) {
             i += 1;
             if (i >= argc) {
                 usage();
             }
             mFile = argv[i];
-            if (strcmp(mFile, "-") == 0) {
+            if (strcmp(mFile, STDOUT) == 0) {
                 loadMap = stdout;
             }
             else {
@@ -843,14 +858,14 @@ static int parseOptions(int argc, char *argv[]) {
                 }
             }
         }
-        else if (strcmp(argv[i], "-o") == 0) {
+        else if (strcmp(argv[i], O_KEY) == 0) {
             i += 1;
             if (i >= argc) {
                 usage();
             }
             oFile = argv[i];
         }
-        else if (*argv[i] == '-') {
+        else if (IS_KEY(argv[i])) {
             usage();
         }
         else {
@@ -860,7 +875,7 @@ static int parseOptions(int argc, char *argv[]) {
         i += 1;
     }
     while (i < argc) {
-        if (*argv[i] == '-') {
+        if (IS_KEY(argv[i])) {
             usage();
         }
         i += 1;
@@ -1462,10 +1477,17 @@ static int skipBytes(Dataset *ds, int count) {
 }
 
 static void usage(void) {
-    fputs("Usage: ldr [-m mfile][-o ofile] sfile...\n", stdout);
+#if defined(__cos)
+    syslog("Usage: LDR[,M=mfile][,O=ofile],sfile...", SYSLOG_USER, 1, 1);
+    syslog("  M=mfile - load map file", SYSLOG_USER, 1, 1);
+    syslog("  O=ofile - output object file", SYSLOG_USER, 1, 1);
+    syslog("  sfile   - source file(s)", SYSLOG_USER, 1, 1);
+#else
+    fputs("Usage: ldr [-m mfile][-o ofile] sfile...\n", stderr);
     fputs("  -m mfile - load map file\n", stderr);
     fputs("  -o ofile - output object file\n", stderr);
     fputs("  sfile    - source file(s)\n", stderr);
+#endif
     exit(1);
 }
 

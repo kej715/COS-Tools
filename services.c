@@ -46,6 +46,6 @@ void *reallocate(void *old, int oldSize, int newSize) {
         fprintf(stderr, "Failed to reallocate %d bytes\n", newSize);
         exit(1);
     }
-    memset(new + oldSize, 0, newSize - oldSize);
+    memset((unsigned char *)new + oldSize, 0, newSize - oldSize);
     return new;
 }

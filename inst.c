@@ -23,12 +23,9 @@
 **--------------------------------------------------------------------------
 */
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "calconst.h"
 #include "calproto.h"
-#include "caltypes.h"
 #include "services.h"
 
 #define INT_22_LOWER (-010000000)
@@ -59,7 +56,7 @@ typedef struct patternNode {
         RegisterType regster;
         OperatorType operator;
         InstructionHandler handler;
-    };
+    } value;
 } PatternNode;
 
 static void addInstruction(char *id, u8 attributes, InstructionHandler handler);
@@ -180,7 +177,7 @@ static ErrorCode BITP(void) {
     restoreBase();
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
-    if (val.intValue == 16) {
+    if (val.value.intValue == 16) {
         if (currentSection->parcelBitPosCounter > 0) {
             currentSection->originCounter += 1;
             currentSection->locationCounter += 1;
@@ -188,9 +185,9 @@ static ErrorCode BITP(void) {
         currentSection->parcelBitPosCounter = 0;
         currentSection->wordBitPosCounter = 0;
     }
-    else if (val.intValue >= 0 && val.intValue < 16) {
-        currentSection->parcelBitPosCounter = val.intValue;
-        currentSection->wordBitPosCounter = ((currentSection->locationCounter & 0x03) * 16) + val.intValue;
+    else if (val.value.intValue >= 0 && val.value.intValue < 16) {
+        currentSection->parcelBitPosCounter = val.value.intValue;
+        currentSection->wordBitPosCounter = ((currentSection->locationCounter & 0x03) * 16) + val.value.intValue;
     }
     else {
         err = Err_OperandField;
@@ -209,17 +206,17 @@ static ErrorCode BITW(void) {
     restoreBase();
     if (err != Err_None) (void)registerError(err);
     if (*s != '\0') err = Err_OperandField;
-    if (val.intValue == 64) {
+    if (val.value.intValue == 64) {
         currentSection->wordBitPosCounter = 0;
         currentSection->parcelBitPosCounter = 0;
         currentSection->originCounter = (currentSection->originCounter & 0xfffffc) + 4;
         currentSection->locationCounter = (currentSection->locationCounter & 0xfffffc) + 4;
     }
-    else if (val.intValue >= 0 && val.intValue < 64) {
-        currentSection->wordBitPosCounter = val.intValue;
-        currentSection->parcelBitPosCounter = val.intValue % 16;
-        currentSection->originCounter = (currentSection->originCounter & 0xfffffc) + (val.intValue / 16);
-        currentSection->locationCounter = (currentSection->locationCounter & 0xfffffc) + (val.intValue / 16);
+    else if (val.value.intValue >= 0 && val.value.intValue < 64) {
+        currentSection->wordBitPosCounter = val.value.intValue;
+        currentSection->parcelBitPosCounter = val.value.intValue % 16;
+        currentSection->originCounter = (currentSection->originCounter & 0xfffffc) + (val.value.intValue / 16);
+        currentSection->locationCounter = (currentSection->locationCounter & 0xfffffc) + (val.value.intValue / 16);
     }
     else {
         err = Err_OperandField;
@@ -303,7 +300,7 @@ static ErrorCode BSS(void) {
         return Err_OperandField;
     listValue(&val);
     firstAddress = currentSection->originCounter;
-    advanceBitPosition(currentSection, val.intValue * 64);
+    advanceBitPosition(currentSection, val.value.intValue * 64);
     limitAddress = currentSection->originCounter;
     if (isCodeSection(currentSection) || isDataSection(currentSection))
         reserveStorage(currentSection, firstAddress, limitAddress - firstAddress);
@@ -336,8 +333,8 @@ static ErrorCode BSSZ(void) {
     listValue(&val);
     savedListControl = currentListControl;
     currentListControl = 0;
-    wordCount = val.intValue;
-    val.intValue = 0;
+    wordCount = val.value.intValue;
+    val.value.intValue = 0;
     val.attributes = 0;
     val.section = currentSection;
     while (wordCount-- > 0) {
@@ -442,7 +439,7 @@ static ErrorCode CON(void) {
             val.type = NumberType_Integer;
             val.attributes = 0;
             val.section = NULL;
-            val.intValue = 0;
+            val.value.intValue = 0;
         }
         else {
             s = getNextValue(s, &val, &err);
@@ -613,7 +610,7 @@ static ErrorCode ENTRY(void) {
                 val.type = NumberType_Integer;
                 val.attributes = SYM_UNDEFINED;
                 val.section = NULL;
-                val.intValue = 0;
+                val.value.intValue = 0;
                 symbol = addSymbol(token.details.name.ptr, token.details.name.len, qualifier, &val);
             }
             else if ((symbol->value.attributes & (SYM_EXTERNAL|SYM_REDEFINABLE)) != 0) {
@@ -621,7 +618,7 @@ static ErrorCode ENTRY(void) {
                 err = registerError(Err_OperandField);
             }
             else if ((symbol->value.attributes & SYM_BYTE_ADDRESS) != 0
-                     && (symbol->value.intValue & 0x07) != 0) {
+                     && (symbol->value.value.intValue & 0x07) != 0) {
                 symbol = NULL;
                 err = registerError(Err_OperandField);
             }
@@ -629,7 +626,7 @@ static ErrorCode ENTRY(void) {
                 symbol->value.attributes |= SYM_ENTRY;
                 addEntryPoint(currentModule, symbol);
             }
-            else if (pass == 2 && symbol != NULL && (symbol->value.attributes & SYM_UNDEFINED) != 0) {
+            else if (pass == 2 && symbol != NULL && (symbol->value.attributes & SYM_UNDEFINED) != 0 && isFlexibleSyntax == FALSE) {
                 err = registerError(Err_Undefined);
             }
         }
@@ -681,7 +678,7 @@ static ErrorCode EXT(void) {
                 val.type = NumberType_Integer;
                 val.attributes = SYM_EXTERNAL;
                 val.section = NULL;
-                val.intValue = 0;
+                val.value.intValue = 0;
                 symbol = addSymbol(token.details.name.ptr, token.details.name.len, qualifier, &val);
                 n += 1;
                 if (pass == 1 && symbol != NULL) {
@@ -984,7 +981,7 @@ static ErrorCode IFA(void) {
         s = getNextValue(s + 1, &count, &err);
         restoreBase();
         if (err != Err_None) return err;
-        if (isSimpleInteger(&count) == FALSE || count.intValue < 0) {
+        if (isSimpleInteger(&count) == FALSE || count.value.intValue < 0) {
             freeToken(exp);
             return Err_OperandField;
         }
@@ -1005,7 +1002,7 @@ static ErrorCode IFA(void) {
     }
     freeToken(exp);
     if (err != Err_None && err != Err_Undefined) return err;
-    if (cond != targetCond) skipLines(locationFieldToken, count.intValue);
+    if (cond != targetCond) skipLines(locationFieldToken, count.value.intValue);
 
     return Err_None;
 }
@@ -1052,7 +1049,7 @@ static ErrorCode IFC(void) {
         s = getNextValue(s + 1, &count, &err);
         restoreBase();
         if (err != Err_None) return err;
-        if (isSimpleInteger(&count) == FALSE || count.intValue < 0) return Err_OperandField;
+        if (isSimpleInteger(&count) == FALSE || count.value.intValue < 0) return Err_OperandField;
     }
     else if (locationFieldToken == NULL) {
         return Err_OperandField;
@@ -1083,7 +1080,7 @@ static ErrorCode IFC(void) {
             return Err_OperandField;
     }
 
-    if (cond == FALSE) skipLines(locationFieldToken, count.intValue);
+    if (cond == FALSE) skipLines(locationFieldToken, count.value.intValue);
 
     return Err_None;
 }
@@ -1111,27 +1108,27 @@ static ErrorCode IFE(void) {
         s = getNextValue(s + 1, &count, &err);
         restoreBase();
         if (err != Err_None) return err;
-        if (isSimpleInteger(&count) == FALSE || count.intValue < 0) return Err_OperandField;
+        if (isSimpleInteger(&count) == FALSE || count.value.intValue < 0) return Err_OperandField;
     }
     else if (locationFieldToken == NULL) {
         return Err_OperandField;
     }
     op = opToken.details.name.ptr;
     if (strncasecmp(op, "LT", 2) == 0)
-        cond = val1.intValue < val2.intValue;
+        cond = val1.value.intValue < val2.value.intValue;
     else if (strncasecmp(op, "LE", 2) == 0)
-        cond = val1.intValue <= val2.intValue;
+        cond = val1.value.intValue <= val2.value.intValue;
     else if (strncasecmp(op, "GT", 2) == 0)
-        cond = val1.intValue > val2.intValue;
+        cond = val1.value.intValue > val2.value.intValue;
     else if (strncasecmp(op, "GE", 2) == 0)
-        cond = val1.intValue >= val2.intValue;
+        cond = val1.value.intValue >= val2.value.intValue;
     else if (strncasecmp(op, "EQ", 2) == 0)
-        cond = val1.intValue == val2.intValue;
+        cond = val1.value.intValue == val2.value.intValue;
     else if (strncasecmp(op, "NE", 2) == 0)
-        cond = val1.intValue != val2.intValue;
+        cond = val1.value.intValue != val2.value.intValue;
     else
         return Err_OperandField;
-    if (cond == FALSE) skipLines(locationFieldToken, count.intValue);
+    if (cond == FALSE) skipLines(locationFieldToken, count.value.intValue);
 
     return Err_None;
 }
@@ -1224,12 +1221,12 @@ static ErrorCode LOC(void) {
     if (*s != '\0'
         || isNotWordAddress(&val)
         || isInteger(&val) == FALSE
-        || val.intValue < 0
+        || val.value.intValue < 0
         || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
         || isAbsolute(&val) != currentModule->isAbsolute
         || (val.section != NULL && val.section != currentSection))
         return Err_OperandField;
-    currentSection->locationCounter = val.intValue * 4;
+    currentSection->locationCounter = val.value.intValue * 4;
     return err;
 }
 
@@ -1455,7 +1452,7 @@ static ErrorCode MICRO(void) {
         s = getNextValue(s + 1, &val, &err);
         if (err != Err_None) (void)registerError(err);
         if (isSimpleInteger(&val)) {
-            exp1 = (val.intValue <= 0) ? 0 : val.intValue;
+            exp1 = (val.value.intValue <= 0) ? 0 : val.value.intValue;
         }
         else {
             err = registerError(Err_OperandField);
@@ -1464,7 +1461,7 @@ static ErrorCode MICRO(void) {
             s = getNextValue(s + 1, &val, &err);
             if (err != Err_None) (void)registerError(err);
             if (isSimpleInteger(&val)) {
-                exp2 = (val.intValue <= 1) ? 0 : val.intValue - 1;
+                exp2 = (val.value.intValue <= 1) ? 0 : val.value.intValue - 1;
             }
             else {
                 err = registerError(Err_OperandField);
@@ -1514,16 +1511,16 @@ static ErrorCode MICSIZE(void) {
     val.type = NumberType_Integer;
     val.attributes = SYM_REDEFINABLE;
     val.section = NULL;
-    val.intValue = strlen((char *)name->value);
+    val.value.intValue = strlen((char *)name->value);
     if (symbol == NULL) {
         symbol = addSymbol(locationFieldToken->details.name.ptr, locationFieldToken->details.name.len, currentQualifier, &val);
     }
     else if ((symbol->value.attributes & SYM_REDEFINABLE) != 0) {
         symbol->value.attributes = val.attributes;
         symbol->value.section = val.section;
-        symbol->value.intValue = val.intValue;
+        symbol->value.value.intValue = val.value.intValue;
     }
-    else if (symbol->value.attributes != val.attributes || symbol->value.intValue != val.intValue) {
+    else if (symbol->value.attributes != val.attributes || symbol->value.value.intValue != val.value.intValue) {
         err = Err_DoubleDefinition;
     }
     if (pass == 2) symbol->value.attributes |= SYM_DEFINED_P2;
@@ -1567,7 +1564,7 @@ static ErrorCode ORG(void) {
         val.type = NumberType_Integer;
         val.attributes = getRelativeAttribute(currentSection);
         val.section = currentSection;
-        val.intValue = 0;
+        val.value.intValue = 0;
     }
     else {
         forceInstWordBoundary();
@@ -1577,12 +1574,12 @@ static ErrorCode ORG(void) {
     if (*s != '\0'
         || isNotWordAddress(&val)
         || isInteger(&val) == FALSE
-        || val.intValue < 0
+        || val.value.intValue < 0
         || (val.attributes & (SYM_EXTERNAL|SYM_UNDEFINED)) != 0
         || isAbsolute(&val) != currentModule->isAbsolute
         || (val.section != NULL && val.section != currentSection))
         return Err_OperandField;
-    originValue = val.intValue * 4;
+    originValue = val.value.intValue * 4;
     isNominalSection = currentSection == currentModule->firstSection;
     if (isRelocatable(&val) == FALSE && (isNominalSection == FALSE || currentModule->isAbsolute == FALSE)) {
         return Err_OperandField;
@@ -1738,7 +1735,7 @@ static ErrorCode SECTION(void) {
         symbol = findSymbol(id, len, currentQualifier);
         if (symbol == NULL) {
             val.type = NumberType_Integer;
-            val.intValue = 0;
+            val.value.intValue = 0;
             val.attributes = SYM_WORD_ADDRESS|SYM_RELOCATABLE;
             val.section = section;
             symbol = addSymbol(id, len, currentQualifier, &val);
@@ -1748,7 +1745,7 @@ static ErrorCode SECTION(void) {
                 symbol->value.type = NumberType_Integer;
                 symbol->value.attributes = SYM_WORD_ADDRESS|SYM_RELOCATABLE;
                 symbol->value.section = section;
-                symbol->value.intValue = 0;
+                symbol->value.value.intValue = 0;
             }
             else {
                 return Err_DoubleDefinition;
@@ -1756,7 +1753,7 @@ static ErrorCode SECTION(void) {
         }
         else {
             symbol->value.attributes |= SYM_DEFINED_P2;
-            if (symbol->value.intValue != 0
+            if (symbol->value.value.intValue != 0
                 || symbol->value.section != section
                 || symbol->value.attributes != (SYM_WORD_ADDRESS|SYM_RELOCATABLE)) {
                 return Err_DoubleDefinition;
@@ -1785,12 +1782,12 @@ static ErrorCode SKIP(void) {
         s = getNextValue(operandField, &count, &err);
         restoreBase();
         if (err != Err_None) return err;
-        if (isSimpleInteger(&count) == FALSE || count.intValue < 0) return Err_OperandField;
+        if (isSimpleInteger(&count) == FALSE || count.value.intValue < 0) return Err_OperandField;
     }
     else if (locationFieldToken == NULL) {
         return Err_OperandField;
     }
-    skipLines(locationFieldToken, count.intValue);
+    skipLines(locationFieldToken, count.value.intValue);
 
     return Err_None;
 }
@@ -1807,12 +1804,12 @@ static ErrorCode SPACE(void) {
     if (err != Err_None) return err;
     if (isSimpleInteger(&val) && *s == '\0') {
         listControlMask = LIST_LIS;
-        if (val.intValue > 0) {
+        if (val.value.intValue > 0) {
             listFlush(currentSection);
             resetErrorRegistrations();
             listControlMask = LIST_ON;
             listClearSource();
-            while (val.intValue-- > 0) listFlush(currentSection);
+            while (val.value.intValue-- > 0) listFlush(currentSection);
         }
     }
     else {
@@ -1832,9 +1829,9 @@ static ErrorCode STACK(void) {
     if (err != Err_None) return err;
     if (val.type == NumberType_Integer
         && (val.attributes & (SYM_EXTERNAL|SYM_RELOCATABLE|SYM_IMMOBILE|SYM_LITERAL|SYM_UNDEFINED|SYM_PARCEL_ADDRESS)) == 0
-        && val.intValue >= 0
+        && val.value.intValue >= 0
         && *s == '\0') {
-        currentModule->stackSize += val.intValue;
+        currentModule->stackSize += val.value.intValue;
         listValue(&val);
     }
     else {
@@ -1950,7 +1947,7 @@ static ErrorCode VWD(void) {
             err = evaluateExpression(&token, &val);
             if (err == Err_None) {
                 if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
-                    fieldWidth = val.intValue;
+                    fieldWidth = val.value.intValue;
                 }
                 else {
                     err = Err_OperandField;
@@ -2095,14 +2092,14 @@ static ErrorCode Ai__X(void) {
         else if (isSimpleInteger(&val) == FALSE) {
             emit_gh_i_jkm(currentSection, 020, i, &val);
         }
-        else if (val.intValue >= 0 && val.intValue < 64) {
-            emit_gh_i_jk(currentSection, 022, i, val.intValue);
+        else if (val.value.intValue >= 0 && val.value.intValue < 64) {
+            emit_gh_i_jk(currentSection, 022, i, val.value.intValue);
         }
-        else if (val.intValue >= 0) {
+        else if (val.value.intValue >= 0) {
             emit_gh_i_jkm(currentSection, 020, i, &val);
         }
         else {
-            val.intValue ^= MASK22;
+            val.value.intValue ^= MASK22;
             emit_gh_i_jkm(currentSection, 021, i, &val);
         }
     }
@@ -2346,7 +2343,7 @@ static ErrorCode CLN(void) {
         val = zeroIntVal;
         err = Err_OperandField;
     }
-    emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 3);
+    emit_gh_i_j_k(currentSection, 001, 4, val.value.intValue, 3);
     return err;
 }
 
@@ -2454,7 +2451,7 @@ static ErrorCode IP(void) {
         val = zeroIntVal;
         err = Err_OperandField;
     }
-    emit_gh_ijk(currentSection, 001, val.intValue == 0 ? 0402 : 0401);
+    emit_gh_ijk(currentSection, 001, val.value.intValue == 0 ? 0402 : 0401);
     return err;
 }
 
@@ -2942,19 +2939,19 @@ static ErrorCode Si__Si_left_X(void) {
     err = registerError(evaluateExpression(instArgv[2], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (i == 0) {
-            if (val.intValue == 64) {
+            if (val.value.intValue == 64) {
                 emit_gh_ijk(currentSection, 053, 0);
             }
             else {
-                emit_gh_i_jk(currentSection, 052, i2, val.intValue);
+                emit_gh_i_jk(currentSection, 052, i2, val.value.intValue);
             }
         }
         else if (i == i2) {
-            if (val.intValue == 64) {
+            if (val.value.intValue == 64) {
                 emit_gh_i_jk(currentSection, 055, i, 0);
             }
             else {
-                emit_gh_i_jk(currentSection, 054, i, val.intValue);
+                emit_gh_i_jk(currentSection, 054, i, val.value.intValue);
             }
         }
         else {
@@ -3045,19 +3042,19 @@ static ErrorCode Si__Si_right_X(void) {
     err = registerError(evaluateExpression(instArgv[2], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
         if (i == 0) {
-            if (val.intValue == 0) {
+            if (val.value.intValue == 0) {
                 emit_gh_ijk(currentSection, 052, 0);
             }
             else {
-                emit_gh_i_jk(currentSection, 053, i2, 64 - val.intValue);
+                emit_gh_i_jk(currentSection, 053, i2, 64 - val.value.intValue);
             }
         }
         else if (i == i2) {
-            if (val.intValue == 0) {
+            if (val.value.intValue == 0) {
                 emit_gh_i_jk(currentSection, 054, i, 0);
             }
             else {
-                emit_gh_i_jk(currentSection, 055, i, 64 - val.intValue);
+                emit_gh_i_jk(currentSection, 055, i, 64 - val.value.intValue);
             }
         }
         else {
@@ -3118,11 +3115,11 @@ static ErrorCode Si__CmplMaskLeft(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
-        if (val.intValue == 0) {
+        if (val.value.intValue == 0) {
             emit_gh_i_jk(currentSection, 042, i, 0);
         }
         else {
-            emit_gh_i_jk(currentSection, 043, i, 64 - val.intValue);
+            emit_gh_i_jk(currentSection, 043, i, 64 - val.value.intValue);
         }
     }
     else {
@@ -3143,11 +3140,11 @@ static ErrorCode Si__CmplMaskRight(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
-        if (val.intValue == 64) {
+        if (val.value.intValue == 64) {
             emit_gh_i_jk(currentSection, 043, i, 0);
         }
         else {
-            emit_gh_i_jk(currentSection, 042, i, val.intValue);
+            emit_gh_i_jk(currentSection, 042, i, val.value.intValue);
         }
     }
     else {
@@ -3175,11 +3172,11 @@ static ErrorCode Si__MaskLeft(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
-        if (val.intValue == 64) {
+        if (val.value.intValue == 64) {
             emit_gh_i_jk(currentSection, 042, i, 0);
         }
         else {
-            emit_gh_i_jk(currentSection, 043, i, val.intValue);
+            emit_gh_i_jk(currentSection, 043, i, val.value.intValue);
         }
     }
     else {
@@ -3200,11 +3197,11 @@ static ErrorCode Si__MaskRight(void) {
     err = registerError(getRegisterNumber(instArgv[0], &i));
     err = registerError(evaluateExpression(instArgv[1], &val));
     if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 64)) {
-        if (val.intValue == 0) {
+        if (val.value.intValue == 0) {
             emit_gh_i_jk(currentSection, 043, i, 0);
         }
         else {
-            emit_gh_i_jk(currentSection, 042, i, 64 - val.intValue);
+            emit_gh_i_jk(currentSection, 042, i, 64 - val.value.intValue);
         }
     }
     else {
@@ -3286,11 +3283,11 @@ static ErrorCode Si__X(void) {
         else if (isNegOne(&val)) {
             emit_gh_i_jk(currentSection, 042, i, 0);
         }
-        else if (val.intValue >= 0) {
+        else if (val.value.intValue >= 0) {
             emit_gh_i_jkm(currentSection, 040, i, &val);
         }
         else {
-            val.intValue ^= MASK22;
+            val.value.intValue ^= MASK22;
             emit_gh_i_jkm(currentSection, 041, i, &val);
         }
     }
@@ -3391,7 +3388,7 @@ static ErrorCode SIPI(void) {
         val = zeroIntVal;
         err = Err_OperandField;
     }
-    emit_gh_i_j_k(currentSection, 001, 4, val.intValue, 1);
+    emit_gh_i_j_k(currentSection, 001, 4, val.value.intValue, 1);
     return err;
 }
 
@@ -4464,7 +4461,7 @@ static void addPattern(char *s, InstructionHandler handler) {
         if (*nodep == NULL) {
             *nodep = newNode;
             if (newNode->type == NodeType_PatternEnd) {
-                newNode->handler = handler;
+                newNode->value.handler = handler;
                 return;
             }
             nodep = &newNode->next;
@@ -4487,7 +4484,7 @@ static void addPattern(char *s, InstructionHandler handler) {
                 else {
                     node->sibling = newNode;
                     if (newNode->type == NodeType_PatternEnd) {
-                        newNode->handler = handler;
+                        newNode->value.handler = handler;
                         return;
                     }
                     nodep = &newNode->next;
@@ -4637,20 +4634,20 @@ static ErrorCode defineSymbol(u16 attributes) {
             case 'O':
             case 'o':
                 if (isWordAddress(&val)) {
-                    val.intValue *= 8;
+                    val.value.intValue *= 8;
                 }
                 else if (isParcelAddress(&val)) {
-                    val.intValue *= 2;
+                    val.value.intValue *= 2;
                 }
                 val.attributes = SYM_PARCEL_ADDRESS;
                 break;
             case 'P':
             case 'p':
                 if (isWordAddress(&val)) {
-                    val.intValue *= 4;
+                    val.value.intValue *= 4;
                 }
                 else if (isByteAddress(&val)) {
-                    val.intValue /= 2;
+                    val.value.intValue /= 2;
                 }
                 val.attributes = SYM_PARCEL_ADDRESS;
                 break;
@@ -4663,10 +4660,10 @@ static ErrorCode defineSymbol(u16 attributes) {
             case 'W':
             case 'w':
                 if (isParcelAddress(&val)) {
-                    val.intValue /= 4;
+                    val.value.intValue /= 4;
                 }
                 else if (isByteAddress(&val)) {
-                    val.intValue /= 8;
+                    val.value.intValue /= 8;
                 }
                 val.attributes = SYM_WORD_ADDRESS;
                 break;
@@ -4692,10 +4689,10 @@ static ErrorCode defineSymbol(u16 attributes) {
     else if ((symbol->value.attributes & (SYM_UNDEFINED|SYM_REDEFINABLE)) != 0) {
         symbol->value.attributes = val.attributes;
         symbol->value.section = val.section;
-        symbol->value.intValue = val.intValue;
+        symbol->value.value.intValue = val.value.intValue;
     }
     else if (((symbol->value.attributes ^ val.attributes) & ~SYM_DEFINED_P2) != 0
-             || symbol->value.intValue != val.intValue) {
+             || symbol->value.value.intValue != val.value.intValue) {
         err = Err_DoubleDefinition;
     }
     if (pass == 2) symbol->value.attributes |= SYM_DEFINED_P2;
@@ -4993,7 +4990,7 @@ static ErrorCode handleBranch(u16 opCode) {
     s = getNextValue(operandField, &val, &err);
     if (*s != '\0') err = Err_OperandField;
     if (isWordAddress(&val)) {
-        val.intValue <<= 2;
+        val.value.intValue <<= 2;
         val.attributes = (val.attributes & ~SYM_WORD_ADDRESS) | SYM_PARCEL_ADDRESS;
     }
     else if (isByteAddress(&val)) {
@@ -5325,9 +5322,9 @@ static bool isEquivNode(PatternNode *node1, PatternNode *node2) {
     if (node1->type == node2->type) {
         switch (node1->type) {
         case NodeType_Register:
-            return node1->regster == node2->regster;
+            return node1->value.regster == node2->value.regster;
         case NodeType_Operator:
-            return node1->operator == node2->operator;
+            return node1->value.operator == node2->value.operator;
         default:
             return TRUE;
         }
@@ -5336,23 +5333,23 @@ static bool isEquivNode(PatternNode *node1, PatternNode *node2) {
 }
 
 static bool isFloatFour(Value *val) {
-    return val->type == NumberType_Float && val->floatValue == 4.0;
+    return val->type == NumberType_Float && val->value.floatValue == 4.0;
 }
 
 static bool isFloatFourEighths(Value *val) {
-    return val->type == NumberType_Float && val->floatValue == 0.5;
+    return val->type == NumberType_Float && val->value.floatValue == 0.4;
 }
 
 static bool isFloatOne(Value *val) {
-    return val->type == NumberType_Float && val->floatValue == 1.0;
+    return val->type == NumberType_Float && val->value.floatValue == 1.0;
 }
 
 static bool isFloatSixEighths(Value *val) {
-    return val->type == NumberType_Float && val->floatValue == 0.75;
+    return val->type == NumberType_Float && val->value.floatValue == 0.6;
 }
 
 static bool isFloatTwo(Value *val) {
-    return val->type == NumberType_Float && val->floatValue == 2.0;
+    return val->type == NumberType_Float && val->value.floatValue == 2.0;
 }
 
 static bool isInteger(Value *val) {
@@ -5360,15 +5357,15 @@ static bool isInteger(Value *val) {
 }
 
 static bool isIntegerRange(Value *val, int lowerBound, int upperBound) {
-    return (isInteger(val) && val->intValue >= lowerBound && val->intValue <= upperBound);
+    return (isInteger(val) && val->value.intValue >= lowerBound && val->value.intValue <= upperBound);
 }
 
 static bool isNegOne(Value *val) {
-    return isSimpleInteger(val) && val->intValue == -1;
+    return isSimpleInteger(val) && val->value.intValue == -1;
 }
 
 static bool isOne(Value *val) {
-    return isSimpleInteger(val) && val->intValue == 1;
+    return isSimpleInteger(val) && val->value.intValue == 1;
 }
 
 static bool isSimpleInteger(Value *val) {
@@ -5377,7 +5374,7 @@ static bool isSimpleInteger(Value *val) {
 }
 
 static bool isZero(Value *val) {
-    return isSimpleInteger(val) && val->intValue == 0;
+    return isSimpleInteger(val) && val->value.intValue == 0;
 }
 
 static InstructionHandler matchInstruction(bool *didMatchResultField) {
@@ -5406,7 +5403,7 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
         switch (token.type) {
         case TokenType_Register:
             while (TRUE) {
-                if (node->type == NodeType_Register && node->regster == token.details.regster.type) break;
+                if (node->type == NodeType_Register && node->value.regster == token.details.regster.type) break;
                 node = node->sibling;
                 if (node == NULL) return NULL;
             }
@@ -5442,14 +5439,14 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
             //
             if (start != fields[i - 1] && *(start - 1) != ',') {
                 while (node != NULL) {
-                    if (node->type == NodeType_Operator && node->operator == token.details.operator.type) break;
+                    if (node->type == NodeType_Operator && node->value.operator == token.details.operator.type) break;
                     node = node->sibling;
                     if (node == NULL) return NULL;
                 }
             }
             opNode = expNode = NULL;
             while (node != NULL) {
-                if (node->type == NodeType_Operator && node->operator == token.details.operator.type)
+                if (node->type == NodeType_Operator && node->value.operator == token.details.operator.type)
                     opNode = node;
                 else if (node->type == NodeType_Expression)
                     expNode = node;
@@ -5461,7 +5458,7 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
                     node = opNode;
                 }
                 else if (opNode != NULL) {
-                    switch (opNode->operator) {
+                    switch (opNode->value.operator) {
                     case Op_CmplMaskLeft:
                     case Op_CmplMaskRight:
                     case Op_MaskLeft:
@@ -5514,7 +5511,7 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
                 if (node == NULL) return NULL;
             }
             *didMatchResultField = TRUE;
-            if (node->type == NodeType_PatternEnd) return node->handler;
+            if (node->type == NodeType_PatternEnd) return node->value.handler;
             node = node->next;
         }
         else if (*s == ',') {
@@ -5550,7 +5547,7 @@ static ErrorCode numericMicro(int base) {
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) (void)registerError(err);
     if (isSimpleInteger(&val)) {
-        n = val.intValue;
+        n = val.value.intValue;
     }
     else {
         n = 0;
@@ -5561,7 +5558,7 @@ static ErrorCode numericMicro(int base) {
         s = getNextValue(s + 1, &val, &err);
         (void)registerError(err);
         if (isSimpleInteger(&val) && isIntegerRange(&val, 0, 8)) {
-            count = val.intValue;
+            count = val.value.intValue;
         }
         else {
             err = Err_OperandField;
@@ -5600,7 +5597,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         s += 1;
         if (*s >= 'h' && *s <= 'k') {
             node->type = NodeType_Register;
-            node->regster = RegisterType_A;
+            node->value.regster = RegisterType_A;
         }
         else {
             parseError(s - 1);
@@ -5610,7 +5607,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         s += 1;
         if (*s == 'j' && *(s + 1) == 'k') {
             node->type = NodeType_Register;
-            node->regster = RegisterType_B;
+            node->value.regster = RegisterType_B;
             s += 1;
         }
         else {
@@ -5622,19 +5619,19 @@ static char *parseNextNode(char *s, PatternNode *node) {
         switch (*s) {
         case 'A':
             node->type = NodeType_Register;
-            node->regster = RegisterType_CA;
+            node->value.regster = RegisterType_CA;
             break;
         case 'E':
             node->type = NodeType_Register;
-            node->regster = RegisterType_CE;
+            node->value.regster = RegisterType_CE;
             break;
         case 'I':
             node->type = NodeType_Register;
-            node->regster = RegisterType_CI;
+            node->value.regster = RegisterType_CI;
             break;
         case 'L':
             node->type = NodeType_Register;
-            node->regster = RegisterType_CL;
+            node->value.regster = RegisterType_CL;
             break;
         default:
             parseError(s - 1);
@@ -5645,7 +5642,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         s += 1;
         if (*s == 'C') {
             node->type = NodeType_Register;
-            node->regster = RegisterType_MC;
+            node->value.regster = RegisterType_MC;
         }
         else {
             parseError(s - 1);
@@ -5656,7 +5653,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         if (*s == 'S' || *s == 'V') {
             if (*(s + 1) == 'j') {
                 node->type = NodeType_Register;
-                node->regster = (*s == 'S') ? RegisterType_PS : RegisterType_PV;
+                node->value.regster = (*s == 'S') ? RegisterType_PS : RegisterType_PV;
                 s += 1;
             }
             else {
@@ -5672,7 +5669,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         if (*s == 'S' || *s == 'V') {
             if (*(s + 1) == 'j') {
                 node->type = NodeType_Register;
-                node->regster = (*s == 'S') ? RegisterType_QS : RegisterType_QV;
+                node->value.regster = (*s == 'S') ? RegisterType_QS : RegisterType_QV;
                 s += 1;
             }
             else {
@@ -5687,7 +5684,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         s += 1;
         if (*s == 'T') {
             node->type = NodeType_Register;
-            node->regster = RegisterType_RT;
+            node->value.regster = RegisterType_RT;
         }
         else {
             parseError(s - 1);
@@ -5700,29 +5697,29 @@ static char *parseNextNode(char *s, PatternNode *node) {
         case 'j':
         case 'k':
             node->type = NodeType_Register;
-            node->regster = RegisterType_S;
+            node->value.regster = RegisterType_S;
             break;
         case 'B':
             if (*(s + 1) == 'j') {
                 node->type = NodeType_Register;
-                node->regster = RegisterType_SB;
+                node->value.regster = RegisterType_SB;
                 s += 1;
             }
             else {
                 node->type = NodeType_Register;
-                node->regster = RegisterType_Sign;
+                node->value.regster = RegisterType_Sign;
             }
             break;
         case 'M':
             s += 1;
             if (*s == 'j' && *(s + 1) == 'k') {
                 node->type = NodeType_Register;
-                node->regster = RegisterType_SM;
+                node->value.regster = RegisterType_SM;
                 s += 1;
             }
             else {
                 node->type = NodeType_Register;
-                node->regster = RegisterType_Sem;
+                node->value.regster = RegisterType_Sem;
                 s -= 1;
             }
             break;
@@ -5730,7 +5727,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
             s += 1;
             if (*s == 'j') {
                 node->type = NodeType_Register;
-                node->regster = RegisterType_SR;
+                node->value.regster = RegisterType_SR;
             }
             else {
                 parseError(s - 1);
@@ -5740,7 +5737,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
             s += 1;
             if (*s == 'j') {
                 node->type = NodeType_Register;
-                node->regster = RegisterType_ST;
+                node->value.regster = RegisterType_ST;
             }
             else {
                 parseError(s - 1);
@@ -5755,7 +5752,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         s += 1;
         if (*s == 'j' && *(s + 1) == 'k') {
             node->type = NodeType_Register;
-            node->regster = RegisterType_T;
+            node->value.regster = RegisterType_T;
             s += 1;
         }
         else {
@@ -5769,15 +5766,15 @@ static char *parseNextNode(char *s, PatternNode *node) {
         case 'j':
         case 'k':
             node->type = NodeType_Register;
-            node->regster = RegisterType_V;
+            node->value.regster = RegisterType_V;
             break;
         case 'L':
             node->type = NodeType_Register;
-            node->regster = RegisterType_VL;
+            node->value.regster = RegisterType_VL;
             break;
         case 'M':
             node->type = NodeType_Register;
-            node->regster = RegisterType_VM;
+            node->value.regster = RegisterType_VM;
             break;
         default:
             parseError(s - 1);
@@ -5788,7 +5785,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         s += 1;
         if (*s == 'A') {
             node->type = NodeType_Register;
-            node->regster = RegisterType_XA;
+            node->value.regster = RegisterType_XA;
         }
         else {
             parseError(s - 1);
@@ -5798,7 +5795,7 @@ static char *parseNextNode(char *s, PatternNode *node) {
         s += 1;
         if (*s == 'S' && *(s + 1) == 'j') {
             node->type = NodeType_Register;
-            node->regster = RegisterType_ZS;
+            node->value.regster = RegisterType_ZS;
             s += 1;
         }
         else {
@@ -5808,90 +5805,90 @@ static char *parseNextNode(char *s, PatternNode *node) {
     case '+':
         node->type = NodeType_Operator;
         if (*(s + 1) == 'F') {
-            node->operator = Op_FloatAdd;
+            node->value.operator = Op_FloatAdd;
             s += 1;
         }
         else {
-            node->operator = Op_Add;
+            node->value.operator = Op_Add;
         }
         break;
     case '-':
         node->type = NodeType_Operator;
         if (*(s + 1) == 'F') {
-            node->operator = Op_FloatSubtract;
+            node->value.operator = Op_FloatSubtract;
             s += 1;
         }
         else {
-            node->operator = Op_Subtract;
+            node->value.operator = Op_Subtract;
         }
         break;
     case '*':
         node->type = NodeType_Operator;
         switch (*(s + 1)) {
         case 'F':
-            node->operator = Op_FloatMultiply;
+            node->value.operator = Op_FloatMultiply;
             s += 1;
             break;
         case 'H':
-            node->operator = Op_HalfMultiply;
+            node->value.operator = Op_HalfMultiply;
             s += 1;
             break;
         case 'I':
-            node->operator = Op_2_FloatMultiply;
+            node->value.operator = Op_2_FloatMultiply;
             s += 1;
             break;
         case 'R':
-            node->operator = Op_RoundedMultiply;
+            node->value.operator = Op_RoundedMultiply;
             s += 1;
             break;
         default:
-            node->operator = Op_Multiply;
+            node->value.operator = Op_Multiply;
             break;
         }
         break;
     case '&':
         node->type = NodeType_Operator;
-        node->operator = Op_And;
+        node->value.operator = Op_And;
         break;
     case '!':
         node->type = NodeType_Operator;
-        node->operator = Op_Or;
+        node->value.operator = Op_Or;
         break;
     case '/':
         node->type = NodeType_Operator;
         if (*(s + 1) == 'H') {
-            node->operator = Op_HalfDivide;
+            node->value.operator = Op_HalfDivide;
             s += 1;
         }
         else {
-            node->operator = Op_Divide;
+            node->value.operator = Op_Divide;
         }
         break;
     case '\\':
         node->type = NodeType_Operator;
-        node->operator = Op_Xor;
+        node->value.operator = Op_Xor;
         break;
     case '#':
         node->type = NodeType_Operator;
         if (*(s + 1) == '<') {
-            node->operator = Op_CmplMaskLeft;
+            node->value.operator = Op_CmplMaskLeft;
             s += 1;
         }
         else if (*(s + 1) == '>') {
-            node->operator = Op_CmplMaskRight;
+            node->value.operator = Op_CmplMaskRight;
             s += 1;
         }
         else {
-            node->operator = Op_Complement;
+            node->value.operator = Op_Complement;
         }
         break;
     case '<':
         node->type = NodeType_Operator;
-        node->operator = Op_ShiftLeft;
+        node->value.operator = Op_ShiftLeft;
         break;
     case '>':
         node->type = NodeType_Operator;
-        node->operator = Op_ShiftRight;
+        node->value.operator = Op_ShiftRight;
         break;
     case '$':
         node->type = NodeType_Expression;
