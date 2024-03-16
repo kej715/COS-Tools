@@ -3,12 +3,13 @@
          IDENT     HELLO
          COMMENT   'HELLO - A simple *Hello World* program'
          ENTRY     HELLO
-         EXT       ADV,LOG
          START     HELLO
 
-HELLO    S1        ='Hello world!'Z
+HELLO    S0        O'004          ; F$MSG
+         S1        ='Hello world!'Z
          S2        O'17           ; CLASS=1, OR=1, FC=3
-         R         LOG
-         R         ADV            ; advance to next job step
+         EX
+         S0        O'000          ; F$ADV
+         EX
 
          END
