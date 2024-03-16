@@ -83,7 +83,7 @@ u64 cosDsReadCW(Dataset *ds) {
 }
 
 int cosDsRewind(Dataset *ds) {
-    return _cosrew(ds);
+    return _reopen(ds->fd);
 }
 
 int cosDsWrite(Dataset *ds, u8 *buffer, int len) {

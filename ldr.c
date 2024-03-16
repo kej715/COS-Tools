@@ -34,9 +34,6 @@
 #include "ldrproto.h"
 #include "ldrtypes.h"
 #include "services.h"
-#if defined(__cos)
-#include <sys/syslog.h>
-#endif
 
 static void addBlock(Module *module, Block *block);
 static LibraryModule *addLibraryModule(char *libraryPath, u8 *module, u8 pdtOrdinal);
@@ -54,7 +51,7 @@ static u64 getWord(u8 *bytes);
 static int idcmp(u8 *id1, u8*id2, int len);
 static int isLibrary(Dataset *ds, int pass, char *sourcePath);
 static int loadLibraryModule(Dataset *ds, LibraryModule *module, int pass);
-static u64 loadModules(Dataset *ds, u8 *moduleId, int pass);
+static int loadModules(Dataset *ds, u8 *moduleId, int pass);
 static int locateTable(Dataset *ds, u8 tableType, u64 *hdr, int *tableLength, char *sourcePath);
 static int parseOptions(int argc, char *argv[]);
 static void printAddress(u32 address, bool isParcelAddress);
@@ -131,10 +128,12 @@ int main(int argc, char *argv[]) {
     char *sp;
     int status;
     struct tm *tmp;
+    int year;
 
     clock = time(NULL);
     tmp = localtime(&clock);
-    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_year - 100);
+    year = tmp->tm_year >= 100 ? tmp->tm_year - 100 : tmp->tm_year;
+    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, year);
     sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
     firstFileIndex = parseOptions(argc, argv);
@@ -153,18 +152,18 @@ int main(int argc, char *argv[]) {
             addSuffix(argv[fileIndex], ".obj", sourcePath);
             ds = cosDsOpen(sourcePath);
             if (ds == NULL) {
-                fprintf(stderr, "Failed to open %s\n", sourcePath);
+                eprintf("Failed to open %s", sourcePath);
                 exit(1);
             }
             status = isLibrary(ds, pass, sourcePath);
             if (status == -1) {
-                fprintf(stderr, "Failed to read %s\n", sourcePath);
+                eprintf("Failed to read %s", sourcePath);
                 exit(1);
             }
             else if (status == 0) {
                 calculateModuleName(sourcePath, moduleId);
                 if (loadModules(ds, moduleId, pass) == -1) {
-                    fprintf(stderr, "Failed to load modules from %s\n", sourcePath);
+                    eprintf("Failed to load modules from %s", sourcePath);
                     exit(1);
                 }
             }
@@ -173,7 +172,7 @@ int main(int argc, char *argv[]) {
         }
         if (pass == 1) {
             if (resolveExternals() == -1) {
-                fputs("Failed to resolve external references\n", stderr);
+                eputs("Failed to resolve external references");
                 exit(1);
             }
             //
@@ -195,13 +194,13 @@ int main(int argc, char *argv[]) {
             for (lm = firstLibraryModule; lm != NULL; lm = lm->next) {
                 ds = cosDsOpen(lm->libraryPath);
                 if (ds == NULL) {
-                    fprintf(stderr, "Failed to open %s\n", lm->libraryPath);
+                    eprintf("Failed to open %s", lm->libraryPath);
                     exit(1);
                 }
                 status = loadLibraryModule(ds, lm, pass);
                 cosDsClose(ds);
                 if (status != 1) {
-                    fprintf(stderr, "Failed to load %.8s from %s\n", lm->id, lm->libraryPath);
+                    eprintf("Failed to load %.8s from %s", lm->id, lm->libraryPath);
                     exit(1);
                 }
             }
@@ -223,7 +222,7 @@ int main(int argc, char *argv[]) {
     }
     ds = cosDsCreate(objectPath);
     if (ds == NULL) {
-        fprintf(stderr, "Failed to create %s\n", objectPath);
+        eprintf("Failed to create %s", objectPath);
         exit(1);
     }
     status = writeExecutable(ds);
@@ -235,9 +234,9 @@ int main(int argc, char *argv[]) {
     }
     if (hasErrorFlag || errorCount > 0) {
         if (hasErrorFlag)
-            fputs("One or more source modules have error flags set\n", stderr);
+            eputs("One or more source modules have error flags set");
         if (errorCount > 0)
-            fprintf(stderr, "%d linkage errors detected\n", errorCount);
+            eprintf("%d linkage errors detected", errorCount);
         exit(1);
     }
 }
@@ -328,21 +327,23 @@ static void addSuffix(char *inPath, char *suffix, char *outPath) {
         else if (*ip == '.')
             dp = ip;
         if (op >= limit) {
-            fprintf(stderr, "Path too long: %s\n", inPath);
+            eprintf("Path too long: %s", inPath);
             exit(1);
         }
         *op++ = *ip;
     }
+#if !defined(__cos)
     if (dp == NULL) {
         ip = suffix;
         while (*ip != '\0' && op < limit) {
             *op++ = *ip++;
         }
         if (op >= limit) {
-            fprintf(stderr, "Path too long: %s\n", inPath);
+            eprintf("Path too long: %s", inPath);
             exit(1);
         }
     }
+#endif
     *op = '\0';
 }
 
@@ -382,7 +383,7 @@ static Symbol *addSymbol(u8 *id, Block *block, u64 value, bool isParcelAddress) 
             }
         }
         else {
-            fprintf(stderr, "Duplicate entry point %s defined in module %s, previously defined in module %s\n",
+            eprintf("Duplicate entry point %s defined in module %s, previously defined in module %s",
                 current->id, block->module->id, current->block->module->id);
             errorCount += 1;
             free(new);
@@ -572,7 +573,7 @@ static u64 getWord(u8 *bytes) {
     return word;
 }
 
-static int idcmp(u8 *id1, u8*id2, int len) {
+static int idcmp(u8 *id1, u8 *id2, int len) {
     return strncasecmp((char *)id1, (char *)id2, len);
 }
 
@@ -593,7 +594,7 @@ static int isLibrary(Dataset *ds, int pass, char *sourcePath) {
         tableType = hdr >> 60;
         if (tableType == LDR_TT_DFT) {
             if (libraryCount >= MAX_LIBRARIES) {
-                fprintf(stderr, "Too many libraries specified, max is %d\n", MAX_LIBRARIES);
+                eprintf("Too many libraries specified, max is %d", MAX_LIBRARIES);
                 exit(1);
             }
             libraryPaths[libraryCount] = (char *)allocate(strlen(sourcePath) + 1);
@@ -637,7 +638,7 @@ static int loadLibraryModule(Dataset *ds, LibraryModule *module, int pass) {
         table = (u8 *)allocate(tableLength);
         n = cosDsRead(ds, table, tableLength);
         if (n != tableLength) {
-            fprintf(stderr, "Failed to read DFT in %s\n", module->libraryPath);
+            eprintf("Failed to read DFT in %s", module->libraryPath);
             free(table);
             return -1;
         }
@@ -668,7 +669,7 @@ static int loadLibraryModule(Dataset *ds, LibraryModule *module, int pass) {
         table = (u8 *)allocate(tableLength);
         n = cosDsRead(ds, table, tableLength);
         if (n != tableLength) {
-            fprintf(stderr, "Failed to read PDT in %s\n", module->libraryPath);
+            eprintf("Failed to read PDT in %s", module->libraryPath);
             free(table);
             return -1;
         }
@@ -682,7 +683,7 @@ static int loadLibraryModule(Dataset *ds, LibraryModule *module, int pass) {
     }
     else { // pass 2
         if (skipBytes(ds, tableLength) == -1) {
-            fprintf(stderr, "Failed to skip over PDT in %s\n", module->libraryPath);
+            eprintf("Failed to skip over PDT in %s", module->libraryPath);
             return -1;
         }
         currentModule = module->module;
@@ -716,7 +717,7 @@ static int loadLibraryModule(Dataset *ds, LibraryModule *module, int pass) {
     return 1;
 }
 
-static u64 loadModules(Dataset *ds, u8 *moduleId, int pass) {
+static int loadModules(Dataset *ds, u8 *moduleId, int pass) {
     u8 buf[8];
     u64 cw;
     u64 hdr;
@@ -785,7 +786,7 @@ static u64 loadModules(Dataset *ds, u8 *moduleId, int pass) {
             break;
         default:
             // issue warning and ignore unrecognized table types
-            fprintf(stderr, "Warning: unrecognized table type: %02o\n", tableType);
+            eprintf("Warning: unrecognized table type: %02o", tableType);
             break;
         }
         if (skipBytes(ds, tableLength) == -1) return -1;
@@ -804,7 +805,7 @@ static int locateTable(Dataset *ds, u8 tableType, u64 *hdr, int *tableLength, ch
     while (TRUE) {
         n = cosDsRead(ds, buf, 8);
         if (n == -1) {
-            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            eprintf("Failed to read table header from %s", sourcePath);
             return -1;
         }
         if (n == 0) {
@@ -828,7 +829,7 @@ static int locateTable(Dataset *ds, u8 tableType, u64 *hdr, int *tableLength, ch
             return 1;
         }
         if (skipBytes(ds, tl) == -1) {
-            fprintf(stderr, "Failed to skip %s in %s\n", getTableType(tableType), sourcePath);
+            eprintf("Failed to skip %s in %s", getTableType(tableType), sourcePath);
             return -1;
         }
     }
@@ -934,8 +935,7 @@ static void printModuleSummary(Module *module) {
     for (block = module->firstBlock; block != NULL; block = block->nextInModule) {
         fprintf(loadMap, "   %-8.8s  %-7.7s  %3d  ", block->id, getBlockType(block->type), block->index);
         printAddress(block->baseAddress, FALSE);
-        fprintf(loadMap, "  %6d", block->length);
-        fputs("\n", loadMap);
+        fprintf(loadMap, "  %6d\n", block->length);
     }
     fputs("\n   Entry     Section   Address\n", loadMap);
     fputs("   --------  --------  ---------\n", loadMap);
@@ -988,7 +988,7 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
     blockIndex = (hdr >> 25) & 0x7f;
     targetBlock = findBlock(currentModule, blockIndex);
     if (targetBlock == NULL) {
-        fprintf(stderr, "Failed to find block %d referenced by BRT of module %s\n", blockIndex, currentModule->id);
+        eprintf("Failed to find block %d referenced by BRT of module %s", blockIndex, currentModule->id);
         errorCount += 1;
         return skipBytes(ds, tableLength);
     }
@@ -1006,7 +1006,7 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
             bitAddress = word & 0x3fffffff;
             block = findBlock(currentModule, blockIndex);
             if (block == NULL) {
-                fprintf(stderr, "Failed to find block %d referenced by extended relocation entry in BRT of module %s\n",
+                eprintf("Failed to find block %d referenced by extended relocation entry in BRT of module %s",
                         blockIndex, currentModule->id);
                 errorCount += 1;
                 continue;
@@ -1032,7 +1032,7 @@ static int processBRT(Dataset *ds, u64 hdr, int tableLength) {
                 block = findBlock(currentModule, blockIndex);
                 if (block == NULL) {
                     if (blockIndex == 0x7f && parcelAddress == 0xffffff) break;
-                    fprintf(stderr, "Failed to find block %d referenced by standard relocation entry in BRT of module %s\n",
+                    eprintf("Failed to find block %d referenced by standard relocation entry in BRT of module %s",
                             blockIndex, currentModule->id);
                     errorCount += 1;
                     continue;
@@ -1112,7 +1112,7 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
         word = getWord(table + offset);
         offset += 8;
         if (isSet(word, 1)) {
-            fprintf(stderr, "Warning: Section %s in module %s has error flag set\n", block->id, module->id);
+            eprintf("Warning: Section %s in module %s has error flag set", block->id, module->id);
             block->hasErrorFlag = hasErrorFlag = TRUE;
         }
         if (isSet(word, 0)) {
@@ -1132,7 +1132,7 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
                 block->type = (BlockType)blockType;
             }
             else {
-                fprintf(stderr, "Warning: Section %s in module %s has unknown block type %d\n", block->id, module->id, blockType);
+                eprintf("Warning: Section %s in module %s has unknown block type %d", block->id, module->id, blockType);
                 block->type = BlockType_Mixed;
             }
             block->isExtMem = ((word >> 48) & 0x3f) == 2;
@@ -1153,7 +1153,7 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
         blockIndex = (word >> 1) & 0x7f;
         block = findBlock(module, blockIndex);
         if (block == NULL) {
-            fprintf(stderr, "Invalid block index %d in entry point definition %.8s of module %s\n",
+            eprintf("Invalid block index %d in entry point definition %.8s of module %s",
                 blockIndex, (char *)name, module->id);
             errorCount += 1;
             offset += 8;
@@ -1167,7 +1167,7 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
                 startSymbol = symbol;
             }
             else {
-                fprintf(stderr, "Warning: previous start symbol %s of module %s overrides start symbol %s of module %s\n",
+                eprintf("Warning: previous start symbol %s of module %s overrides start symbol %s of module %s",
                     startSymbol->id, startSymbol->block->module->id, symbol->id, currentModule->id);
             }
         }
@@ -1209,7 +1209,7 @@ static int processTXT(Dataset *ds, u64 hdr, int tableLength) {
         loadAddress += block->baseAddress;
         imageOffset = loadAddress * 8;
         if (imageOffset + tableLength > imageSize) {
-            fprintf(stderr, "TXT of module %s exceeds image size (load address %o, length %d)\n",
+            eprintf("TXT of module %s exceeds image size (load address %o, length %d)",
                 currentModule->id, loadAddress, tableLength);
             errorCount += 1;
             return skipBytes(ds, tableLength);
@@ -1218,7 +1218,7 @@ static int processTXT(Dataset *ds, u64 hdr, int tableLength) {
         return (n == tableLength) ? 0 : -1;
     }
     else {
-        fprintf(stderr, "Failed to find block %d referenced by TXT of module %s\n", blockIndex, currentModule->id);
+        eprintf("Failed to find block %d referenced by TXT of module %s", blockIndex, currentModule->id);
         errorCount += 1;
         return skipBytes(ds, tableLength);
     }
@@ -1248,19 +1248,19 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
         bitAddress = word & 0x3fffffff;
         block = findBlock(currentModule, blockIndex);
         if (block == NULL) {
-            fprintf(stderr, "Failed to find block %d referenced by XRT of module %s\n", blockIndex, currentModule->id);
+            eprintf("Failed to find block %d referenced by XRT of module %s", blockIndex, currentModule->id);
             errorCount += 1;
             continue;
         }
         if (extIndex >= currentModule->externalRefCount) {
-            fprintf(stderr, "Invalid external reference index %d in XRT of module %s\n", blockIndex, currentModule->id);
+            eprintf("Invalid external reference index %d in XRT of module %s", blockIndex, currentModule->id);
             errorCount += 1;
             continue;
         }
         id = currentModule->externalRefTable + (extIndex * 8);
         symbol = findSymbol(id);
         if (symbol == NULL) {
-            fprintf(stderr, "Unsatisfied external reference %.8s\n", id);
+            eprintf("Unsatisfied external reference %.8s", id);
             errorCount += 1;
             continue;
         }
@@ -1340,7 +1340,7 @@ static int resolveExternal(u8 *id) {
     for (i = 0; i < libraryCount; i++) {
         ds = cosDsOpen(libraryPaths[i]);
         if (ds == NULL) {
-            fprintf(stderr, "Failed to open %s\n", libraryPaths[i]);
+            eprintf("Failed to open %s", libraryPaths[i]);
             return -1;
         }
         status = searchLibrary(ds, id, module, &pdtOrdinal, libraryPaths[i]);
@@ -1401,7 +1401,7 @@ static int searchLibrary(Dataset *ds, u8 *id, u8 *module, u8 *pdtOrdinal, char *
         table = (u8 *)allocate(tableLength);
         n = cosDsRead(ds, table, tableLength);
         if (n != tableLength) {
-            fprintf(stderr, "Failed to read DFT in %s\n", sourcePath);
+            eprintf("Failed to read DFT in %s", sourcePath);
             free(table);
             return -1;
         }
@@ -1437,7 +1437,7 @@ static int searchLibrary(Dataset *ds, u8 *id, u8 *module, u8 *pdtOrdinal, char *
         table = (u8 *)allocate(tableLength);
         n = cosDsRead(ds, table, tableLength);
         if (n != tableLength) {
-            fprintf(stderr, "Failed to read PDT from %s\n", sourcePath);
+            eprintf("Failed to read PDT from %s", sourcePath);
             return -1;
         }
         blockWordCount = hdr & 0xff;
@@ -1478,24 +1478,26 @@ static int skipBytes(Dataset *ds, int count) {
 
 static void usage(void) {
 #if defined(__cos)
-    syslog("Usage: LDR[,M=mfile][,O=ofile],sfile...", SYSLOG_USER, 1, 1);
-    syslog("  M=mfile - load map file", SYSLOG_USER, 1, 1);
-    syslog("  O=ofile - output object file", SYSLOG_USER, 1, 1);
-    syslog("  sfile   - source file(s)", SYSLOG_USER, 1, 1);
+    eputs("Usage: LDR[,M=mfile][,O=ofile],sfile...");
+    eputs("  M=mfile - load map file");
+    eputs("  O=ofile - output object file");
+    eputs("  sfile   - source file(s)");
 #else
-    fputs("Usage: ldr [-m mfile][-o ofile] sfile...\n", stderr);
-    fputs("  -m mfile - load map file\n", stderr);
-    fputs("  -o ofile - output object file\n", stderr);
-    fputs("  sfile    - source file(s)\n", stderr);
+    eputs("Usage: ldr [-m mfile][-o ofile] sfile...");
+    eputs("  -m mfile - load map file");
+    eputs("  -o ofile - output object file");
+    eputs("  sfile    - source file(s)");
 #endif
     exit(1);
 }
 
 static int writeExecutable(Dataset *ds) {
     if (writePDT(ds) == -1 || writeTXT(ds) == -1) return -1;
+#if !defined(__cos)
     cosDsWriteEOR(ds);
     cosDsWriteEOF(ds);
     cosDsWriteEOD(ds);
+#endif
     return 0;
 }
 
@@ -1531,7 +1533,7 @@ static int writePDT(Dataset *ds) {
 
     entryCount = (startSymbol != NULL) ? 1 : 0;
     if (entryCount == 0) {
-        fputs("No start address\n", stderr);
+        eputs("No start address");
         errorCount += 1;
     }
     pdtLen = 1                 // header word
@@ -1543,7 +1545,7 @@ static int writePDT(Dataset *ds) {
         pdtLen += (strlen(firstModule->comment) + 7) / 8;
     }
     //
-    //  Write headser word
+    //  Write header word
     //
     word = ((u64)LDR_TT_PDT << 60)
          | (pdtLen << 36)
@@ -1640,7 +1642,7 @@ static int writeTXT(Dataset *ds) {
     u64 wordCount;
 
     //
-    //  Write headser word
+    //  Write header word
     //
     wordCount = blockLimit - 0200;
     byteCount = wordCount * 8;

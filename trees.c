@@ -592,7 +592,7 @@ u16 getRelativeAttribute(Section *section) {
     case SectionType_Dynamic:
         return SYM_RELOCATABLE;
     default:
-        fprintf(stderr, "Unknown section type: %d\n", section->type);
+        eprintf("Unknown section type: %d", section->type);
         exit(1);
     }
 }

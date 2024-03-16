@@ -30,6 +30,7 @@
 #include "caltypes.h"
 #include "cosdataset.h"
 #include "fnv.h"
+#include "services.h"
 #if defined(__cos)
 #include <sys/syslog.h>
 #endif
@@ -130,12 +131,19 @@ int main(int argc, char *argv[], char *envp[]) {
         fclose(sourceFile);
         if (lFile == NULL && listingFile != NULL) fclose(listingFile);
         if (oFile == NULL && objectFile != NULL) {
+#if defined(__cos)
+            if (cosDsClose(objectFile) == -1) {
+                eprintf("Failed to close object file for %s", argv[srcIndex - 1]);
+                exit(1);
+            }
+#else
             if (cosDsWriteEOF(objectFile) == -1
                 || cosDsWriteEOD(objectFile) == -1
                 || cosDsClose(objectFile) == -1) {
-                fprintf(stderr, "Failed to write object file for %s\n", argv[srcIndex]);
+                eprintf("Failed to write object file for %s", argv[srcIndex - 1]);
                 exit(1);
             }
+#endif
         }
         if (isExtText) {
             listingFile = savedListingFile;
@@ -145,18 +153,25 @@ int main(int argc, char *argv[], char *envp[]) {
     }
     if (lFile != NULL && listingFile != NULL) fclose(listingFile);
     if (oFile != NULL) {
+#if defined(__cos)
+        if (cosDsClose(objectFile) == -1) {
+            eputs("Failed to write object file");
+            exit(1);
+        }
+#else
         if (cosDsWriteEOF(objectFile) == -1
             || cosDsWriteEOD(objectFile) == -1
             || cosDsClose(objectFile) == -1) {
-            fputs("Failed to write object file\n", stdout);
+            eputs("Failed to write object file");
             exit(1);
         }
+#endif
     }
-    if (warnCount > 0) fprintf(stderr, "%d warning%s detected\n", warnCount, warnCount > 1 ? "s" : "");
-    if (errCount > 0)  fprintf(stderr, "%d error%s detected\n", errCount, errCount > 1 ? "s" : "");
+    if (warnCount > 0) eprintf("%d warning%s detected", warnCount, warnCount > 1 ? "s" : "");
+    if (errCount > 0)  eprintf("%d error%s detected", errCount, errCount > 1 ? "s" : "");
     for (code = Err_DataItem; code <= Warn_RedefinedMacro; code++) {
         if ((errorUnion & (1 << code)) != 0) {
-            fprintf(stderr, "%-2s %s\n", getErrorIndicator(code), getErrorMessage(code));
+            eprintf("%-2s %s", getErrorIndicator(code), getErrorMessage(code));
         }
     }
     exit(errCount > 0 || (warnCount > 0 && isFatalWarnings));
@@ -238,7 +253,7 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
          else if (*cp == '.')
              dp = fp;
          if (fp >= limit) {
-             fprintf(stderr, "Path too long: %s\n", argv[argi]);
+             eprintf("Path too long: %s", argv[argi]);
              exit(1);
          }
          *fp++ = *cp;
@@ -307,6 +322,7 @@ static void parseOptions(int argc, char *argv[]) {
             if (i >= argc || IS_KEY(argv[i])) {
                 usage();
             }
+            sourceCount += 1;
         }
 #endif
         else if (strcmp(argv[i], L_KEY) == 0) {
@@ -455,7 +471,7 @@ static int runPass(int passNo, bool isExtText) {
     resetLocalSymbols();
     resetQualifierStack();
     if (fseek(sourceFile, 0L, SEEK_SET) != 0) {
-        fputs("Failed to rewind source file\n", stderr);
+        eputs("Failed to rewind source file");
         exit(1);
     }
     if (explicitIdent != NULL && isExtText == FALSE) {
@@ -465,7 +481,7 @@ static int runPass(int passNo, bool isExtText) {
         else { // pass == 2
             module = findModule(explicitIdent, strlen(explicitIdent));
             if (module == NULL) {
-                fprintf(stderr, "Module vanished in pass 2: %s\n", explicitIdent);
+                eprintf("Module vanished in pass 2: %s", explicitIdent);
                 exit(1);
             }
             resetModule(module);
@@ -494,37 +510,39 @@ static int runPass(int passNo, bool isExtText) {
 static void timeInit(void) {
     time_t clock;
     struct tm *tmp;
+    int year;
 
     clock = time(NULL);
     tmp = localtime(&clock);
-    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_year - 100);
+    year = tmp->tm_year >= 100 ? tmp->tm_year - 100 : tmp->tm_year;
+    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, year);
     sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
-    sprintf(currentJDate, "%02d/%03d", tmp->tm_year - 100, tmp->tm_yday + 1);
+    sprintf(currentJDate, "%02d/%03d", year, tmp->tm_yday + 1);
 }
 
 static void usage(void) {
 #if defined(__cos)
-    syslog("Usage: CAL[,F][,I=sfile][,L=lfile][,N=ident][,O=ofile][,T=tfile]...[,W][,X]", SYSLOG_USER, 1, 1);
-    syslog("  F       - enable flexible syntax", SYSLOG_USER, 1, 1);
-    syslog("  I=sfile - source file", SYSLOG_USER, 1, 1);
-    syslog("  L=lfile - listing file", SYSLOG_USER, 1, 1);
-    syslog("  N=ident - default module identifier", SYSLOG_USER, 1, 1);
-    syslog("  O=ofile - object file", SYSLOG_USER, 1, 1);
-    syslog("  S       - disable section stacking", SYSLOG_USER, 1, 1);
-    syslog("  T=tfile - external text file", SYSLOG_USER, 1, 1);
-    syslog("  W       - exit with error status on warning indications", SYSLOG_USER, 1, 1);
-    syslog("  X       - enable implicit external symbols", SYSLOG_USER, 1, 1);
+    eputs("Usage: CAL[,F][,I=sfile][,L=lfile][,N=ident][,O=ofile][,T=tfile]...[,W][,X]");
+    eputs("  F       - enable flexible syntax");
+    eputs("  I=sfile - source file");
+    eputs("  L=lfile - listing file");
+    eputs("  N=ident - default module identifier");
+    eputs("  O=ofile - object file");
+    eputs("  S       - disable section stacking");
+    eputs("  T=tfile - external text file");
+    eputs("  W       - exit with error status on warning indications");
+    eputs("  X       - enable implicit external symbols");
 #else
-    fputs("Usage: cal [-f][-l lfile][-n ident][-o ofile][-T dlist][-t tfile]...[-w][-x] sfile ...\n", stderr);
-    fputs("  -f       - enable flexible syntax\n", stderr);
-    fputs("  -l lfile - listing file\n", stderr);
-    fputs("  -o ofile - object file\n", stderr);
-    fputs("  -s       - disable section stacking\n", stderr);
-    fputs("  -T dlist - text file directory list\n", stderr);
-    fputs("  -t tfile - external text file\n", stderr);
-    fputs("  -w       - exit with error status on warning indications\n", stderr);
-    fputs("  -x       - enable implicit external symbols\n", stderr);
-    fputs("  sfile - source file(s)\n", stderr);
+    eputs("Usage: cal [-f][-l lfile][-n ident][-o ofile][-T dlist][-t tfile]...[-w][-x] sfile ...");
+    eputs("  -f       - enable flexible syntax");
+    eputs("  -l lfile - listing file");
+    eputs("  -o ofile - object file");
+    eputs("  -s       - disable section stacking");
+    eputs("  -T dlist - text file directory list");
+    eputs("  -t tfile - external text file");
+    eputs("  -w       - exit with error status on warning indications");
+    eputs("  -x       - enable implicit external symbols");
+    eputs("  sfile - source file(s)");
 #endif
     exit(1);
 }

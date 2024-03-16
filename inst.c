@@ -50,6 +50,7 @@ typedef enum patternNodeType {
 
 typedef struct patternNode {
     PatternNodeType type;
+    char *pattern;               // original pattern when type == NodeType_PatternEnd
     struct patternNode *next;    // link to next node in this sequence
     struct patternNode *sibling; // link to next adjacent sequence
     union {
@@ -264,7 +265,7 @@ static ErrorCode BLOCK(void) {
             section = addSection(currentModule, id, len, SectionType_Mixed, SectionLocation_CM);
         }
         else {
-            fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+            eprintf("Section vanished in pass 2: %.*s", token.details.name.len, token.details.name.ptr);
             exit(1);
         }
     }
@@ -404,7 +405,7 @@ static ErrorCode COMMON(void) {
             section = addSection(currentModule, id, len, SectionType_Common, SectionLocation_CM);
         }
         else {
-            fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+            eprintf("Section vanished in pass 2: %.*s", token.details.name.len, token.details.name.ptr);
             exit(1);
         }
     }
@@ -760,7 +761,7 @@ static ErrorCode IDENT(void) {
     else { // pass == 2
         module = findModule(token.details.name.ptr, token.details.name.len);
         if (module == NULL) {
-            fprintf(stderr, "Module vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+            eprintf("Module vanished in pass 2: %.*s", token.details.name.len, token.details.name.ptr);
             exit(1);
         }
         resetModule(module);
@@ -1723,7 +1724,7 @@ static ErrorCode SECTION(void) {
             section = addSection(currentModule, id, len, type, location);
         }
         else {
-            fprintf(stderr, "Section vanished in pass 2: %.*s\n", token.details.name.len, token.details.name.ptr);
+            eprintf("Section vanished in pass 2: %.*s", token.details.name.len, token.details.name.ptr);
             exit(1);
         }
     }
@@ -4449,11 +4450,13 @@ static void addMacroParam(MacroDefn *defn, MacroParamType type, char *name, int 
 /*
  *  addPattern - add a machine instruction pattern to the collection of patterns
  */
-static void addPattern(char *s, InstructionHandler handler) {
+static void addPattern(char *pattern, InstructionHandler handler) {
     PatternNode *newNode;
     PatternNode *node;
     PatternNode **nodep;
+    char *s;
     
+    s = pattern;
     nodep = &instructionPatterns;
     while (TRUE) {
         newNode = (PatternNode *)allocate(sizeof(PatternNode));
@@ -4461,6 +4464,7 @@ static void addPattern(char *s, InstructionHandler handler) {
         if (*nodep == NULL) {
             *nodep = newNode;
             if (newNode->type == NodeType_PatternEnd) {
+                newNode->pattern = pattern;
                 newNode->value.handler = handler;
                 return;
             }
@@ -4471,7 +4475,7 @@ static void addPattern(char *s, InstructionHandler handler) {
             while (TRUE) {
                 if (isEquivNode(node, newNode)) {
                     if (node->type == NodeType_PatternEnd) {
-                        fputs("Duplicate instruction pattern\n", stderr);
+                        eputs("Duplicate instruction pattern");
                         exit(1);
                     }
                     nodep = &node->next;
@@ -4484,6 +4488,7 @@ static void addPattern(char *s, InstructionHandler handler) {
                 else {
                     node->sibling = newNode;
                     if (newNode->type == NodeType_PatternEnd) {
+                        newNode->pattern = pattern;
                         newNode->value.handler = handler;
                         return;
                     }
@@ -5511,7 +5516,9 @@ static InstructionHandler matchInstruction(bool *didMatchResultField) {
                 if (node == NULL) return NULL;
             }
             *didMatchResultField = TRUE;
-            if (node->type == NodeType_PatternEnd) return node->value.handler;
+            if (node->type == NodeType_PatternEnd) {
+                return node->value.handler;
+            }
             node = node->next;
         }
         else if (*s == ',') {
@@ -5586,7 +5593,7 @@ static ErrorCode numericMicro(int base) {
 }
 
 static void parseError(char *s) {
-    fprintf(stderr, "Unrecognized character in instruction pattern: \"%s\"\n", s);
+    eprintf("Unrecognized character in instruction pattern: \"%s\"", s);
     exit(1);
 }
 

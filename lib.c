@@ -36,7 +36,6 @@
 #include "services.h"
 #if defined(__cos)
 #include <sys/files.h>
-#include <sys/syslog.h>
 #endif
 
 static void addBlock(Module *module, char *id);
@@ -108,10 +107,12 @@ int main(int argc, char *argv[]) {
     char *sp;
     char tempPath[MAX_FILE_PATH_LENGTH+1];
     struct tm *tmp;
+    int year;
 
     clock = time(NULL);
     tmp = localtime(&clock);
-    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_year - 100);
+    year = tmp->tm_year >= 100 ? tmp->tm_year - 100 : tmp->tm_year;
+    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, year);
     sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
     firstSourceFileIdx = parseOptions(argc, argv);
@@ -148,7 +149,7 @@ int main(int argc, char *argv[]) {
         addSuffix(argv[fileIndex], ".obj", sourcePath);
         ds = cosDsOpen(sourcePath);
         if (ds == NULL) {
-            fprintf(stderr, "Failed to open %s\n", sourcePath);
+            eprintf("Failed to open %s", sourcePath);
             exit(1);
         }
         if (isLibrary(ds)) {
@@ -165,7 +166,7 @@ int main(int argc, char *argv[]) {
             || cosDsWriteEOF(outputFile) == -1
             || cosDsWriteEOD(outputFile) == -1
             || cosDsClose(outputFile) == -1) {
-            fprintf(stderr, "Failed to write output file %s\n", tempPath);
+            eprintf("Failed to write output file %s", tempPath);
             unlink(tempPath);
             exit(1);
         }
@@ -178,12 +179,12 @@ int main(int argc, char *argv[]) {
             unlink(outputPath);
             ds = cosDsOpen(tempPath);
             if (ds == NULL) {
-                fprintf(stderr, "Failed to open %s\n", tempPath);
+                eprintf("Failed to open %s", tempPath);
                 exit(1);
             }
             outputFile = cosDsCreate(outputPath);
             if (outputFile == NULL) {
-                fprintf(stderr, "Failed to create %s\n", outputPath);
+                eprintf("Failed to create %s", outputPath);
                 exit(1);
             }
             for (;;) {
@@ -214,7 +215,7 @@ int main(int argc, char *argv[]) {
                 }
             }
             if (cosDsClose(outputFile) == -1) {
-                fprintf(stderr, "Failed to close %s\n", outputPath);
+                eprintf("Failed to close %s", outputPath);
                 exit(1);
             }
             cosDsClose(ds);
@@ -223,7 +224,7 @@ int main(int argc, char *argv[]) {
             unlink(outputPath);
             if (rename(tempPath, outputPath) == -1) {
                 perror(outputPath);
-                fprintf(stderr, "Failed to rename %s to %s\n", tempPath, outputPath);
+                eprintf("Failed to rename %s to %s", tempPath, outputPath);
                 exit(1);
             }
 #endif
@@ -401,7 +402,7 @@ static Module *addModule(char *id) {
             }
         }
         else {
-            fprintf(stderr, "Logic error - duplicate module detected: %s\n", new->id);
+            eprintf("Logic error - duplicate module detected: %s", new->id);
             exit(1);
         }
     }
@@ -425,21 +426,23 @@ static void addSuffix(char *inPath, char *suffix, char *outPath) {
         else if (*ip == '.')
             dp = ip;
         if (op >= limit) {
-            fprintf(stderr, "Path too long: %s\n", inPath);
+            eprintf("Path too long: %s", inPath);
             exit(1);
         }
         *op++ = *ip;
     }
+#if !defined(__cos)
     if (dp == NULL) {
         ip = suffix;
         while (*ip != '\0' && op < limit) {
             *op++ = *ip++;
         }
         if (op >= limit) {
-            fprintf(stderr, "Path too long: %s\n", inPath);
+            eprintf("Path too long: %s", inPath);
             exit(1);
         }
     }
+#endif
     *op = '\0';
 }
 
@@ -463,14 +466,14 @@ static void appendLibrary(Dataset *ods, Dataset *ids, char *argv[], char *source
     while (TRUE) {
         n = cosDsRead(ids, buf, 8);
         if (n == -1) {
-            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            eprintf("Failed to read table header from %s", sourcePath);
             exit(1);
         }
         else if (n == 0) {
             cw = cosDsReadCW(ids);
             if (cosDsIsEOF(cw) || cosDsIsEOD(cw)) return;
             if (ods != NULL && isSkipping == FALSE && writeEOR(ods) == -1) {
-                fputs("Failed to write output file\n", stderr);
+                eputs("Failed to write output file");
                 exit(1);
             }
             continue;
@@ -480,14 +483,14 @@ static void appendLibrary(Dataset *ods, Dataset *ids, char *argv[], char *source
         if (tableType == LDR_TT_DFT) {
             wc = (hdr >> 24) & 0xffffff;
             if (cosDsRead(ids, buf, 16) != 16) {
-                fprintf(stderr, "Failed to read DFT module name from %s\n", sourcePath);
+                eprintf("Failed to read DFT module name from %s", sourcePath);
                 exit(1);
             }
             tableLength = (wc - 3) * 8;
             memset(moduleName, 0, 9);
             memcpy(moduleName, buf + 8, 8);
             if (isOmittedName(moduleName, argv) || findModule(moduleName) != NULL) {
-                fprintf(stderr, "Warning: duplicate module %s ignored in %s\n", moduleName, sourcePath);
+                eprintf("Warning: duplicate module %s ignored in %s", moduleName, sourcePath);
                 isSkipping = TRUE;
             }
             else {
@@ -501,7 +504,7 @@ static void appendLibrary(Dataset *ods, Dataset *ids, char *argv[], char *source
         }
         if (isSkipping) {
             if (skipBytes(ids, tableLength) == -1) {
-                fprintf(stderr, "Failed to skip over %s in %s\n", getTableType(tableType), sourcePath);
+                eprintf("Failed to skip over %s in %s", getTableType(tableType), sourcePath);
                 exit(1);
             }
             continue;
@@ -511,7 +514,7 @@ static void appendLibrary(Dataset *ods, Dataset *ids, char *argv[], char *source
             table = (u8 *)allocate(tableLength);
             n = cosDsRead(ids, table, tableLength);
             if (n != tableLength) {
-                fprintf(stderr, "Failed to read PDT from %s\n", sourcePath);
+                eprintf("Failed to read PDT from %s", sourcePath);
                 exit(1);
             }
             processPDT(module, hdr, table, tableLength);
@@ -553,7 +556,7 @@ static void appendObjectFile(Dataset *ods, Dataset *ids, char *argv[], char *sou
     calculateModuleName(sourcePath, moduleName);
 
     if (isOmittedName(moduleName, argv) || findModule(moduleName) != NULL) {
-        fprintf(stderr, "Warning: duplicate module %s ignored in %s\n", moduleName, sourcePath);
+        eprintf("Warning: duplicate module %s ignored in %s", moduleName, sourcePath);
         return;
     }
 
@@ -566,7 +569,7 @@ static void appendObjectFile(Dataset *ods, Dataset *ids, char *argv[], char *sou
     while (TRUE) {
         n = cosDsRead(ids, buf, 8);
         if (n == -1) {
-            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            eprintf("Failed to read table header from %s", sourcePath);
             exit(1);
         }
         else if (n == 0) {
@@ -587,14 +590,14 @@ static void appendObjectFile(Dataset *ods, Dataset *ids, char *argv[], char *sou
             table = (u8 *)allocate(tableLength);
             n = cosDsRead(ids, table, tableLength);
             if (n != tableLength) {
-                fprintf(stderr, "Failed to read PDT from %s\n", sourcePath);
+                eprintf("Failed to read PDT from %s", sourcePath);
                 exit(1);
             }
             processPDT(module, hdr, table, tableLength);
             free(table);
         }
         else if (skipBytes(ids, tableLength) == -1) {
-            fprintf(stderr, "Failed to skip over %s in %s\n", getTableType(tableType), sourcePath);
+            eprintf("Failed to skip over %s in %s", getTableType(tableType), sourcePath);
             exit(1);
         }
     }
@@ -608,7 +611,7 @@ static void appendObjectFile(Dataset *ods, Dataset *ids, char *argv[], char *sou
     while (TRUE) {
         n = cosDsRead(ids, buf, 8);
         if (n == -1) {
-            fprintf(stderr, "Failed to read table header from %s\n", sourcePath);
+            eprintf("Failed to read table header from %s", sourcePath);
             exit(1);
         }
         else if (n == 0) {
@@ -623,11 +626,11 @@ static void appendObjectFile(Dataset *ods, Dataset *ids, char *argv[], char *sou
             // An object file shouldn't contain any DFT's, so if
             // we find any, ignore them.
             //
-            fprintf(stderr, "Warning: DFT ignored in object file %s\n", sourcePath);
+            eprintf("Warning: DFT ignored in object file %s", sourcePath);
             wc = (hdr >> 24) & 0xffffff;
             tableLength = (wc - 1) * 8;
             if (skipBytes(ids, tableLength) == -1) {
-                fprintf(stderr, "Failed to skip over %s in %s\n", getTableType(tableType), sourcePath);
+                eprintf("Failed to skip over %s in %s", getTableType(tableType), sourcePath);
                 exit(1);
             }
         }
@@ -680,11 +683,11 @@ static int copyBytes(Dataset *ods, Dataset *ids, int count, char *sourcePath) {
     while (count > 0) {
         n = (count > sizeof(buf)) ? sizeof(buf) : count;
         if (cosDsRead(ids, buf, n) != n) {
-            fprintf(stderr, "Failed to read %s\n", sourcePath);
+            eprintf("Failed to read %s", sourcePath);
             return -1;
         }
         if (writeBytes(ods, buf, n) != n) {
-            fputs("Failed to write output file\n", stderr);
+            eputs("Failed to write output file");
             return -1;
         }
         count -= n;
@@ -930,17 +933,17 @@ static int skipBytes(Dataset *ds, int count) {
 
 static void usage(void) {
 #if defined(__cos)
-    syslog("Usage: LIB[,L=lfile][,O=ofile][,R=name[:name...]],sfile...", SYSLOG_USER, 1, 1);
-    syslog("  L=lfile - listing file", SYSLOG_USER, 1, 1);
-    syslog("  O=ofile - output library file", SYSLOG_USER, 1, 1);
-    syslog("  R=name  - name(s) of modules to omit from output library file", SYSLOG_USER, 1, 1);
-    syslog("  sfile   - source object and library file(s)", SYSLOG_USER, 1, 1);
+    eputs("Usage: LIB[,L=lfile][,O=ofile][,R=name[:name...]],sfile...");
+    eputs("  L=lfile - listing file");
+    eputs("  O=ofile - output library file");
+    eputs("  R=name  - name(s) of modules to omit from output library file");
+    eputs("  sfile   - source object and library file(s)");
 #else
-    fputs("Usage: lib [-l lfile][-o ofile][-r name...] sfile...\n", stderr);
-    fputs("  -l lfile - listing file\n", stderr);
-    fputs("  -o ofile - output library file\n", stderr);
-    fputs("  -r name  - name(s) of modules to omit from output library file\n", stderr);
-    fputs("  sfile    - source object and library file(s)\n", stderr);
+    eputs("Usage: lib [-l lfile][-o ofile][-r name...] sfile...");
+    eputs("  -l lfile - listing file");
+    eputs("  -o ofile - output library file");
+    eputs("  -r name  - name(s) of modules to omit from output library file");
+    eputs("  sfile    - source object and library file(s)");
 #endif
     exit(1);
 }
@@ -981,7 +984,7 @@ static int writeDFT(Dataset *ods, Module *module) {
 static int writeEOR(Dataset *ds) {
     if (ds != NULL) {
         if (cosDsWriteEOR(ds) == -1) {
-            fputs("Failed to write EOR to output file\n", stderr);
+            eputs("Failed to write EOR to output file");
             return -1;
         }
     }
@@ -1004,7 +1007,7 @@ static int writeName(char *name, Dataset *ds) {
             }
         }
         if (cosDsWriteWord(ds, word) == -1) {
-            fprintf(stderr, "Failed to write name '%s' to output file\n", name);
+            eprintf("Failed to write name '%s' to output file", name);
             return -1;
         }
     }
@@ -1023,7 +1026,7 @@ static int writeNames(Symbol *symbol, Dataset *ds) {
 static int writeWord(Dataset *ds, u64 word) {
     if (ds != NULL) {
         if (cosDsWriteWord(ds, word) == -1) {
-            fputs("Failed to write word output file\n", stderr);
+            eputs("Failed to write word output file");
             return -1;
         }
     }
@@ -1038,10 +1041,10 @@ static int writeBytes(Dataset *ds, u8 *buf, int len) {
     n = cosDsWrite(ds, buf, len);
     if (n != len) {
         if (n == -1) {
-            fputs("Failed to write output file\n", stderr);
+            eputs("Failed to write output file");
         }
         else {
-            fprintf(stderr, "Truncated write to output file, %d != %d\n", len, n);
+            eprintf("Truncated write to output file, %d != %d", len, n);
         }
     }
     return n;

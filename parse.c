@@ -226,7 +226,7 @@ Token *copyToken(Token *token) {
         // nothing more to copy
         break;
     default:
-        fprintf(stderr, "Invalid token type: %d\n", token->type);
+        eprintf("Invalid token type: %d", token->type);
         break;
     }
     return new;
@@ -279,7 +279,7 @@ bool equalTokens(Token *t1, Token *t2) {
     case TokenType_Error:
         return t1->details.error.code == t2->details.error.code;
     default:
-        fprintf(stderr, "Invalid token type: %d\n", t1->type);
+        eprintf("Invalid token type: %d", t1->type);
         break;
     }
     return FALSE;
@@ -536,7 +536,7 @@ static ErrorCode evaluateSymbol(Token *token) {
                 case SectionType_TaskCom:
                     val.attributes |= SYM_IMMOBILE;
                 default:
-                    fprintf(stderr, "Unknown section type: %d\n", currentSection->type);
+                    eprintf("Unknown section type: %d", currentSection->type);
                     exit(1);
                 }
             }
@@ -1036,7 +1036,7 @@ void freeToken(Token *token) {
             // nothing more to free
             break;
         default:
-            fprintf(stderr, "Invalid token type: %d\n", token->type);
+            eprintf("Invalid token type: %d", token->type);
             break;
         }
         free(token);

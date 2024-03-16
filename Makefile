@@ -49,6 +49,17 @@ CALOBJS = cal.o          \
           services.o     \
           trees.o
 
+DASMHDRS = basetypes.h   \
+          cosdataset.h   \
+          cosldr.h       \
+          ldrconst.h     \
+          ldrtypes.h     \
+          services.h
+
+DASMOBJS = dasm.o        \
+          cosdataset.o   \
+          services.o
+
 LDRHDRS = basetypes.h    \
           cosdataset.h   \
           cosldr.h       \
@@ -77,7 +88,7 @@ LIBOBJS = lib.o          \
           fnv32a.o       \
           services.o
 
-all: cal ldr lib
+all: cal dasm ldr lib
 
 cos:
 	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE)
@@ -85,11 +96,26 @@ cos:
 cal: $(CALOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
+cal.abs: $(CALOBJS)
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) cal
+
+dasm: $(DASMOBJS)
+	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
+
+dasm.abs: $DASMOBJS)
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) dasm
+
 ldr: $(LDROBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
+ldr.abs: $(LDROBJS)
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) ldr
+
 lib: $(LIBOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
+
+lib.abs: $(LDROBJS)
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) lib
 
 clean:
 	rm -f *.o *.abs cal ldr lib

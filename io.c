@@ -28,6 +28,7 @@
 #include "calconst.h"
 #include "calproto.h"
 #include "caltypes.h"
+#include "services.h"
 
 static char *getMacroParamValue(MacroCall *call, char *name);
 
@@ -125,10 +126,21 @@ void readNextLine(void) {
                 break;
             }
             else {
-                fputs("Failed to read source file\n", stderr);
+                eputs("Failed to read source file");
                 exit(1);
             }
         }
+#if defined(__cos)
+        else if (c == 0x1b) {
+            /*
+             * Handle COS blank compression indicator
+             */
+            c = fgetc(sourceFile);
+            if (c == EOF) break;
+            c -= 036; /* blank count is biased by 36 octal */
+            while (c-- > 0 && i < MAX_SOURCE_LINE_LENGTH) sourceLine[i++] = ' ';
+        }
+#endif
         else if (c == '\n') {
             break;
         }

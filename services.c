@@ -22,20 +22,51 @@
 **--------------------------------------------------------------------------
 */
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "services.h"
+#if defined(__cos)
+#include <sys/syslog.h>
+#endif
 
 void *allocate(int size) {
     void *new;
 
     new = malloc((size_t)size);
     if (new == NULL) {
-        fprintf(stderr, "Failed to allocate %d bytes\n", size);
+        eprintf("Failed to allocate %d bytes", size);
         exit(1);
     }
     memset(new, 0, (size_t)size);
     return new;
+}
+
+void eprintf(char *format, ...) {
+    va_list ap;
+#if defined(__cos)
+    char buf[120];
+#endif
+
+    va_start(ap, format);
+#if defined(__cos)
+    vsprintf(buf, format, ap);
+    syslog(buf, SYSLOG_USER, 1, 1);
+#else
+    vfprintf(stderr, format, ap);
+    fputs("\n", stderr);
+#endif
+    va_end(ap);
+}
+
+void eputs(char *s) {
+#if defined(__cos)
+    syslog(s, SYSLOG_USER, 1, 1);
+#else
+    fputs(s, stderr);
+    fputs("\n", stderr);
+#endif
 }
 
 void *reallocate(void *old, int oldSize, int newSize) {
@@ -43,7 +74,7 @@ void *reallocate(void *old, int oldSize, int newSize) {
 
     new = realloc(old, (size_t)newSize);
     if (new == NULL) {
-        fprintf(stderr, "Failed to reallocate %d bytes\n", newSize);
+        eprintf("Failed to reallocate %d bytes", newSize);
         exit(1);
     }
     memset((unsigned char *)new + oldSize, 0, newSize - oldSize);

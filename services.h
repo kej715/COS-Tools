@@ -25,6 +25,8 @@
 */
 
 void *allocate(int size);
+void eprintf(char *format, ...);
+void eputs(char *s);
 void *reallocate(void *old, int oldSize, int newSize);
 
 #endif
