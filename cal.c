@@ -55,11 +55,11 @@ static char *textPath = NULL;
 
 #if defined(__cos)
 #define IS_KEY(s) (*((s) + strlen(s) - 1) == '=')
+#define B_KEY "B="
 #define F_KEY "F"
 #define I_KEY "I="
 #define L_KEY "L="
 #define N_KEY "N="
-#define O_KEY "O="
 #define R_KEY "R="
 #define S_KEY "S"
 #define T_KEY "T="
@@ -129,7 +129,10 @@ int main(int argc, char *argv[], char *envp[]) {
         listSymbolTable();
         writeObjectCode();
         fclose(sourceFile);
-        if (lFile == NULL && listingFile != NULL) fclose(listingFile);
+        if (lFile == NULL && listingFile != NULL) {
+            fclose(listingFile);
+            listingFile = NULL;
+        }
         if (oFile == NULL && objectFile != NULL) {
 #if defined(__cos)
             if (cosDsClose(objectFile) == -1) {
@@ -144,6 +147,7 @@ int main(int argc, char *argv[], char *envp[]) {
                 exit(1);
             }
 #endif
+            objectFile = NULL;
         }
         if (isExtText) {
             listingFile = savedListingFile;
@@ -152,10 +156,10 @@ int main(int argc, char *argv[], char *envp[]) {
         }
     }
     if (lFile != NULL && listingFile != NULL) fclose(listingFile);
-    if (oFile != NULL) {
+    if (oFile != NULL && objectFile != NULL) {
 #if defined(__cos)
         if (cosDsClose(objectFile) == -1) {
-            eputs("Failed to write object file");
+            eputs("Failed to close object file");
             exit(1);
         }
 #else
@@ -194,7 +198,10 @@ static FILE *openExtText(char *fileName) {
             filePath[len] = '/';
             strcpy(filePath + len + 1, fileName);
             fp = fopen(filePath, "r");
-            if (fp != NULL) return fp;
+            if (fp != NULL) {
+                strcpy(sourceFilePath, filePath);
+                return fp;
+            }
         }
         if (*cp == '\0') return NULL;
         cp += 1;
@@ -275,6 +282,8 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
         }
     }
     if (*isExtText) return argi;
+    strcpy(sourceFilePath, filePath);
+
     if (lFile == NULL) {
 #if defined(__cos)
         listingFile = stdout;
@@ -289,7 +298,7 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     }
     if (oFile == NULL) {
 #if defined(__cos)
-        strcpy(filePath, "OBJ");
+        strcpy(filePath, "$BLD");
 #else
         strcpy(dp, ".obj");
 #endif
@@ -367,16 +376,25 @@ static void parseOptions(int argc, char *argv[]) {
             }
             explicitIdent = sp;
         }
+#if defined(__cos)
+        else if (strcmp(argv[i], B_KEY) == 0) {
+#else
         else if (strcmp(argv[i], O_KEY) == 0) {
+#endif
             i += 1;
             if (i >= argc) {
                 usage();
             }
             oFile = argv[i];
-            objectFile = cosDsCreate(oFile);
-            if (objectFile == NULL) {
-                perror(oFile);
-                exit(1);
+            if (strcmp(oFile, "0") != 0) {
+                objectFile = cosDsCreate(oFile);
+                if (objectFile == NULL) {
+                    perror(oFile);
+                    exit(1);
+                }
+            }
+            else {
+                objectFile = NULL;
             }
         }
         else if (strcmp(argv[i], S_KEY) == 0) {
@@ -550,9 +568,9 @@ static void usage(void) {
 static void writeObjectCode(void) {
     Module *module;
 
-    if (objectFile == NULL) return;
-
-    for (module = firstModule; module != NULL; module = module->next) {
-        writeObjectRecord(module, objectFile);
+    if (objectFile != NULL) {
+        for (module = firstModule; module != NULL; module = module->next) {
+            writeObjectRecord(module, objectFile);
+        }
     }
 }

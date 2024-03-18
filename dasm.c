@@ -1,11 +1,11 @@
 /*--------------------------------------------------------------------------
 **
-**  Copyright 2022 Kevin E. Jordan
+**  Copyright 2024 Kevin E. Jordan
 **
-**  Name: ldr.c
+**  Name: dasm.c
 **
 **  Description:
-**      This file is the main module of the COS loader.
+**      This file is the main module of the COS disassembler.
 **
 **  Licensed under the Apache License, Version 2.0 (the "License");
 **  you may not use this file except in compliance with the License.
@@ -112,6 +112,8 @@ int main(int argc, char *argv[]) {
     }
 
     disassemble(ds, start, limit);
+
+    exit(0);
 }
 
 static void disassemble(Dataset *ds, u32 start, u32 limit) {

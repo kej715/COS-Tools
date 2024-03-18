@@ -76,6 +76,7 @@ extern char *resultField;
 extern Section *sectionStack[];
 extern int sectionStackPtr;
 extern FILE *sourceFile;
+extern char sourceFilePath[];
 extern SourceFormatType sourceFormatStack[];
 extern int sourceFormatStackPtr;
 extern char sourceLine[];

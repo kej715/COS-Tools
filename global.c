@@ -73,6 +73,7 @@ char *resultField = NULL;
 Section *sectionStack[BLOCK_STACK_SIZE];
 int sectionStackPtr = 0;
 FILE *sourceFile = NULL;
+char sourceFilePath[MAX_FILE_PATH_LENGTH+5];
 SourceFormatType sourceFormatStack[SOURCE_FORMAT_STACK_SIZE];
 int sourceFormatStackPtr = 0;
 char sourceLine[MAX_SOURCE_LINE_LENGTH+1];

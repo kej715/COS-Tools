@@ -239,6 +239,7 @@ int main(int argc, char *argv[]) {
             eprintf("%d linkage errors detected", errorCount);
         exit(1);
     }
+    exit(0);
 }
 
 static void addBlock(Module *module, Block *block) {

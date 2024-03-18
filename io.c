@@ -126,7 +126,7 @@ void readNextLine(void) {
                 break;
             }
             else {
-                eputs("Failed to read source file");
+                perror(sourceFilePath);
                 exit(1);
             }
         }

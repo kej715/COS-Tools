@@ -162,16 +162,13 @@ int main(int argc, char *argv[]) {
         fileIndex += 1;
     }
     if (outputFile != NULL) {
-        if (cosDsWriteEOR(outputFile) == -1
-            || cosDsWriteEOF(outputFile) == -1
-            || cosDsWriteEOD(outputFile) == -1
-            || cosDsClose(outputFile) == -1) {
+#if defined(__cos)
+        if (cosDsClose(outputFile) == -1) {
             eprintf("Failed to write output file %s", tempPath);
             unlink(tempPath);
             exit(1);
         }
         if (isRewrite) {
-#if defined(__cos)
             u8 buf[512*8];
             int n;
             int rc;
@@ -220,20 +217,31 @@ int main(int argc, char *argv[]) {
             }
             cosDsClose(ds);
             unlink(tempPath);
+        }
 #else
+        if (cosDsWriteEOR(outputFile) == -1
+            || cosDsWriteEOF(outputFile) == -1
+            || cosDsWriteEOD(outputFile) == -1
+            || cosDsClose(outputFile) == -1) {
+            eprintf("Failed to write output file %s", tempPath);
+            unlink(tempPath);
+            exit(1);
+        }
+        if (isRewrite) {
             unlink(outputPath);
             if (rename(tempPath, outputPath) == -1) {
                 perror(outputPath);
                 eprintf("Failed to rename %s to %s", tempPath, outputPath);
                 exit(1);
             }
-#endif
         }
+#endif
     }
     if (listingFile != NULL) {
         printListing(listingFile);
         fclose(listingFile);
     }
+    exit(0);
 }
 
 static void addBlock(Module *module, char *id) {

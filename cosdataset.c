@@ -87,7 +87,7 @@ int cosDsRewind(Dataset *ds) {
 }
 
 int cosDsWrite(Dataset *ds, u8 *buffer, int len) {
-    return write(ds->fd, buffer,len);
+    return write(ds->fd, buffer, len);
 }
 
 int cosDsWriteEOD(Dataset *ds) {
