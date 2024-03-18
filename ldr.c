@@ -104,13 +104,15 @@ static Symbol        *symbolTable = NULL;
 
 #if defined(__cos)
 #define IS_KEY(s) (*((s) + strlen(s) - 1) == '=')
-#define M_KEY "M="
-#define O_KEY "O="
-#define STDOUT "$OUT"
+#define AB_KEY  "AB="
+#define DN_KEY  "DN="
+#define LIB_KEY "LIB="
+#define M_KEY   "M="
+#define STDOUT  "$OUT"
 #else
 #define IS_KEY(s) (*(s) == '-')
-#define M_KEY "-m"
-#define O_KEY "-o"
+#define M_KEY  "-m"
+#define O_KEY  "-o"
 #define STDOUT "-"
 #endif
 
@@ -149,6 +151,23 @@ int main(int argc, char *argv[]) {
         currentModule = NULL;
         fileIndex = firstFileIndex;
         while (fileIndex < argc) {
+            if (IS_KEY(argv[fileIndex])) {
+#if defined(__cos)
+                if (strcmp(argv[fileIndex], AB_KEY) == 0
+                    || strcmp(argv[fileIndex], M_KEY) == 0
+                    || strcmp(argv[fileIndex], "AB") == 0) {
+                    fileIndex += 2;
+                    continue;
+                }
+#else
+                if (strcmp(argv[fileIndex], O_KEY) == 0
+                    || strcmp(argv[fileIndex], M_KEY) == 0) {
+                    fileIndex += 2;
+                    continue;
+                }
+#endif
+                fileIndex += 1;
+            }
             addSuffix(argv[fileIndex], ".obj", sourcePath);
             ds = cosDsOpen(sourcePath);
             if (ds == NULL) {
@@ -206,6 +225,18 @@ int main(int argc, char *argv[]) {
             }
         }
     }
+#if defined(__cos)
+    if (oFile != NULL) {
+        ds = cosDsCreate(oFile);
+        if (ds == NULL) {
+            eprintf("Failed to create %s", oFile);
+            exit(1);
+        }
+        status = writeExecutable(ds);
+        cosDsClose(ds);
+        if (status == -1) unlink(oFile);
+    }
+#else
     if (oFile != NULL) {
         addSuffix(oFile, ".abs", objectPath);
     }
@@ -228,6 +259,7 @@ int main(int argc, char *argv[]) {
     status = writeExecutable(ds);
     cosDsClose(ds);
     if (status == -1) unlink(objectPath);
+#endif
     if (loadMap != NULL) {
         printLoadMap();
         fclose(loadMap);
@@ -840,7 +872,7 @@ static int parseOptions(int argc, char *argv[]) {
     int i;
     int firstSrcIndex;
 
-    firstSrcIndex = argc;
+    firstSrcIndex = -1;
     i = 1;
     while (i < argc) {
         if (strcmp(argv[i], M_KEY) == 0) {
@@ -860,29 +892,39 @@ static int parseOptions(int argc, char *argv[]) {
                 }
             }
         }
+#if defined(__cos)
+        else if (strcmp(argv[i], DN_KEY) == 0
+                 || strcmp(argv[i], LIB_KEY) == 0) {
+            i += 1;
+            if (i >= argc) {
+                usage();
+            }
+            if (firstSrcIndex < 0) firstSrcIndex = i;
+        }
+        else if (strcmp(argv[i], AB_KEY) == 0) {
+#else
         else if (strcmp(argv[i], O_KEY) == 0) {
+#endif
             i += 1;
             if (i >= argc) {
                 usage();
             }
             oFile = argv[i];
         }
+#if defined(__cos)
+        else if (strcmp(argv[i], "AB") == 0) {
+            oFile = "$ABD";
+        }
+#endif
         else if (IS_KEY(argv[i])) {
             usage();
         }
         else {
-            firstSrcIndex = i++;
-            break;
+            if (firstSrcIndex < 0) firstSrcIndex = i;
         }
         i += 1;
     }
-    while (i < argc) {
-        if (IS_KEY(argv[i])) {
-            usage();
-        }
-        i += 1;
-    }
-    if (firstSrcIndex >= argc) {
+    if (firstSrcIndex < 0) {
         usage();
     }
     return firstSrcIndex;
