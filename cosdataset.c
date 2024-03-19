@@ -320,9 +320,11 @@ int cosDsWrite(Dataset *ds, u8 *buffer, int len) {
         len -= residue;
         residue = COS_BLOCK_SIZE - 8;
     }
-    memcpy(ds->buffer + ds->cursor, buffer, len);
-    ds->cursor += len;
-    written += len;
+    if (len > 0) {
+        memcpy(ds->buffer + ds->cursor, buffer, len);
+        ds->cursor += len;
+        written += len;
+    }
     return written;
 }
 
