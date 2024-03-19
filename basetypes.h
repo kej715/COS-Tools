@@ -52,7 +52,8 @@
         typedef unsigned int u32;
         typedef unsigned long int u64;
     #elif defined(__i386) || defined(__i386__) || defined(__powerpc__) || defined(__ppc__) \
-        || defined(__sparc__) || defined(__hppa__) || defined(__arm__)
+        || defined(__sparc__) || defined(__hppa__) || defined(__arm__) \
+        || defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_8__) || defined(__ARM_ARCH_8A)
         /*
         **  32-bit systems
         */
