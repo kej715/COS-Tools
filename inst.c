@@ -2105,7 +2105,7 @@ static ErrorCode Ai__X(void) {
         }
     }
     else {
-        emit_gh_i_jk(currentSection, 031, i, 0);
+        emit_gh_i_jkm(currentSection, 020, i, &zeroIntVal);
         err = Err_OperandField;
     }
     return err;
@@ -3308,7 +3308,7 @@ static ErrorCode Si__X(void) {
         emit_gh_i_jk(currentSection, 071, i, 030);
     }
     else {
-        emit_gh_i_jk(currentSection, 043, i, 0);
+        emit_gh_i_jkm(currentSection, 040, i, &zeroIntVal);
         err = Err_OperandField;
     }
     return err;

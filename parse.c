@@ -327,7 +327,7 @@ ErrorCode evaluateExpression(Token *expression, Value *value) {
         }
     }
     else if (err == Err_Undefined) {
-        value->attributes = SYM_UNDEFINED;
+        value->attributes |= SYM_UNDEFINED;
         value->section = NULL;
         value->value.intValue = 0;
     }
