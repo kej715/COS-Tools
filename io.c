@@ -159,7 +159,6 @@ void readNextLine(void) {
     if (isFlexibleSyntax && sourceLine[0] != '*' && sourceLine[0] != ' ' && sourceLine[0] != '\0') {
         char *cp;
         char *dp;
-        char lineBuf[MAX_SOURCE_LINE_LENGTH*2+1];
         char *labelEnd;
         long val;
 
@@ -175,18 +174,10 @@ void readNextLine(void) {
                 val = strtol(sourceLine, NULL, 10);
                 localSymbolCtrs[val] += 1;
                 sprintf(sourceLine, "@%ld$%d = *", val, localSymbolCtrs[val]);
-                return;
             }
             else {
-                strcpy(lineBuf, sourceLine);
+                strcpy(labelEnd, " = *");
             }
-            readNextLine();
-            dp = lineBuf+strlen(lineBuf);
-            cp = sourceLine;
-            while (*cp != '\0') *dp++ = *cp++;
-            *dp = '\0';
-            if ((dp - lineBuf) > MAX_SOURCE_LINE_LENGTH) lineBuf[MAX_SOURCE_LINE_LENGTH] = '\0';
-            strcpy(sourceLine, lineBuf);
         }
         else {
             for (i = lineEnd; i > 0; i--) {
