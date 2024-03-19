@@ -121,7 +121,7 @@ clean:
 	rm -f *.o *.abs cal ldr lib
 
 install: cal ldr lib
-	install -b -g wheel -o root -m 755 cal ldr lib $(PREFIX)/bin
+	install -b -o root -m 755 cal ldr lib $(PREFIX)/bin
 
 cal.o:  cal.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
