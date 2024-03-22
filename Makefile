@@ -120,8 +120,8 @@ lib.abs: $(LDROBJS)
 clean:
 	rm -f *.o *.abs cal ldr lib
 
-install: cal ldr lib
-	install -b -o root -m 755 cal ldr lib $(PREFIX)/bin
+install: cal dasm ldr lib
+	install -b -o root -m 755 cal dasm ldr lib $(PREFIX)/bin
 
 cal.o:  cal.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
