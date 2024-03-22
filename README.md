@@ -4,7 +4,23 @@ This repository provides tools for creating software that will execute on a Cray
 supercomputer running the COS operating system. In particular, these tools can be used
 to create programs that will run on Andras Tantos' Cray supercomputer simulator,
 [cray-sim](https://github.com/andrastantos/cray-sim), under the COS 1.17 operating system
-provided in Andras' repository. Tools provided by this repo currently include:
+provided in Andras' repository.
+
+- [Tools](#tools)
+- &nbsp;&nbsp;[cal](#cal)
+- &nbsp;&nbsp;[dasm](#dasm)
+- &nbsp;&nbsp;[ldr](#ldr)
+- &nbsp;&nbsp;[lib](#lib)
+- [Running on Cray X-MP](#running)
+- [Going Native with the Tools](#native)
+- &nbsp;&nbsp;[CAL](#cal-ntv)
+- &nbsp;&nbsp;[DASM](#dasm-ntv)
+- &nbsp;&nbsp;[LDR](#ldr-ntv)
+- &nbsp;&nbsp;[LIB](#lib-ntv)
+
+## <a id="tools"></a> Supported Tools
+
+Tools provided by this repo currently include:
 
 - __cal__. A cross-assembler supporting [Cray Assembly Language v2](http://www.bitsavers.org/pdf/cray/CAL/SR-2003_CAL_Assembler_Version_2_Feb86.pdf).
 - __dasm__. A disassembler able to disassemble executables produced by __ldr__.
@@ -27,7 +43,7 @@ sudo make install
 By default, the tools are installed in the directory `/usr/local/bin`. Edit the `Makefile` if
 you want to install them elsewhere.
 
-## cal
+### <a id="cal"></a> cal
 
 __cal__ is a cross-assembler for the Cray Assembly Language. It accepts source programs
 complying with the Cray Assemble Language as defined in [Cray Assembler Version 2 Reference
@@ -66,7 +82,7 @@ This would cross-assemble a source file named `hello.cal` and produce an object 
 override these default names based upon the source file name. Additionally, if you specify
 `-l 0`, no listing file will be produced.
 
-## dasm
+### <a id="dasm"></a> dasm
 
 __dasm__ is a disassembler. It accepts an absolute executable produced by __ldr__ and
 produces a disassembly listing revealing the Cray X-MP machine instructions contained in
@@ -79,7 +95,7 @@ dasm path [start] [limit]
   limit - parcel address at which to end disassembly (default: end of executable
 ```
 
-## ldr
+### <a id="ldr"></a> ldr
 
 __ldr__ is a linking loader for the COS operating system and Cray X-MP computer system. It
 accepts object files produced by the __cal__ cross-assembler and libraries produced by the
@@ -104,7 +120,7 @@ _syslib.lib_ and produce an absolute executable named _hello.abs_. It would also
 a file named _hello.map_ containing a load map providing details about the linking
 operation.
 
-## lib
+### <a id="lib"></a> lib
 
 __lib__ is an object library manager for collections of relocatable object modules produced
 by __cal__. The synopsis of the __lib__ command is:
@@ -397,4 +413,175 @@ using the LIST command:
   20:02:35.2735       0.0222    ABORT         - P=00001417B   TASK-ID=0001
   20:02:35.2755       0.0222    ABORT         - BASE=00775000 LIMIT=01153000 CPU-NUMBER=00
   20:02:35.2774       0.0222    ABORT         - JOB STEP ABORTED.
+```
+## <a id="native"></a> Going Native with the Tools
+
+[This fork of Amsterdam Compiler Kit (ACK)](https://github.com/kej715/ack) supports the Cray
+X-MP supercomputer and the COS operating system platform. It provides cross-compilers that
+produce executables for the Cray X-MP and COS. Currently, this fork of the ACK can
+cross-compile programs written in the following languages:
+
+- __BASIC__
+- __C__
+- __Pascal__
+
+If you clone this repository and build and install it, you can use it to cross-compile
+the COS Tools (i.e., _cal_, _dasm_, _ldr_, and _lib_). This will produce an assembler,
+disassembler, linking loader, and librarian that will run natively on the Cray X-MP and COS.
+
+To build the tools to run natively:
+
+1. Clone the fork of the ACK repository, build, and install it:
+
+    ```
+    git clone https://github.com/kej715/ack.git
+    cd ack
+    ./cray-build.sh
+    sudo ./cray-build.sh install
+    ```
+2. Execute the following commands from the COS Tools repository:
+
+    ```
+    make clean
+    make cos
+    ```
+
+`make cos` will produce four native executables for the Cray X-MP and COS:
+
+- __cal.abs__
+- __dasm.abs__
+- __ldr.abs__
+- __lib.abs__
+
+These can be uploaded to a Control Data computer running NOS 2.8.7 (e.g., using FTP
+in binary mode as described earlier), and then the _Cray Station_ interface can be used to
+copy them to the Cray X-MP and saved as permanent files there. The following NOS CCL procedure
+will accomplish this:
+
+```
+.PROC,SAVE*I,F=(*F,*N=CRAYBIN).
+.IF,FILE(F,AS),LOCAL.
+  REWIND,F.
+.ELSE,LOCAL.
+  GET,F.
+.ENDIF,LOCAL.
+COPYBF,F,ZZZCBIN.
+REPLACE,ZZZCBIN=F.
+CSUBMIT,CRAYJOB,TO.
+REVERT,NOLIST.
+.DATA,CRAYJOB.
+JOB,JN=CRAYRUN.
+ACCOUNT,AC=CRAY,APW=XYZZY,UPW=QUASAR.
+ECHO,ON=ALL.
+OPTION,STAT=ON.
+FETCH,DN=F,MF=FE,DF=TR,^
+TEXT='USER,GUEST,GUEST.GET,F.CTASK.'.
+SAVE,DN=F,EXO=ON.
+```
+
+Assuming that this procedure is added as a record to the file named CRAY, created above,
+it can be executed as follows to copy an executable (e.g., CAL) to the Cray X-MP and save it
+as an executable permanent file:
+
+```
+BEGIN,SAVE,CRAY,CAL.
+```
+
+A batch job submitted to the Cray X-MP could then use the ACCESS command to access the
+executable and run it, e.g., using commands that look like:
+
+```
+ACCESS,DN=CAL.
+CAL,I=SOURCE.
+```
+
+Note that when the tools are built for native execution, the syntax of the command line
+arguments they accept is different than the syntax they accept when they are built as
+cross-tools. The syntax they accept when running natively conforms to requirements of the
+COS operating system, and it also aligns (although not 100%) with documentation about the
+original native tools. Details are provided, below:
+
+### <a id="cal-ntv"></a> CAL
+
+The synopsis of the __CAL__ command when built for running natively is:
+
+```
+CAL[,B=ofile][,F][,I=sfile][,L=lfile][,N=ident][,T=tfile]...[,W][,X].
+  B=ofile - object file
+  F       - enable flexible syntax
+  I=sfile - source file
+  L=lfile - listing file
+  N=ident - default module identifier
+  S       - disable section stacking
+  T=tfile - external text file
+  W       - exit with error status on warning indications
+  X       - enable implicit external symbols
+```
+
+A typical usage of the __CAL__ command looks like:
+
+```
+CAL,I=HELLO
+```
+
+This would assemble a local source file named `HELLO` and produce an object file named
+`$BLD`. By default, an assembler listing will be written to `$OUT`. You can use the `B=` and
+`L=` arguments to override these defaults. Additionally, if you specify `L=0`, no listing file will be produced, and if you specify `B=0`, no object file will be produced.
+
+### <a id="dasm-ntv"></a> DASM
+
+The synopsis of the __DASM__ command when built for running natively is:
+
+```
+DASM,file[,start][,limit].
+  file  - COS executable file
+  start - parcel address at which to start disassembly (default: 0200a)
+  limit - parcel address at which to end disassembly (default: end of executable
+```
+
+### <a id="ldr-ntv"></a> LDR
+
+The synopsis of the __LDR__ command when built for running natively is:
+
+```
+LDR[,AB[=ofile]][,DN=rfile[:rfile...]][,LIB=lfile[:lfile...]][,M=mfile].
+  AB=ofile  - output object file
+  DN=rfile  - relocatable object file
+  LIB=lfile - library file
+  M=mfile   - load map file
+```
+
+A typical usage of the __LDR__ command looks like:
+
+```
+LDR,AB,DN=HELLO,LIB=SYSLIB,M=$OUT.
+```
+
+This would link a relocatable object module named _HELLO_ with a library named
+_SYSLIB_ and produce an absolute executable named _$ABD_ (default name of absolute
+executable). It would also write a loadmap to $OUT.
+
+### <a id="lib-ntv"></a> LIB
+
+The synopsis of the __LIB__ command when built for running natively is:
+
+```
+LIB[,L=lfile][,O=ofile][,R=name[:name...]],sfile...
+  L=lfile - listing file
+  O=ofile - output library file
+  R=name  - name(s) of modules to omit from output library file
+  sfile   - source object and library file(s)
+```
+
+A typical usage of the __LIB__ command looks like:
+
+```
+LIB,L=$OUT,O=MATHLIB,EXP,LOG2,SQRT.
+```
+
+If the `O=` option is not specified, no output library file is produced. Thus, to list the
+contents of a library, execute the __LIB__ command as in:
+
+```
+LIB,L=$OUT,MATHLIB.
 ```
