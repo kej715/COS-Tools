@@ -540,12 +540,12 @@ static void timeInit(void) {
 
 static void usage(void) {
 #if defined(__cos)
-    eputs("Usage: CAL[,F][,I=sfile][,L=lfile][,N=ident][,O=ofile][,T=tfile]...[,W][,X]");
+    eputs("Usage: CAL[,B=ofile][,F][,I=sfile][,L=lfile][,N=ident][,T=tfile]...[,W][,X]");
+    eputs("  B=ofile - object file");
     eputs("  F       - enable flexible syntax");
     eputs("  I=sfile - source file");
     eputs("  L=lfile - listing file");
     eputs("  N=ident - default module identifier");
-    eputs("  O=ofile - object file");
     eputs("  S       - disable section stacking");
     eputs("  T=tfile - external text file");
     eputs("  W       - exit with error status on warning indications");
