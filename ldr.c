@@ -1521,10 +1521,11 @@ static int skipBytes(Dataset *ds, int count) {
 
 static void usage(void) {
 #if defined(__cos)
-    eputs("Usage: LDR[,M=mfile][,O=ofile],sfile...");
-    eputs("  M=mfile - load map file");
-    eputs("  O=ofile - output object file");
-    eputs("  sfile   - source file(s)");
+    eputs("Usage: LDR[,AB[=ofile]][,DN=rfile[:rfile...]][,LIB=lfile[:lfile...]][,M=mfile].");
+    eputs("  AB=ofile  - output object file (default is $ABD)");
+    eputs("  DN=rfile  - relocatable object file");
+    eputs("  LIB=lfile - library file");
+    eputs("  M=mfile   - load map file");
 #else
     eputs("Usage: ldr [-m mfile][-o ofile] sfile...");
     eputs("  -m mfile - load map file");

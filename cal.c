@@ -540,7 +540,7 @@ static void timeInit(void) {
 
 static void usage(void) {
 #if defined(__cos)
-    eputs("Usage: CAL[,B=ofile][,F][,I=sfile][,L=lfile][,N=ident][,T=tfile]...[,W][,X]");
+    eputs("Usage: CAL[,B=ofile][,F][,I=sfile][,L=lfile][,N=ident][,T=tfile]...[,W][,X].");
     eputs("  B=ofile - object file");
     eputs("  F       - enable flexible syntax");
     eputs("  I=sfile - source file");
