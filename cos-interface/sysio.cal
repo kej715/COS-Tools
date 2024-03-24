@@ -160,6 +160,10 @@ $RWDR    SUBR
 $RWDR    RETURN
 
 $RWD     SUBR
+         A0        A1
+         JAP       $RWD1          ; if not negative offset
+         A5        JCDSP,
+         A1        A5-A1
 $RWD1    S0        DPBIO,A1
          JSM       $RWD7          ; if buffered I/O busy
          S2        S2<(D'63-D'9)  ; position function code
@@ -247,6 +251,10 @@ $WWDR    SUBR
 $WWDR    RETURN
 
 $WWD     SUBR
+         A0        A1
+         JAP       $WWD1          ; if not negative offset
+         A5        JCDSP,
+         A1        A5-A1
 $WWD1    S0        DPBIO,A1
          JSM       $WWD4          ; if buffered I/O busy
          S2        S2<(D'63-D'15) ; position unused bit count
