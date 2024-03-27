@@ -3,6 +3,8 @@
          IDENT     DMP
          COMMENT   'DMP - Dump block of memory to log'
 
+         EXT       $I2X@32
+
 DMP      SECTION   MIXED
 
 **
@@ -34,56 +36,6 @@ $DMP2    =         *
 $DMP     RETURN
 
 $DMPA    BSSZ      3
-
-**
-*  $I2X@32 - Convert 32-bit value to 8 hexadecimal digits
-*
-*  Entry:
-*    (S1) 32-bit value
-*
-*  Exit:
-*    (S7) 8 hexadecimal digits
-*
-*  Uses:
-*    A2, A3, A4
-*    S2, S3
-*
-         ENTRY     $I2X@32
-$I2X@32  A2        D'32           ; initial nibble shift count
-         A3        4              ; shift count decrement
-         S2        X'0F
-         S7        0              ; initialize converted word
-$I2X@321 S3        S1
-         A2        A2-A3
-         A0        A2
-         JAZ       $I2X@322       ; if shift count is 0 (last nibble)
-         S3        S3>A2          ; position nibble
-$I2X@322 S3        S3&S2
-         A4        S3
-         S3        HEX,A4         ; fetch digit
-         S7        S7<D'8         ; merge into word
-         S7        S7!S3
-         A0        A2
-         JAN       $I2X@321       ; if not done
-         J         B00
-
-HEX      BSS       0
-         CON       '0'R
-         CON       '1'R
-         CON       '2'R
-         CON       '3'R
-         CON       '4'R
-         CON       '5'R
-         CON       '6'R
-         CON       '7'R
-         CON       '8'R
-         CON       '9'R
-         CON       'A'R
-         CON       'B'R
-         CON       'C'R
-         CON       'D'R
-         CON       'E'R
-         CON       'F'R
 
          SECTION   *
 

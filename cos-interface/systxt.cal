@@ -224,12 +224,6 @@ DPBWA    =         O'007          ; Word address of user data area (bits 40-63)
 **
 *  Command line argument parsing definitions
 * 
-ARGKEY   =         0              ; Keyword of parameter
-ARGREQ   =         1              ; 1 if required parameter, 0 if optional
-ARGDFL   =         2              ; Default value
-ARGVAL   =         3              ; Value of parameter
-ARGTEL   =         ARGVAL+1       ; Argument table entry length
-
 ARGCOLON =         O'03           ; Colon delimiter
 ARGEQUAL =         O'07           ; Equal sign delimiter
 ARGCOMMA =         O'17           ; Comma delimiter

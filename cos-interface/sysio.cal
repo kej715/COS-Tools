@@ -3,119 +3,7 @@
          IDENT     SYSIO
          COMMENT   'SYSIO - System I/O utility functions'
 
-**
-*  $PARGS - Parse command line arguments
-*
-*  Entry:
-*    (A1) Argument parsing table address
-*
-KEY      SET       1
-COMMA    SET       2
-EQUAL    SET       3
-STOP     SET       4
-JCAWRD   SET       5
-
 SYSIO    SECTION   MIXED
-
-         ENTRY     $PARGS
-$PARGS   SUBR
-         S.COMMA   ARGCOMMA
-         S.EQUAL   ARGEQUAL
-         S.STOP    ARGSTOP
-         A2        JCCPR          ; point to first word of command args
-         A3        ARGTEL         ; set argument table entry length
-$PARGS1  S.JCAWRD  ,A2            ; next word from job comm area
-         A2        A2+1
-         S6        <8
-         S.JCAWRD  S.JCAWRD&S6
-$PARGS2  S0        S.JCAWRD\S.STOP
-         JSZ       $PARGS10       ; if end of command line
-         S0        S.JCAWRD\S.COMMA
-         JSN       $PARGS1        ; if not comma
-         S.KEY     ,A2            ; next word from job comm area
-         S6        S.KEY&S6
-         S7        O'20
-         S0        S6-S7
-         JSP       $PARGS3        ; if not delimiter
-         S0        S6
-         JSN       $PARGS1        ; if delimiter
-$PARGS3  A2        A2+1
-*
-*        Find keyword in argument parsing table
-*
-         A4        A1
-$PARGS4  S6        ,A4            ; keyword from next table entry
-         S0        S.KEY\S6
-         JSZ       $PARGS5        ; if keyword matches
-         S0        S6
-         JSZ       $PARGS9        ; if end of table, unrecognized keyword
-         A4        A4+A3          ; advance to next table entry
-         J         $PARGS4
-
-$PARGS5  S.JCAWRD  ,A2            ; next word from job comm area
-         A2        A2+1
-         S6        <8
-         S.JCAWRD  S.JCAWRD&S6
-         S0        S.JCAWRD\S.EQUAL
-         JSZ       $PARGS7        ; if equal sign specified
-*
-*        Keyword match and no value specified, so set default value
-*
-$PARGS6  S7        ARGDFL,A4
-         ARGVAL,A4 S7
-         J         $PARGS2
-*
-*        Equal sign specified, look for value
-*
-$PARGS7  S.JCAWRD  ,A2            ; next word from job comm area
-         S6        S.JCAWRD&S6
-         S7        O'20
-         S0        S6-S7
-         JSP       $PARGS8        ; if not delimiter
-         S0        S6
-         JSN       $PARGS6        ; if delimiter
-$PARGS8  ARGVAL,A4 S.JCAWRD       ; store parameter value
-         A2        A2+1
-         J         $PARGS1        ; process next command line argument
-*
-*        Unrecognized keyword detected
-*
-$PARGS9  $PARGSB,  S.KEY
-         MESSAGE   $PARGSA,US
-         ABORT
-*
-*        End of command line. Check for required arguments that
-*        were not specified.
-*
-$PARGS10 A4        A1
-
-$PARGS11 S0        ,A4
-         JSZ       $PARGS14       ; if end of table
-         S0        ARGVAL,A4
-         JSZ       $PARGS12       ; if no value specified
-         A4        A4+A3
-         J         $PARGS11
-
-$PARGS12 S0        ARGREQ,A4
-         JSN       $PARGS13       ; if value required
-         S1        ARGDFL,A4      ; set default value
-         ARGVAL,A4 S1
-         A4        A4+A3
-         J         $PARGS11
-
-$PARGS13 S1        ARGKEY,A4
-         $PARGSD,  S1
-         MESSAGE   $PARGSC,US
-         ABORT
-
-$PARGS14 =         *
-$PARGS   RETURN
-
-$PARGSA  DATA      'Unrecognized parameter:'
-$PARGSB  BSSZ      2
-
-$PARGSC  DATA      'Required parameter unspecified:'
-$PARGSD  BSSZ      2
 
 **
 *  $RWDP/$RWDR - Read Words Partial/Record
@@ -315,7 +203,7 @@ $WEOD    RETURN
 *           = 0 No errors encountered.
 *           = 1 Unrecovered data error encountered.
 *
-*  Uses: S2
+*  Uses: A2, S2
 *
          ENTRY     $WEOF
 $WEOF    SUBR
@@ -324,6 +212,10 @@ $WEOF    SUBR
 $WEOF    RETURN
 
 $WEFD    SUBR
+         A0        A1
+         JAP       $WEFD1         ; if not negative offset
+         A2        JCDSP,
+         A1        A2-A1
 $WEFD1   S0        DPBIO,A1
          JSM       $WEFD4         ; if buffered I/O busy
          S2        S2<(D'63-D'9)  ; position and store function code
@@ -344,8 +236,6 @@ $WEFD    RETURN
 
 $WEFD4   RECALL    A1
          J         $WEFD1
-
-$REWD    =         *              ; Rewind
 
          SECTION   *
 

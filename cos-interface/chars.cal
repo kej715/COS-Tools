@@ -13,6 +13,9 @@ CHARS    SECTION   MIXED
 *    (A2) address of buffer for packed characters
 *    (A3) number of characters to pack
 *
+*  Exit:
+*    (A2) address of last packed word stored
+*
 *  Uses:
 *    A4, A5
 *    S1, S7
@@ -68,8 +71,9 @@ $UNP1    S1        ,A1            ; fetch next word of packed characters
 
 $UNP2    A0        A3
          JAZ       $UNP3          ; if done
-         S1        S1>A4          ; unpack next character
-         S7        S1&S2
+         S7        S1
+         S7        S7>A4          ; unpack next character
+         S7        S7&S2
          ,A2       S7
          A2        A2+1           ; advance destination address
          A3        A3-1           ; decrement character count
