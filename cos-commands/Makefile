@@ -24,15 +24,24 @@
 BINDIR = /usr/local/bin
 COSDIR = ../cos-interface
 
-OBJS =	\
-	copyd.obj
-
-all:	copyd.abs
+all:	copyd.abs copyf.abs copyr.abs
 
 copyd.abs: copyd.obj
 	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
 
 copyd.obj: copyd.cal
+	$(BINDIR)/cal -t $(COSDIR)/systxt $<
+
+copyf.abs: copyf.obj
+	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
+
+copyf.obj: copyf.cal
+	$(BINDIR)/cal -t $(COSDIR)/systxt $<
+
+copyr.abs: copyr.obj
+	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
+
+copyr.obj: copyr.cal
 	$(BINDIR)/cal -t $(COSDIR)/systxt $<
 
 clean:

@@ -19,41 +19,40 @@ OODN     DATA      '$OUT'L
 
          SECTION   *
 
-TEXT     SECTION   CODE
+COPYD    SECTION   MIXED
 
 COPYD    =         *
-         A1        ARGV           ; parse command line arguments
-         R         $PARGS
+         R         PARGS          ; parse command line arguments
          S1        ARGI,          ; set input dataset name
          IODN,     S1
          S1        ARGO,          ; set output dataset name
          OODN,     S1
-         OPEN      IODN,I         ; open input file
-         JSN       COP7           ; if open failed
-         OPEN      OODN,O         ; open output file
-         JSN       COP8           ; if open failed
          S1        ARGS,          ; convert S value to binary
          R         $D2I@24
          S1        132
          S0        S1-S7
          JSM       COP9           ; if invalid argument
          SHIFT,    S7
-         S0        S7
+         OPEN      IODN,I         ; open input file
+         JSN       COP7           ; if open failed
+         OPEN      OODN,O         ; open output file
+         JSN       COP8           ; if open failed
+         S0        SHIFT,
          JSN       COP10          ; if shifting text file
 
-COP1     A1        IODN,
+COP1     A1        IODN+1,
          READP     A1,UDA,UDASZ
          JSZ       COP3           ; if EOF, EOD, null record, or error
          JSM       COP2           ; if EOR
          A3        A4-A2          ; number of words read
-         A1        OODN,
+         A1        OODN+1,
          WRITEP    A1,UDA,A3
          S0        S1
          JSZ       COP1           ; if no error
          J         COP6
 
 COP2     A3        A4-A2          ; number of words read
-         A1        OODN,
+         A1        OODN+1,
          WRITE     A1,UDA,A3,S6
          S0        S1
          JSN       COP6           ; if error
@@ -70,20 +69,18 @@ COP3     S0        S1
          S1        S1&S2
          S0        S2-S1
          JSZ       COP4           ; if EOD
-         A1        OODN,
+         A1        OODN+1,
          WRITEF    A1
          S0        S1
          JSN       COP6           ; if error
          A1        FCOUNT,        ; increment count of files
          A1        A1+1
          FCOUNT,   A1
+         S0        SHIFT,
+         JSN       COP10          ; if shifting text file
          J         COP1
 
-COP4     A1        OODN,
-         WRITED    A1
-         S0        S1
-         JSN       COP6           ; if error
-         A1        RCOUNT,
+COP4     A1        RCOUNT,
          S7        =' ',
          R         $I2D@24
          COPB,     S7
@@ -119,7 +116,7 @@ COP9     MESSAGE   COPF,US
 *    A3 : number of words read
 *    S6 : unused bit count
 *
-COP10    A1        IODN,
+COP10    A1        IODN+1,
          READ      A1,UDA,UDASZ
          JSZ       COP3           ; if EOF, EOD, null record, or error
          JSM       COP11          ; if EOR
@@ -164,16 +161,17 @@ COP14    A1        UDA            ; unpack record to line buffer
          R         $PACK
          S1        CHARS,         ; calculate number of words in packed record
          S2        7
-         S1        S1+S7
+         S1        S1+S2
          S1        S1>3
          A3        S1             ; number of words to write
          S6        CHARS,         ; calculate number of unused bytes in last word
          S7        <3
          S6        S6&S7
-         S7        8
-         S6        S7-S6
+         S5        8
+         S6        S5-S6
+         S6        S6&S7
          S6        S6<3           ; number of unused bits
-         A1        OODN,
+         A1        OODN+1,
          WRITE     A1,UDA,A3,S6
          S0        S1
          JSN       COP6           ; if error
@@ -183,6 +181,69 @@ COP14    A1        UDA            ; unpack record to line buffer
          S1        ' 'R           ; replace page eject character
          LBUF,     S1
          J         COP10
+
+**
+*  PARGS - Parse command line arguments
+*
+
+PARGS    SUBR
+         R         $PARGS
+
+PAR1     A1        A1+1           ; point to next command line token
+         A2        A2-1
+         A0        A2
+         JAZ       PAR6           ; if all supplied tokens processed
+         A3        ,A1            ; fetch next token
+         S1        ,A3
+         S2        ='I='L,
+         S0        S1\S2
+         JSN       PAR2           ; if not 'I=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR5           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGI,     S1
+         J         PAR1
+
+PAR2     S2        ='O='L,
+         S0        S1\S2
+         JSN       PAR3           ; if not 'O=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR5           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGO,     S1
+         J         PAR1
+
+PAR3     S2        ='S='L,
+         S0        S1\S2
+         JSN       PAR4           ; if not 'S=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR5           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGS,     S1
+         J         PAR1
+
+PAR4     S2        ='S'L,
+         S0        S1\S2
+         JSN       PAR5           ; if not 'S' keyword
+         S1        ='1'L,
+         ARGS,     S1
+         J         PAR1
+
+PAR5     MESSAGE   COPF,US
+         ABORT
+
+PAR6     =         *
+
+PARGS    RETURN
 
          SECTION   *
 
@@ -198,16 +259,12 @@ COPD     DATA      'Failed to open'
 COPE     DATA      0
          CON       0
 
-COPF     DATA      'Invalid argument'Z
+COPF     DATA      'Invalid command line argument'Z
          CON       0
 
-ARGV     DATA      'I'L,0,'IN$'L
-ARGI     DATA      0
-         DATA      'O'L,0,'OUT$'L
-ARGO     DATA      0
-         DATA      'S'L,0,'0'L
-ARGS     DATA      0
-         CON       0
+ARGI     DATA      '$IN'L
+ARGO     DATA      '$OUT'L
+ARGS     DATA      '0'L
 
 CHARS    CON       0
 SHIFT    CON       0
