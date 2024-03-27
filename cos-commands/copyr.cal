@@ -1,0 +1,289 @@
+         TITLE     'COPYR'
+         SUBTITLE  'Copy Blocked Records'
+         IDENT     COPYR
+         COMMENT   'COPYR - Copy Blocked Records'
+         ENTRY     COPYR
+         EXT       $D2I@24,$I2D@24,$PACK,$PARGS,$UNPACK
+         START     COPYR
+
+NB       =         D'10
+UDASZ    =         NB*D'512
+
+DATA     SECTION   DATA
+
+IODN     DATA      '$IN'L
+         VWD       6/4,30/0,4/OSTSA,24/0 ; system managed/resident
+
+OODN     DATA      '$OUT'L
+         VWD       6/4,30/0,4/OSTSA,24/0 ; system managed/resident
+
+         SECTION   *
+
+COPYR    SECTION   MIXED
+
+COPYR    =         *
+         R         PARGS          ; parse command line arguments
+         S1        ARGI,          ; set input dataset name
+         IODN,     S1
+         S1        ARGO,          ; set output dataset name
+         OODN,     S1
+         S1        ARGNR,         ; convert NR value to binary
+         R         $D2I@24
+         MXRECS,   S7
+         S1        ARGS,          ; convert S value to binary
+         R         $D2I@24
+         S1        132
+         S0        S1-S7
+         JSM       COP9           ; if invalid argument
+         SHIFT,    S7
+         OPEN      IODN,I         ; open input file
+         JSN       COP7           ; if open failed
+         OPEN      OODN,O         ; open output file
+         JSN       COP8           ; if open failed
+         S0        SHIFT,
+         JSN       COP10          ; if shifting text file
+
+COP1     A1        IODN+1,
+         READP     A1,UDA,UDASZ
+         JSZ       COP3           ; if EOF, EOD, null record, or error
+         JSM       COP2           ; if EOR
+         A3        A4-A2          ; number of words read
+         A1        OODN+1,
+         WRITEP    A1,UDA,A3
+         S0        S1
+         JSZ       COP1           ; if no error
+         J         COP6
+
+COP2     A3        A4-A2          ; number of words read
+         A1        OODN+1,
+         WRITE     A1,UDA,A3,S6
+         S0        S1
+         JSN       COP6           ; if error
+         A1        RCOUNT,        ; increment count of records
+         A1        A1+1
+         RCOUNT,   A1
+         A2        MXRECS,
+         A0        A1-A2
+         JAP       COP4           ; if maximum requested records processed
+         J         COP1
+
+COP3     S0        S1
+         JSN       COP5           ; if unrecoverable read error
+
+COP4     A1        RCOUNT,
+         S7        =' ',
+         R         $I2D@24
+         COPB,     S7
+         MESSAGE   COPA,US
+         ENDP
+
+COP5     MESSAGE   ='Unrecoverable read error'Z,US
+         ABORT
+
+COP6     MESSAGE   ='Unrecoverable write error'Z,US
+         ABORT
+
+COP7     S1        ARGI,
+         COPE,     S1
+         MESSAGE   COPD,US
+         ABORT
+
+COP8     S1        ARGO,
+         COPE,     S1
+         MESSAGE   COPD,US
+         ABORT
+
+COP9     MESSAGE   COPF,US
+         ABORT
+*
+*  Handle the input file as text. Shift each line by the number of spaces
+*  specified by the S= command line argument.
+*
+*    A3 : number of words read
+*    S6 : unused bit count
+*
+COP10    A1        IODN+1,
+         READ      A1,UDA,UDASZ
+         JSZ       COP3           ; if EOF, EOD, null record, or error
+         JSM       COP11          ; if EOR
+         S6        0              ; clear unused bit count
+
+COP11    A1        A4-A2          ; number of words read
+         S7        7              ; convert number of unused bits to unused bytes
+         S6        S6+S7
+         S6        S6>3
+         S7        A1             ; compute maximum number of characters to process
+         S7        S7<3
+         S7        S7-S6
+         S1        SHIFT,         ; calculate total record length including shift count
+         S1        S1+S7
+         S2        132
+         S0        S2-S1
+         JSP       COP12          ; if total record length won't exceed 132 characters
+         S2        S1-S2          ; reduce number of characters to process
+         S7        S7-S2
+
+COP12    CHARS,    S7             ; save character count
+         A1        SHIFT,         ; generate line prefix for shift
+         A2        LBUF+1
+         S1        ' 'R
+
+COP13    A1        A1-1
+         A0        A1
+         JAZ       COP14          ; if line prefix complete
+         ,A2       S1
+         A2        A2+1
+         J         COP13
+
+COP14    A1        UDA            ; unpack record to line buffer
+         A3        CHARS,
+         R         $UNPACK
+         A3        CHARS,         ; calculate total record length
+         A4        SHIFT,
+         A3        A3+A4
+         CHARS,    A3
+         A1        LBUF           ; pack shifted record
+         A2        UDA
+         R         $PACK
+         S1        CHARS,         ; calculate number of words in packed record
+         S2        7
+         S1        S1+S2
+         S1        S1>3
+         A3        S1             ; number of words to write
+         S6        CHARS,         ; calculate number of unused bytes in last word
+         S7        <3
+         S6        S6&S7
+         S5        8
+         S6        S5-S6
+         S6        S6&S7
+         S6        S6<3           ; number of unused bits
+         A1        OODN+1,
+         WRITE     A1,UDA,A3,S6
+         S0        S1
+         JSN       COP6           ; if error
+         A1        RCOUNT,        ; increment count of records
+         A1        A1+1
+         RCOUNT,   A1
+         A2        MXRECS,
+         A0        A1-A2
+         JAP       COP4           ; if maximum requested records processed
+         S1        ' 'R           ; replace page eject character
+         LBUF,     S1
+         J         COP10
+
+**
+*  PARGS - Parse command line arguments
+*
+
+PARGS    SUBR
+         R         $PARGS
+
+PAR1     A1        A1+1           ; point to next command line token
+         A2        A2-1
+         A0        A2
+         JAZ       PAR8           ; if all supplied tokens processed
+         A3        ,A1            ; fetch next token
+         S1        ,A3
+         S2        ='I='L,
+         S0        S1\S2
+         JSN       PAR2           ; if not 'I=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR7           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGI,     S1
+         J         PAR1
+
+PAR2     S2        ='O='L,
+         S0        S1\S2
+         JSN       PAR3           ; if not 'O=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR7           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGO,     S1
+         J         PAR1
+
+PAR3     S2        ='S='L,
+         S0        S1\S2
+         JSN       PAR4           ; if not 'S=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR7           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGS,     S1
+         J         PAR1
+
+PAR4     S2        ='S'L,
+         S0        S1\S2
+         JSN       PAR5           ; if not 'S' keyword
+         S1        ='1'L,
+         ARGS,     S1
+         J         PAR1
+
+PAR5     S2        ='NR='L,
+         S0        S1\S2
+         JSN       PAR6           ; if not 'NR=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR7           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGNR,    S1
+         J         PAR1
+
+PAR6     S2        ='NR'L,
+         S0        S1\S2
+         JSN       PAR7           ; if not 'NR' keyword
+         S1        ='100000'L,    ; "infinity"
+         ARGNR,    S1
+         J         PAR1
+
+PAR7     MESSAGE   COPF,US
+         ABORT
+
+PAR8     =         *
+
+PARGS    RETURN
+
+         SECTION   *
+
+DATA     SECTION   DATA
+
+COPA     DATA      'Copy complete. Records: '
+COPB     DATA      0
+         CON       0
+
+COPD     DATA      'Failed to open'
+COPE     DATA      0
+         CON       0
+
+COPF     DATA      'Invalid command line argument'Z
+         CON       0
+
+ARGI     DATA      '$IN'L
+ARGNR    DATA      '1'L
+ARGO     DATA      '$OUT'L
+ARGS     DATA      '0'L
+
+CHARS    CON       0
+SHIFT    CON       0
+RCOUNT   CON       0
+FCOUNT   CON       0
+MXRECS   CON       0
+
+UDA      BSS       UDASZ
+
+LBUF     DATA      '1'R           ; page eject replaced with line advance after first record written
+         BSS       131
+
+         SECTION   *
+
+         END
