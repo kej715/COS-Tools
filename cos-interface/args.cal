@@ -31,6 +31,8 @@ $PARGS   SUBR
          A3        (JCCPR-JCCCI)*8
          R         $UNPACK
          A1        CHARV
+         R         TOUPPER        ; convert lower case to upper case
+         A1        CHARV
 
 $PAR1    A2        A1             ; start of next token
 
@@ -153,6 +155,47 @@ $PAR10   A1        ARGV
          ARGV,A2   S0
 
 $PARGS   RETURN
+
+**
+*  TOUPPER - convert lower case to upper case
+*
+*  Entry:
+*    (A1) : address of unpacked character list
+*
+
+TOUPPER  S1        ,A1            ; fetch next character
+         S0        S1
+         JSZ       TOU2           ; if done
+         S2        X'27
+         S0        S1\S2
+         JSZ       TOU3           ; if start of string
+         S2        'a'R
+         S0        S1-S2
+         JSM       TOU1           ; if not lower case
+         S2        'z'R+1
+         S0        S1-S2
+         JSP       TOU1           ; if not lower case
+         S2        'a'R-'A'R
+         S1        S1-S2
+         ,A1       S1
+
+TOU1     A1        A1+1
+         J         TOUPPER
+
+TOU2     J         B00
+
+TOU3     A1        A1+1
+         S1        ,A1
+         S0        S1
+         JSZ       TOU2           ; if end of character list
+         S0        S1\S2
+         JSN       TOU3           ; if not end of string
+         A1        A1+1
+         J         TOUPPER
+
+         SECTION   *
+
+DATA     SECTION   DATA
 
 A1SAVE   BSS       1
 
