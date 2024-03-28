@@ -276,7 +276,6 @@ ARGS     DATA      '0'L
 CHARS    CON       0
 SHIFT    CON       0
 RCOUNT   CON       0
-FCOUNT   CON       0
 MXRECS   CON       0
 
 UDA      BSS       UDASZ
