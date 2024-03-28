@@ -1,6 +1,6 @@
          TITLE     'UNPACK'
          SUBTITLE  'Unpack character strings'
-         IDENT     UTIL
+         IDENT     UNPACK
          COMMENT   'UNPACK - Unpack character strings'
 
 UNPACK   SECTION   MIXED

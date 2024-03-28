@@ -1,6 +1,6 @@
          TITLE     'IUTIL'
          SUBTITLE  'Miscellaneous integer utility functions'
-         IDENT     UTIL
+         IDENT     IUTIL
          COMMENT   'UTIL - Miscellaneous integer utility functions'
 
 IUTIL    SECTION   MIXED

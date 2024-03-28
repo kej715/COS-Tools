@@ -1,6 +1,6 @@
          TITLE     'PACK'
          SUBTITLE  'Pack character strings'
-         IDENT     UTIL
+         IDENT     PACK
          COMMENT   'PACK - Pack character strings'
 
 PACK     SECTION   MIXED
