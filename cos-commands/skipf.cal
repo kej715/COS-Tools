@@ -1,0 +1,152 @@
+         TITLE     'SKIPF'
+         SUBTITLE  'Skip Blocked Files'
+         IDENT     SKIPF
+         COMMENT   'SKIPF - Skip Blocked Files'
+         ENTRY     SKIPF
+         EXT       $D2I@24,$I2D@24,$PACK,$PARGS,$UNPACK
+         START     SKIPF
+
+NB       =         D'10
+UDASZ    =         NB*D'512
+
+DATA     SECTION   DATA
+
+IODN     DATA      '$IN'L
+         VWD       6/4,30/0,4/OSTSA,24/0 ; system managed/resident
+
+         SECTION   *
+
+SKIPF    SECTION   MIXED
+
+SKIPF    =         *
+         R         PARGS          ; parse command line arguments
+         S1        ARGDN,         ; set input dataset name
+         IODN,     S1
+         OPEN      IODN,I         ; open input file
+         JSN       SKI5           ; if open failed
+         S1        ARGNF,         ; convert NF value to binary
+         R         $D2I@24
+         MXFILES,  S7
+
+SKI1     A1        IODN+1,
+         READP     A1,UDA,UDASZ
+         JSZ       SKI2           ; if EOF, EOD, null record, or error
+         A1        RCOUNT,        ; increment count of records
+         A1        A1+1
+         RCOUNT,   A1
+         J         SKI1
+
+SKI2     S0        S1
+         JSN       SKI4           ; if unrecoverable read error
+         S1        DPCWF,A1       ; determine whether EOF or EOD
+         S2        <2
+         S1        S1>(D'63-D'03)
+         S1        S1&S2
+         S0        S2-S1
+         JSZ       SKI3           ; if EOD
+         A1        FCOUNT,        ; increment count of files
+         A1        A1+1
+         FCOUNT,   A1
+         A2        MXFILES,
+         A0        A1-A2
+         JAM       SKI1           ; if more files to skip
+
+SKI3     A1        RCOUNT,
+         S7        =' ',
+         R         $I2D@24
+         SKIB,     S7
+         A1        FCOUNT,
+         S7        =' ',
+         R         $I2D@24
+         SKIC,     S7
+         MESSAGE   SKIA,US
+         ENDP
+
+SKI4     MESSAGE   ='Unrecoverable read error'Z,US
+         ABORT
+
+SKI5     S1        ARGDN,
+         SKIE,     S1
+         MESSAGE   SKID,US
+         ABORT
+
+**
+*  PARGS - Parse command line arguments
+*
+
+PARGS    SUBR
+         R         $PARGS
+
+PAR1     A1        A1+1           ; point to next command line token
+         A2        A2-1
+         A0        A2
+         JAZ       PAR5           ; if all supplied tokens processed
+         A3        ,A1            ; fetch next token
+         S1        ,A3
+         S2        ='DN='L,
+         S0        S1\S2
+         JSN       PAR2           ; if not 'DN=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR4           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGDN,    S1
+         J         PAR1
+
+PAR2     S2        ='NF='L,
+         S0        S1\S2
+         JSN       PAR3           ; if not 'NF=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR4           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGNF,    S1
+         J         PAR1
+
+PAR3     S2        ='NF'L,
+         S0        S1\S2
+         JSN       PAR4           ; if not 'NF' keyword
+         S1        ='100000'L,    ; "infinity"
+         ARGNF,    S1
+         J         PAR1
+
+PAR4     MESSAGE   SKIF,US
+         ABORT
+
+PAR5     =         *
+
+PARGS    RETURN
+
+         SECTION   *
+
+DATA     SECTION   DATA
+
+SKIA     DATA      'Skip complete. Records: '
+SKIB     DATA      0
+         DATA      ' Files: '
+SKIC     DATA      0
+         CON       0
+
+SKID     DATA      'Failed to open'
+SKIE     DATA      0
+         CON       0
+
+SKIF     DATA      'Invalid command line argument'Z
+         CON       0
+
+ARGDN    DATA      '$IN'L
+ARGNF    DATA      '1'L
+
+RCOUNT   CON       0
+FCOUNT   CON       0
+MXFILES  CON       0
+
+UDA      BSS       UDASZ
+
+         SECTION   *
+
+         END
