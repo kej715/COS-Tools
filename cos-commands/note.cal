@@ -1,0 +1,128 @@
+         TITLE     'NOTE'
+         SUBTITLE  'Write Text to a Dataset'
+         IDENT     NOTE
+         COMMENT   'NOTE - Write Text to a Dataset'
+         ENTRY     NOTE
+         EXT       $PARGS
+         START     NOTE
+
+DATA     SECTION   DATA
+
+OODN     DATA      '$OUT'L
+         VWD       6/4,30/0,4/OSTSA,24/0 ; system managed/resident
+
+         SECTION   *
+
+NOTE    SECTION   MIXED
+
+NOTE    =         *
+         R         PARGS          ; parse command line arguments
+         S1        ARGDN,         ; set output dataset name
+         OODN,     S1
+         OPEN      OODN,O         ; open output file
+         JSN       NOT3           ; if open failed
+         A1        OODN+1,
+         A2        ARGTXTA,       ; address of text
+         A3        ARGTXTL,       ; number of words to write
+         A0        A3
+         JAZ       NOT1           ; if no words to write
+         S1        ARGTXTU,       ; unused bit count
+         WRITE     A1,A2,A3,S1
+         S0        S1
+         JSN       NOT2           ; if error
+
+NOT1     ENDP
+
+NOT2     MESSAGE   ='Unrecoverable write error'Z,US
+         ABORT
+
+NOT3     S1        ARGDN,
+         NOTB,     S1
+         MESSAGE   NOTA,US
+         ABORT
+
+**
+*  PARGS - Parse command line arguments
+*
+
+PARGS    SUBR
+         R         $PARGS
+
+PAR1     A1        A1+1           ; point to next command line token
+         A2        A2-1
+         A0        A2
+         JAZ       PAR8           ; if all supplied tokens processed
+         A3        ,A1            ; fetch next token
+         S1        ,A3
+         S2        ='DN='L,
+         S0        S1\S2
+         JSN       PAR2           ; if not 'DN=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR7           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         S1        ,A3
+         ARGDN,    S1
+         J         PAR1
+
+PAR2     S2        ='TEXT='L,
+         S0        S1\S2
+         JSN       PAR7           ; if not 'TEXT=' keyword
+         A1        A1+1
+         A2        A2-1
+         A0        A2
+         JAZ       PAR7           ; if argument value missing
+         A3        ,A1            ; fetch argument value
+         ARGTXTA,  A3
+         A4        A3
+         S1        <8
+
+PAR3     S2        ,A4            ; fetch next word of TEXT value
+         S0        S2&S1
+         JSZ       PAR4           ; if end of TEXT value
+         A4        A4+1
+         J         PAR3
+
+PAR4     A3        A4-A3          ; calculate number of words in TEXT value
+         S3        0              ; initialize count of unused bits
+         S0        S2
+         JSZ       PAR6           ; if value length is multiple of 8 bytes
+         A3        A3+1
+         S4        8
+
+PAR5     S3        S3+S4          ; update number of unused bits
+         S2        S2>8
+         S0        S2&S1
+         JSZ       PAR5           ; if more unused bits
+
+PAR6     ARGTXTL,  A3
+         ARGTXTU,  S3
+         J         PAR1
+
+PAR7     MESSAGE   NOTC,US
+         ABORT
+
+PAR8     =         *
+
+PARGS    RETURN
+
+         SECTION   *
+
+DATA     SECTION   DATA
+
+NOTA     DATA      'Failed to open'
+NOTB     DATA      0
+         CON       0
+
+NOTC     DATA      'Invalid command line argument'Z
+         CON       0
+
+ARGDN    DATA      '$OUT'L
+ARGTXTA  CON       0
+ARGTXTL  CON       0
+ARGTXTU  CON       0
+
+         SECTION   *
+
+         END
