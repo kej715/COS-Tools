@@ -24,7 +24,7 @@
 BINDIR = /usr/local/bin
 COSDIR = ../cos-interface
 
-all:	copyd.abs copyf.abs copyr.abs
+all:	copyd.abs copyf.abs copyr.abs note.abs
 
 copyd.abs: copyd.obj
 	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
@@ -42,6 +42,12 @@ copyr.abs: copyr.obj
 	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
 
 copyr.obj: copyr.cal
+	$(BINDIR)/cal -t $(COSDIR)/systxt $<
+
+note.abs: note.obj
+	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
+
+note.obj: note.cal
 	$(BINDIR)/cal -t $(COSDIR)/systxt $<
 
 clean:
