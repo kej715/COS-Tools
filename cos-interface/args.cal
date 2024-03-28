@@ -73,7 +73,7 @@ $PAR3    A3        A1-A2          ; calculate length of token
 *
 $PAR4    A3        A1-A2          ; calculate length of token
 
-$PAR5    A1SAVE,   A1
+$PAR5    B01       A1
          A1        A2             ; start of token
          A2        NXTOKN,        ; where to deliver packed token
          A4        ARGC,          ; store address of packed token in argument vector
@@ -86,7 +86,7 @@ $PAR5    A1SAVE,   A1
          ,A2       S0
          A2        A2+1           ; advance next token address
          NXTOKN,   A2
-         A1        A1SAVE,
+         A1        B01
          A1        A1+1
          J         $PAR1
 *
@@ -105,7 +105,7 @@ $PAR7    S1        ,A1
          J         $PAR7
 
 $PAR8    A3        A1-A2          ; calculate length of string
-         A1SAVE,   A1
+         B01       A1
          A1        A2             ; start of token
          A2        NXTOKN,        ; where to deliver packed token
          A4        ARGC,          ; store address of packed token in argument vector
@@ -118,7 +118,7 @@ $PAR8    A3        A1-A2          ; calculate length of string
          ,A2       S0
          A2        A2+1           ; advance next token address
          NXTOKN,   A2
-         A1        A1SAVE,
+         A1        B01
          S0        ,A1
          JSZ       $PAR10         ; if end of command line
          A1        A1+1           ; advance past closing quote
@@ -196,8 +196,6 @@ TOU3     A1        A1+1
          SECTION   *
 
 DATA     SECTION   DATA
-
-A1SAVE   BSS       1
 
 NXTOKN   BSS       1
 
