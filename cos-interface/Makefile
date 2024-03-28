@@ -25,21 +25,18 @@ BINDIR = /usr/local/bin
 
 OBJS =	\
 	args.obj  \
-	chars.obj \
 	dmp.obj   \
 	iutil.obj \
-	sysio.obj
+	pack.obj  \
+	sysio.obj \
+	unpack.obj
 
 all:	libcos.lib
 
 libcos.lib: $(OBJS)
-	rm -f libcos.lib ;\
-	$(BINDIR)/lib -o libcos.lib $(OBJS)
+	rm -f libcos.lib ; $(BINDIR)/lib -o libcos.lib $(OBJS)
 
 args.obj: args.cal systxt.cal
-	$(BINDIR)/cal -t systxt $<
-
-chars.obj: chars.cal systxt.cal
 	$(BINDIR)/cal -t systxt $<
 
 dmp.obj: dmp.cal systxt.cal
@@ -48,7 +45,13 @@ dmp.obj: dmp.cal systxt.cal
 iutil.obj: iutil.cal systxt.cal
 	$(BINDIR)/cal -t systxt $<
 
+pack.obj: pack.cal systxt.cal
+	$(BINDIR)/cal -t systxt $<
+
 sysio.obj: sysio.cal systxt.cal
+	$(BINDIR)/cal -t systxt $<
+
+unpack.obj: unpack.cal systxt.cal
 	$(BINDIR)/cal -t systxt $<
 
 clean:
