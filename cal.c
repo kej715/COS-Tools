@@ -102,6 +102,7 @@ int main(int argc, char *argv[], char *envp[]) {
 
     while (srcIndex < argc) {
         srcIndex = openNextSource(srcIndex, argc, argv, &isExtText);
+        if (srcIndex < 0) break;
         timeInit();
         listInit();
         firstModule = lastModule = NULL;
@@ -251,6 +252,7 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
             argi += 2;
         }
     }
+    if (argi >= argc) return -1;
     fp = filePath;
     limit = fp + MAX_FILE_PATH_LENGTH;
     dp = NULL;
@@ -284,30 +286,26 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
     if (*isExtText) return argi;
     strcpy(sourceFilePath, filePath);
 
-    if (lFile == NULL) {
 #if defined(__cos)
-        listingFile = stdout;
+    if (lFile == NULL) listingFile = stdout;
 #else
+   if (lFile == NULL) {
         strcpy(dp, ".lst");
         listingFile = fopen(filePath, "w");
         if (listingFile == NULL) {
             perror(filePath);
             exit(1);
         }
-#endif
     }
     if (oFile == NULL) {
-#if defined(__cos)
-        strcpy(filePath, "$BLD");
-#else
         strcpy(dp, ".obj");
-#endif
         objectFile = cosDsCreate(filePath);
         if (objectFile == NULL) {
             perror(filePath);
             exit(1);
         }
     }
+#endif
     return argi;
 }
 
@@ -430,6 +428,16 @@ static void parseOptions(int argc, char *argv[]) {
         i += 1;
     }
     if (sourceCount < 1) usage();
+#if defined(__cos)
+    if (oFile == NULL) {
+        oFile = "$BLD";
+        objectFile = cosDsCreate(oFile);
+        if (objectFile == NULL) {
+            perror(oFile);
+            exit(1);
+        }
+    }
+#endif
 }
 
 static void readEnvars(char *envp[]) {
