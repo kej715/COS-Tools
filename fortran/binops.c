@@ -1,0 +1,254 @@
+/*--------------------------------------------------------------------------
+**
+**  Copyright 2024 Kevin E. Jordan
+**
+**  Name: binops.c
+**
+**  Description:
+**      This file contains functions that implement binary operators for
+**      the compiler. It includes implementations for constant arguments
+**      and implementations that generate code for the target machine.
+**
+**  Licensed under the Apache License, Version 2.0 (the "License");
+**  you may not use this file except in compliance with the License.
+**  You may obtain a copy of the License at
+**
+**      http://www.apache.org/licenses/LICENSE-2.0
+**
+**  Unless required by applicable law or agreed to in writing, software
+**  distributed under the License is distributed on an "AS IS" BASIS,
+**  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+**  See the License for the specific language governing permissions and
+**  limitations under the License.
+**
+**--------------------------------------------------------------------------
+*/
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "binops.h"
+#include "codegen.h"
+#include "proto.h"
+#include "types.h"
+
+static u64 truth[2] = {0, ~(u64)0};
+
+void cstAddInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer += left->details.constant.value.integer;
+}
+
+void cstAddReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.real += left->details.constant.value.real;
+}
+
+void cstDivInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer = left->details.constant.value.integer / right->details.constant.value.integer;
+}
+
+void cstDivReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.real = left->details.constant.value.real / right->details.constant.value.real;
+}
+
+void cstExpInt(OperatorArgument *left, OperatorArgument *right) {
+}
+
+void cstExpReal(OperatorArgument *left, OperatorArgument *right) {
+}
+
+void cstMulInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer *= left->details.constant.value.integer;
+}
+
+void cstMulReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.real *= left->details.constant.value.real;
+}
+
+void cstSubInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer = left->details.constant.value.integer - right->details.constant.value.integer;
+}
+
+void cstSubReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.real = left->details.constant.value.real - right->details.constant.value.real;
+}
+
+void cstAndLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical &= left->details.constant.value.logical;
+}
+
+void cstAndInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer &= left->details.constant.value.integer;
+}
+
+void cstOrLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical |= left->details.constant.value.logical;
+}
+
+void cstOrInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer |= left->details.constant.value.integer;
+}
+
+void cstEqvLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = ~(left->details.constant.value.logical ^ right->details.constant.value.logical);
+}
+
+void cstEqvInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer = ~(left->details.constant.value.integer ^ right->details.constant.value.integer);
+}
+
+void cstNeqvLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical ^= left->details.constant.value.logical;
+}
+
+void cstNeqvInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.integer ^= left->details.constant.value.integer;
+}
+
+void cstEqChar(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) == 0];
+}
+
+void cstEqLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.logical == right->details.constant.value.logical];
+}
+
+void cstEqInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.integer == right->details.constant.value.integer];
+}
+
+void cstEqReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.real == right->details.constant.value.real];
+}
+
+void cstGeChar(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) >= 0];
+}
+
+void cstGeLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.logical >= right->details.constant.value.logical];
+}
+
+void cstGeInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.integer >= right->details.constant.value.integer];
+}
+
+void cstGeReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.real >= right->details.constant.value.real];
+}
+
+void cstGtChar(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) > 0];
+}
+
+void cstGtLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.logical > right->details.constant.value.logical];
+}
+
+void cstGtInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.integer > right->details.constant.value.integer];
+}
+
+void cstGtReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.real > right->details.constant.value.real];
+}
+
+void cstLeChar(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) <= 0];
+}
+
+void cstLeLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.logical <= right->details.constant.value.logical];
+}
+
+void cstLeInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.integer <= right->details.constant.value.integer];
+}
+
+void cstLeReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.real <= right->details.constant.value.real];
+}
+
+void cstLtChar(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) < 0];
+}
+
+void cstLtLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.logical < right->details.constant.value.logical];
+}
+
+void cstLtInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.integer < right->details.constant.value.integer];
+}
+
+void cstLtReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.real < right->details.constant.value.real];
+}
+
+void cstNeChar(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) != 0];
+}
+
+void cstNeLog(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.logical != right->details.constant.value.logical];
+}
+
+void cstNeInt(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.integer != right->details.constant.value.integer];
+}
+
+void cstNeReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.logical = truth[left->details.constant.value.real != right->details.constant.value.real];
+}
+
+void cstCatChar(OperatorArgument *left, OperatorArgument *right) {
+    // TODO: implement CAT
+}
+
+/*
+ *  Table of functions implementing binary operators that operate on constants to produce constants.
+ *  The table is indexed by operator and data type of operands.
+ */
+void (*cstBinOps[(OP_CAT-OP_ADD)+1][BaseType_Pointer+1])(OperatorArgument *left, OperatorArgument *right) = {
+/*             Undefined   Character   Logical     Integer     Real        Double      Complex     Pointer  */
+/* OP_ADD  */ {NULL,       NULL,       NULL,       cstAddInt,  cstAddReal, NULL,       NULL,       NULL      },
+/* OP_DIV  */ {NULL,       NULL,       NULL,       cstDivInt,  cstDivReal, NULL,       NULL,       NULL      },
+/* OP_EXP  */ {NULL,       NULL,       NULL,       cstExpInt,  cstExpReal, NULL,       NULL,       NULL      },
+/* OP_MUL  */ {NULL,       NULL,       NULL,       cstMulInt,  cstMulReal, NULL,       NULL,       NULL      },
+/* OP_SUB  */ {NULL,       NULL,       NULL,       cstSubInt,  cstSubReal, NULL,       NULL,       NULL      },
+/* OP_AND  */ {NULL,       NULL,       cstAndLog,  cstAndInt,  NULL,       NULL,       NULL,       NULL      },
+/* OP_OR   */ {NULL,       NULL,       cstOrLog,   cstOrInt,   NULL,       NULL,       NULL,       NULL      },
+/* OP_EQV  */ {NULL,       NULL,       cstEqvLog,  cstEqvInt,  NULL,       NULL,       NULL,       NULL      },
+/* OP_NEQV */ {NULL,       NULL,       cstNeqvLog, cstNeqvInt, NULL,       NULL,       NULL,       NULL      },
+/* OP_EQ   */ {NULL,       cstEqChar,  cstEqLog,   cstEqInt,   cstEqReal,  NULL,       NULL,       cstEqLog  },
+/* OP_GE   */ {NULL,       cstGeChar,  cstGeLog,   cstGeInt,   cstGeReal,  NULL,       NULL,       cstGeLog  },
+/* OP_GT   */ {NULL,       cstGtChar,  cstGtLog,   cstGtInt,   cstGtReal,  NULL,       NULL,       cstGtLog  },
+/* OP_LE   */ {NULL,       cstLeChar,  cstLeLog,   cstLeInt,   cstLeReal,  NULL,       NULL,       cstLeLog  },
+/* OP_LT   */ {NULL,       cstLtChar,  cstLtLog,   cstLtInt,   cstLtReal,  NULL,       NULL,       cstLtLog  },
+/* OP_NE   */ {NULL,       cstNeChar,  cstNeLog,   cstNeInt,   cstNeReal,  NULL,       NULL,       cstNeLog  },
+/* OP_CAT  */ {NULL,       cstCatChar, NULL,       NULL,       NULL,       NULL,       NULL,       NULL      }
+};
+
+/*
+ *  Table of functions that generate code to implement binary operators for a target machine.
+ *  The table is indexed by operator and data type of operands.
+ */
+void (*genBinOps[(OP_CAT-OP_ADD)+1][BaseType_Pointer+1])(OperatorArgument *left, OperatorArgument *right) = {
+/*             Undefined   Character    Logical      Integer      Real         Double      Complex     Pointer  */
+/* OP_ADD  */ {NULL,       NULL,        NULL,        emitAddInt,  emitAddReal, NULL,       NULL,       NULL      },
+/* OP_DIV  */ {NULL,       NULL,        NULL,        emitDivInt,  emitDivReal, NULL,       NULL,       NULL      },
+/* OP_EXP  */ {NULL,       NULL,        NULL,        NULL,        NULL,        NULL,       NULL,       NULL      },
+/* OP_MUL  */ {NULL,       NULL,        NULL,        emitMulInt,  emitMulReal, NULL,       NULL,       NULL      },
+/* OP_SUB  */ {NULL,       NULL,        NULL,        emitSubInt,  emitSubReal, NULL,       NULL,       NULL      },
+/* OP_AND  */ {NULL,       NULL,        emitAndInt,  emitAndInt,  NULL,        NULL,       NULL,       NULL      },
+/* OP_OR   */ {NULL,       NULL,        emitOrInt,   emitOrInt,   NULL,        NULL,       NULL,       NULL      },
+/* OP_EQV  */ {NULL,       NULL,        emitEqvInt,  emitEqvInt,  NULL,        NULL,       NULL,       NULL      },
+/* OP_NEQV */ {NULL,       NULL,        emitNeqvInt, emitNeqvInt, NULL,        NULL,       NULL,       NULL      },
+/* OP_EQ   */ {NULL,       emitEqChar,  emitEqLog,   emitEqInt,   emitEqReal,  NULL,       NULL,       emitEqLog },
+/* OP_GE   */ {NULL,       emitGeChar,  emitGeLog,   emitGeInt,   emitGeReal,  NULL,       NULL,       emitGeLog },
+/* OP_GT   */ {NULL,       emitGtChar,  emitGtLog,   emitGtInt,   emitGtReal,  NULL,       NULL,       emitGtLog },
+/* OP_LE   */ {NULL,       emitLeChar,  emitLeLog,   emitLeInt,   emitLeReal,  NULL,       NULL,       emitLeLog },
+/* OP_LT   */ {NULL,       emitLtChar,  emitLtLog,   emitLtInt,   emitLtReal,  NULL,       NULL,       emitLtLog },
+/* OP_NE   */ {NULL,       emitNeChar,  emitNeLog,   emitNeInt,   emitNeReal,  NULL,       NULL,       emitNeLog },
+/* OP_CAT  */ {NULL,       emitCatChar, NULL,        NULL,        NULL,        NULL,       NULL,       NULL      }
+};
