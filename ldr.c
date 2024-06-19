@@ -22,6 +22,8 @@
 **--------------------------------------------------------------------------
 */
 
+#define DEBUG 0
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -148,14 +150,16 @@ int main(int argc, char *argv[]) {
     //  relocation, and process XRT's to resolve external references.
     //  
     for (pass = 1; pass <= 2; pass++) {
+#if DEBUG
+        eprintf("Start pass %d", pass);
+#endif
         currentModule = NULL;
         fileIndex = firstFileIndex;
         while (fileIndex < argc) {
             if (IS_KEY(argv[fileIndex])) {
 #if defined(__cos)
                 if (strcmp(argv[fileIndex], AB_KEY) == 0
-                    || strcmp(argv[fileIndex], M_KEY) == 0
-                    || strcmp(argv[fileIndex], "AB") == 0) {
+                    || strcmp(argv[fileIndex], M_KEY) == 0) {
                     fileIndex += 2;
                     continue;
                 }
@@ -168,6 +172,12 @@ int main(int argc, char *argv[]) {
 #endif
                 fileIndex += 1;
             }
+#if defined(__cos)
+            else if (strcmp(argv[fileIndex], "AB") == 0) {
+                fileIndex += 1;
+                continue;
+            }
+#endif
             addSuffix(argv[fileIndex], ".obj", sourcePath);
             ds = cosDsOpen(sourcePath);
             if (ds == NULL) {
@@ -190,6 +200,9 @@ int main(int argc, char *argv[]) {
             fileIndex += 1;
         }
         if (pass == 1) {
+#if DEBUG
+            eputs("Resolve externals");
+#endif
             if (resolveExternals() == -1) {
                 eputs("Failed to resolve external references");
                 exit(1);
@@ -198,6 +211,9 @@ int main(int argc, char *argv[]) {
             //  Traverse the block lists and calculate the base address of
             //  each block based upon the load order
             //
+#if DEBUG
+            eputs("Calculate base addresses");
+#endif
             calculateBaseAddresses(firstBlocks[BlockType_Code]);
             calculateBaseAddresses(firstBlocks[BlockType_Mixed]);
             calculateBaseAddresses(firstBlocks[BlockType_Const]);
@@ -207,10 +223,16 @@ int main(int argc, char *argv[]) {
             calculateBaseAddresses(firstBlocks[BlockType_Dynamic]);
             imageSize *= 8;
             image = (u8 *)allocate(imageSize);
+#if DEBUG
+            eputs("Adjust entry points");
+#endif
             adjustEntryPoints(symbolTable);
         }
         else { // pass 2
             for (lm = firstLibraryModule; lm != NULL; lm = lm->next) {
+#if DEBUG
+                eprintf("Open library %s", lm->libraryPath);
+#endif
                 ds = cosDsOpen(lm->libraryPath);
                 if (ds == NULL) {
                     eprintf("Failed to open %s", lm->libraryPath);
@@ -224,9 +246,15 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+#if DEBUG
+        eprintf("End pass   %d", pass);
+#endif
     }
 #if defined(__cos)
     if (oFile != NULL) {
+#if DEBUG
+        eprintf("Create %s", oFile);
+#endif
         ds = cosDsCreate(oFile);
         if (ds == NULL) {
             eprintf("Failed to create %s", oFile);
@@ -251,6 +279,9 @@ int main(int argc, char *argv[]) {
             strcpy(cp, ".abs");
         }
     }
+#if DEBUG
+    eprintf("Create %s", objectPath);
+#endif
     ds = cosDsCreate(objectPath);
     if (ds == NULL) {
         eprintf("Failed to create %s", objectPath);
@@ -261,6 +292,9 @@ int main(int argc, char *argv[]) {
     if (status == -1) unlink(objectPath);
 #endif
     if (loadMap != NULL) {
+#if DEBUG
+        eputs("Print load map");
+#endif
         printLoadMap();
         fclose(loadMap);
     }
@@ -1380,6 +1414,9 @@ static int resolveExternal(u8 *id) {
     u8 pdtOrdinal;
     int status;
 
+#if DEBUG
+    eprintf("Resolve external %.8s", (char *)id);
+#endif
     for (i = 0; i < libraryCount; i++) {
         ds = cosDsOpen(libraryPaths[i]);
         if (ds == NULL) {
@@ -1388,12 +1425,18 @@ static int resolveExternal(u8 *id) {
         }
         status = searchLibrary(ds, id, module, &pdtOrdinal, libraryPaths[i]);
         if (status == 1) {
+#if DEBUG
+            eprintf("%.8s found in module %.8s of library %s", (char *)id, (char *)module, libraryPaths[i]);
+#endif
             lm = addLibraryModule(libraryPaths[i], module, pdtOrdinal);
             status = loadLibraryModule(ds, lm, 1);
         }
         cosDsClose(ds);
         if (status != 0) return status;
     }
+#if DEBUG
+    eprintf("%.8s not found in library %s", (char *)id, (char *)module, libraryPaths[i]);
+#endif
     return 0;
 }
 
@@ -1464,19 +1507,30 @@ static int searchLibrary(Dataset *ds, u8 *id, u8 *module, u8 *pdtOrdinal, char *
                 }
                 offset += 8;
             }
-            if (isFound == FALSE) offset += externWordCount * 8;
+            if (isFound == FALSE) {
+#if DEBUG
+                eprintf("%.8s not found in DFT of module %.8s in library %s", id, module, sourcePath);
+#endif
+                offset += externWordCount * 8;
+            }
         }
         free(table);
     }
     //
     //  DFT found; locate the first PDT with an entry defining the id sought
     //
+#if DEBUG
+    eprintf("%.8s found in DFT of module %.8s in library %s", id, module, sourcePath);
+#endif
     *pdtOrdinal = 0;
     isFound = FALSE;
 
     while (TRUE) {
         status = locateTable(ds, LDR_TT_PDT, &hdr, &tableLength, sourcePath);
         if (status == -1 || status == 0) return status;
+#if DEBUG
+        eprintf("Located PDT of %.8s in %s", module, sourcePath);
+#endif
         table = (u8 *)allocate(tableLength);
         n = cosDsRead(ds, table, tableLength);
         if (n != tableLength) {
@@ -1499,11 +1553,14 @@ static int searchLibrary(Dataset *ds, u8 *id, u8 *module, u8 *pdtOrdinal, char *
             }
         }
         free(table);
-        if (isFound) return 1;
+        if (isFound) break;
         *pdtOrdinal += 1;
     }
+#if DEBUG
+    eprintf("%.8s %sfound in PDT", id, isFound ? "" : "not ");
+#endif
 
-    return 0;
+    return isFound;
 }
 
 static int skipBytes(Dataset *ds, int count) {
