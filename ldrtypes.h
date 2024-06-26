@@ -42,7 +42,7 @@ typedef struct block {
     struct block *nextInModule;
     struct block *nextInImage;
     struct module *module;
-    char *id;
+    u8 id[8];
     BlockType type;
     int index;
     bool hasErrorFlag;
@@ -55,25 +55,20 @@ typedef struct block {
 
 typedef struct module {
     struct module *next;
-    char *id;
-    bool hasMachineTypeExt;
-    bool hasCallingSeq;
-    u32 length;
+    struct module *left;
+    struct module *right;
+    u8 id[8];
+    char *libraryPath;
     Block *firstBlock;
     Block *lastBlock;
+    int entryCount;
+    u8 *entryTable;
     int externalRefCount;
     u8 *externalRefTable;
     char *comment;
-} Module;
-
-typedef struct libraryModule {
-    struct libraryModule *next;
-    char *libraryPath;
-    u8 id[8];
+    bool doLoad;
     bool isLoaded;
-    u8 pdtOrdinal;
-    Module *module;
-} LibraryModule;
+} Module;
 
 typedef struct symbol {
     struct symbol *left;
