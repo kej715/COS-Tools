@@ -1433,10 +1433,18 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
     //
     //  Process external reference declarations, if any
     //
-    if (externalWordCount > 0 && currentModule->externalRefTable == NULL) {
-        currentModule->externalRefCount = externalWordCount;
+    if (externalWordCount > 0) {
         n = externalWordCount * 8;
-        currentModule->externalRefTable = (u8 *)allocate(n);
+        if (currentModule->externalRefTable != NULL) {
+            if (externalWordCount > currentModule->externalRefCount) {
+                free(currentModule->externalRefTable);
+                currentModule->externalRefTable = (u8 *)allocate(n);
+            }
+        }
+        else {
+            currentModule->externalRefTable = (u8 *)allocate(n);
+        }
+        currentModule->externalRefCount = externalWordCount;
         memcpy(currentModule->externalRefTable, table + offset, n);
         offset += n;
     }
