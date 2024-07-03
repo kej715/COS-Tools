@@ -28,11 +28,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "codegen.h"
+#include "const.h"
 #include "proto.h"
 #include "types.h"
 
 static Register lastReg = 0;
 static u8 registerMap = 0x01;
+static bool isEmissionEnabled = TRUE;
 
 Register allocateRegister(void) {
     u8 mask;
@@ -54,7 +56,7 @@ Register allocateRegister(void) {
 static void emit(char *format, ...) {
     va_list ap;
 
-    if (objectFile != NULL) {
+    if (objectFile != NULL && isEmissionEnabled) {
         va_start(ap, format);
         vfprintf(objectFile, format, ap);
         va_end(ap);
@@ -79,9 +81,8 @@ void emitAddReg(Register reg1, Register reg2, BaseType type) {
         emit("         S%o        S%o+S%o\n", reg1, reg1, reg2);
         break;
     case BaseType_Real:
-        emit("         S%o        S%o+FS%o\n", reg1, reg1, reg2);
-        break;
     case BaseType_Double:
+        emit("         S%o        S%o+FS%o\n", reg1, reg1, reg2);
         break;
     default:
        fprintf(stderr, "emitAddReg unexpected type: %d\n", type);
@@ -97,7 +98,7 @@ void emitAdjustSP(int delta) {
                 emit("         A7        A7-1\n");
             }
         }
-        else {
+        else if (delta > 0) {
             emit("         A1        %d\n", delta);
             emit("         A7        A7-A1\n");
         }
@@ -107,7 +108,7 @@ void emitAdjustSP(int delta) {
             emit("         A7        A7+1\n");
         }
     }
-    else {
+    else if (delta > 0) {
         emit("         A1        %d\n", delta);
         emit("         A7        A7+A1\n");
     }
@@ -133,12 +134,11 @@ void emitCalcTrip(Register init, Register lim, Register incr, BaseType type) {
         emitDivIntReg(lim, incr);
         break;
     case BaseType_Real:
+    case BaseType_Double:
         emit("         S%o        S%o-FS%o\n", lim, lim, init);
         emit("         S%o        S%o+FS%o\n", lim, lim, incr);
         emitDivRealReg(lim, incr);
         emitRealToIntReg(incr);
-        break;
-    case BaseType_Double:
         break;
     default:
        fprintf(stderr, "emitCalcTrip unexpected type: %d\n", type);
@@ -163,12 +163,11 @@ void emitCalcTrip1(Register init, Register lim, BaseType type) {
         emit("         S%o        S%o+S%o\n", lim, lim, init);
         break;
     case BaseType_Real:
+    case BaseType_Double:
         emit("         S%o        S%o-FS%o\n", lim, lim, init);
         emit("         S%o        =1.0,\n", init);
         emit("         S%o        S%o+FS%o\n", lim, lim, init);
         emitRealToIntReg(lim);
-        break;
-    case BaseType_Double:
         break;
     default:
        fprintf(stderr, "emitCalcTrip unexpected type: %d\n", type);
@@ -247,7 +246,7 @@ void emitDivIntReg(Register leftArg, Register rightArg) {
     emitPushReg(leftArg);
     emitPushReg(rightArg);
     emit("         R         %%dvi\n");
-    emit("         S%o        S7\n", rightArg);
+    if (rightArg != RESULT_REG) emit("         S%o        S7\n", rightArg);
     emitRestoreRegs(mask);
 }
 
@@ -263,7 +262,7 @@ void emitDivRealReg(Register leftArg, Register rightArg) {
     emitPushReg(leftArg);
     emitPushReg(rightArg);
     emit("         R         %%dvf\n");
-    emit("         S%o        S7\n", rightArg);
+    if (rightArg != RESULT_REG) emit("         S%o        S7\n", rightArg);
     emitRestoreRegs(mask);
 }
 
@@ -273,7 +272,11 @@ void emitEnd(void) {
 }
 
 void emitEpilog(Symbol *sym, int frameSize) {
-    if (sym->class == SymClass_Function) {
+    if (sym->class == SymClass_Program) {
+        emitPrimCall("@_endfio");
+        emit("         S7        0\n");
+    }
+    else if (sym->class == SymClass_Function) {
         emit("         S7        %d,A6\n", sym->details.progUnit.offset);
     }
     emit("         A7        A6\n");
@@ -380,12 +383,12 @@ void emitIntToReal(OperatorArgument *arg) {
     emitSaveRegs(mask);
     emitPushReg(arg->reg);
     emit("         R         %%cif\n");
-    emit("         S%o        S7\n", arg->reg);
+    if (arg->reg != RESULT_REG) emit("         S%o        S7\n", arg->reg);
     emitRestoreRegs(mask);
 }
 
 void emitLabel(char *label) {
-    emit("%-8s BSS       0\n", label);
+    emit("%-8s =         *\n", label);
 }
 
 void emitLabelDatum(char *label) {
@@ -437,7 +440,7 @@ void emitLoadConst(OperatorArgument *arg) {
     switch (arg->details.constant.dt.type) {
     case BaseType_Character:
         generateLabel(buf);
-        emitString(arg->details.constant.value.chr.string, buf);
+        emitString(arg->details.constant.value.character.string, buf);
         freeRegister(arg->reg);
         arg->reg = emitLoadByteAddr(buf);
         break;
@@ -488,6 +491,37 @@ Register emitLoadStack(int offset) {
     return reg;
 }
 
+Register emitLoadStackAddr(int offset) {
+    Register reg1;
+    Register reg2;
+
+    reg1 = allocateRegister();
+    emit("         S%o        A7\n", reg1);
+    if (offset > 0) {
+        reg2 = allocateRegister();
+        emit("         S%o        %d\n", reg2, offset);
+        emit("         S%o        S%o+S%o\n", reg1, reg1, reg2);
+        freeRegister(reg2);
+    }
+    else if (offset < 0) {
+        reg2 = allocateRegister();
+        emit("         S%o        %d\n", reg2, -offset);
+        emit("         S%o        S%o-S%o\n", reg1, reg1, reg2);
+        freeRegister(reg2);
+    }
+
+    return reg1;
+}
+
+Register emitLoadStackByteAddr(int offset) {
+    Register reg;
+
+    reg = emitLoadStackAddr(offset);
+    emit("         S%o        S%o<3\n", reg, reg);
+
+    return reg;
+}
+
 void emitLoadVar(OperatorArgument *arg) {
     Symbol *sym;
 
@@ -498,7 +532,7 @@ void emitLoadVar(OperatorArgument *arg) {
         emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
         break;
     case SymClass_Argument:
-        emit("         A1        %d,A6\n", arg->reg, sym->details.variable.offset);
+        emit("         A1        %d,A6\n", sym->details.variable.offset);
         emit("         S%o        ,A1\n", arg->reg);
         break;
     case SymClass_Global:
@@ -518,12 +552,14 @@ Register emitLoadVarAddr(Symbol *sym) {
     resultReg = allocateRegister();
     switch (sym->class) {
     case SymClass_Local:
-    case SymClass_Argument:
         offsetReg = allocateRegister();
         emit("         S%o        %d\n", offsetReg, sym->details.variable.offset);
         emit("         S%o        A6\n", resultReg);
         emit("         S%o        S%o+S%o\n", resultReg, resultReg, offsetReg);
         freeRegister(offsetReg);
+        break;
+    case SymClass_Argument:
+        emit("         S%o        %d,A6\n", resultReg, sym->details.variable.offset);
         break;
     case SymClass_Global:
     case SymClass_Pointee:
@@ -582,7 +618,7 @@ void emitMulInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emitPushReg(leftArg->reg);
     emitPushReg(rightArg->reg);
     emit("         R         %%mli\n");
-    emit("         S%o        S7\n", rightArg->reg);
+    if (rightArg->reg != RESULT_REG) emit("         S%o        S7\n", rightArg->reg);
     emitRestoreRegs(mask);
 }
 
@@ -658,6 +694,9 @@ void emitProlog(Symbol *sym) {
     emit("         A6        A7\n");    /* set new base pointer */
     emit("         A1        %s,\n", sym->details.progUnit.frameSizeLabel);
     emit("         A7        A7-A1\n"); /* reserve space for local variables */
+    if (sym->class == SymClass_Program) {
+        emitPrimCall("@_inifio");
+    }
 }
 
 void emitPushReg(Register reg) {
@@ -676,7 +715,7 @@ void emitRealToIntReg(Register arg) {
     emitSaveRegs(mask);
     emitPushReg(arg);
     emit("         R         %%cfi\n");
-    emit("         S%o        S7\n", arg);
+    if (arg != RESULT_REG) emit("         S%o        S7\n", arg);
     emitRestoreRegs(mask);
 }
 
@@ -742,7 +781,7 @@ void emitStoreStack(Register reg, int offset) {
 
 void emitString(char *s, char *label) {
     emitActivateSection("DATA", "DATA");
-    if (label != NULL) emitLabel(label);
+    if (label != NULL) emitWordLabel(label);
     emit("         DATA      '");
     while (*s != '\0') {
         while (*s != '\0' && *s != '\'') {
@@ -762,13 +801,28 @@ void emitSubInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o-S%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
+void emitSubprogramCall(char *id) {
+    char buf[32];
+
+    sprintf(buf, "@%s", id);
+    emitPrimCall(buf);
+}
+
 void emitSubReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o-FS%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
+}
+
+void emitWordLabel(char *label) {
+    emit("%-8s BSS       0\n", label);
 }
 
 void freeAllRegisters(void) {
     registerMap = 0x01;
     lastReg = 0;
+}
+
+void enableEmission(bool isEnabled) {
+    isEmissionEnabled = isEnabled;
 }
 
 void freeRegister(Register reg) {

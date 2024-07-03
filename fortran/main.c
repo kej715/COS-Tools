@@ -67,6 +67,10 @@ int main(int argc, char *argv[]) {
     *cp = '\0';
     
     compile(name);
+
+    if (objectFile != NULL) fclose(objectFile);
+
+    exit(0);
 }
 
 #if defined(__cos)

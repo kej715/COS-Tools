@@ -256,7 +256,9 @@ Symbol *findSymbol(char *identifier) {
 
 void freeAllSymbols(void) {
     freeTree(symbols);
+    symbols = NULL;
     freeTree(labels);
+    labels = NULL;
     lastSymbol = NULL;
 }
 

@@ -21,8 +21,8 @@
 #
 #--------------------------------------------------------------------------
 
-#CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
-CFLAGS  = -O0 -g $(INCL) $(EXTRACFLAGS)
+CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
+#CFLAGS  = -O0 -g $(INCL) $(EXTRACFLAGS)
 PREFIX = /usr/local
 COSOBJS = $(PREFIX)/share/ack/cos/boot.o $(PREFIX)/share/ack/cos/c-ansi.o
 
@@ -44,22 +44,22 @@ OBJS = binops.o   \
        services.o \
        symbols.o
 
-all: cft77
+all: kftc
 
 cos:
 	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE)
 
-cft77: $(OBJS)
+kftc: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
-cft77.abs: $(OBJS)
+kftc.abs: $(OBJS)
 	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) cal
 
 clean:
-	rm -f *.o *.abs cft77
+	rm -f *.o *.abs kftc
 
-install: cft77
-	install -b -o root -m 755 cft77 $(PREFIX)/bin
+install: kftc
+	install -b -o root -m 755 kftc $(PREFIX)/bin
 
 binops.o: binops.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<

@@ -106,7 +106,7 @@ void cstNeqvInt(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstEqChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) == 0];
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) == 0];
 }
 
 void cstEqLog(OperatorArgument *left, OperatorArgument *right) {
@@ -122,7 +122,7 @@ void cstEqReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstGeChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) >= 0];
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) >= 0];
 }
 
 void cstGeLog(OperatorArgument *left, OperatorArgument *right) {
@@ -138,7 +138,7 @@ void cstGeReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstGtChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) > 0];
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) > 0];
 }
 
 void cstGtLog(OperatorArgument *left, OperatorArgument *right) {
@@ -154,7 +154,7 @@ void cstGtReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstLeChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) <= 0];
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) <= 0];
 }
 
 void cstLeLog(OperatorArgument *left, OperatorArgument *right) {
@@ -170,7 +170,7 @@ void cstLeReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstLtChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) < 0];
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) < 0];
 }
 
 void cstLtLog(OperatorArgument *left, OperatorArgument *right) {
@@ -186,7 +186,7 @@ void cstLtReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstNeChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.chr.string, right->details.constant.value.chr.string) != 0];
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) != 0];
 }
 
 void cstNeLog(OperatorArgument *left, OperatorArgument *right) {
@@ -211,21 +211,21 @@ void cstCatChar(OperatorArgument *left, OperatorArgument *right) {
  */
 void (*cstBinOps[(OP_CAT-OP_ADD)+1][BaseType_Pointer+1])(OperatorArgument *left, OperatorArgument *right) = {
 /*             Undefined   Character   Logical     Integer     Real        Double      Complex     Pointer  */
-/* OP_ADD  */ {NULL,       NULL,       NULL,       cstAddInt,  cstAddReal, NULL,       NULL,       NULL      },
-/* OP_DIV  */ {NULL,       NULL,       NULL,       cstDivInt,  cstDivReal, NULL,       NULL,       NULL      },
-/* OP_EXP  */ {NULL,       NULL,       NULL,       cstExpInt,  cstExpReal, NULL,       NULL,       NULL      },
-/* OP_MUL  */ {NULL,       NULL,       NULL,       cstMulInt,  cstMulReal, NULL,       NULL,       NULL      },
-/* OP_SUB  */ {NULL,       NULL,       NULL,       cstSubInt,  cstSubReal, NULL,       NULL,       NULL      },
+/* OP_ADD  */ {NULL,       NULL,       NULL,       cstAddInt,  cstAddReal, cstAddReal, NULL,       NULL      },
+/* OP_DIV  */ {NULL,       NULL,       NULL,       cstDivInt,  cstDivReal, cstDivReal, NULL,       NULL      },
+/* OP_EXP  */ {NULL,       NULL,       NULL,       cstExpInt,  cstExpReal, cstExpReal, NULL,       NULL      },
+/* OP_MUL  */ {NULL,       NULL,       NULL,       cstMulInt,  cstMulReal, cstMulReal, NULL,       NULL      },
+/* OP_SUB  */ {NULL,       NULL,       NULL,       cstSubInt,  cstSubReal, cstSubReal, NULL,       NULL      },
 /* OP_AND  */ {NULL,       NULL,       cstAndLog,  cstAndInt,  NULL,       NULL,       NULL,       NULL      },
 /* OP_OR   */ {NULL,       NULL,       cstOrLog,   cstOrInt,   NULL,       NULL,       NULL,       NULL      },
 /* OP_EQV  */ {NULL,       NULL,       cstEqvLog,  cstEqvInt,  NULL,       NULL,       NULL,       NULL      },
 /* OP_NEQV */ {NULL,       NULL,       cstNeqvLog, cstNeqvInt, NULL,       NULL,       NULL,       NULL      },
-/* OP_EQ   */ {NULL,       cstEqChar,  cstEqLog,   cstEqInt,   cstEqReal,  NULL,       NULL,       cstEqLog  },
-/* OP_GE   */ {NULL,       cstGeChar,  cstGeLog,   cstGeInt,   cstGeReal,  NULL,       NULL,       cstGeLog  },
-/* OP_GT   */ {NULL,       cstGtChar,  cstGtLog,   cstGtInt,   cstGtReal,  NULL,       NULL,       cstGtLog  },
-/* OP_LE   */ {NULL,       cstLeChar,  cstLeLog,   cstLeInt,   cstLeReal,  NULL,       NULL,       cstLeLog  },
-/* OP_LT   */ {NULL,       cstLtChar,  cstLtLog,   cstLtInt,   cstLtReal,  NULL,       NULL,       cstLtLog  },
-/* OP_NE   */ {NULL,       cstNeChar,  cstNeLog,   cstNeInt,   cstNeReal,  NULL,       NULL,       cstNeLog  },
+/* OP_EQ   */ {NULL,       cstEqChar,  cstEqLog,   cstEqInt,   cstEqReal,  cstEqReal,  NULL,       cstEqLog  },
+/* OP_GE   */ {NULL,       cstGeChar,  cstGeLog,   cstGeInt,   cstGeReal,  cstGeReal,  NULL,       cstGeLog  },
+/* OP_GT   */ {NULL,       cstGtChar,  cstGtLog,   cstGtInt,   cstGtReal,  cstGtReal,  NULL,       cstGtLog  },
+/* OP_LE   */ {NULL,       cstLeChar,  cstLeLog,   cstLeInt,   cstLeReal,  cstLeReal,  NULL,       cstLeLog  },
+/* OP_LT   */ {NULL,       cstLtChar,  cstLtLog,   cstLtInt,   cstLtReal,  cstLtReal,  NULL,       cstLtLog  },
+/* OP_NE   */ {NULL,       cstNeChar,  cstNeLog,   cstNeInt,   cstNeReal,  cstNeReal,  NULL,       cstNeLog  },
 /* OP_CAT  */ {NULL,       cstCatChar, NULL,       NULL,       NULL,       NULL,       NULL,       NULL      }
 };
 
@@ -235,20 +235,20 @@ void (*cstBinOps[(OP_CAT-OP_ADD)+1][BaseType_Pointer+1])(OperatorArgument *left,
  */
 void (*genBinOps[(OP_CAT-OP_ADD)+1][BaseType_Pointer+1])(OperatorArgument *left, OperatorArgument *right) = {
 /*             Undefined   Character    Logical      Integer      Real         Double      Complex     Pointer  */
-/* OP_ADD  */ {NULL,       NULL,        NULL,        emitAddInt,  emitAddReal, NULL,       NULL,       NULL      },
-/* OP_DIV  */ {NULL,       NULL,        NULL,        emitDivInt,  emitDivReal, NULL,       NULL,       NULL      },
+/* OP_ADD  */ {NULL,       NULL,        NULL,        emitAddInt,  emitAddReal, emitAddReal,NULL,       NULL      },
+/* OP_DIV  */ {NULL,       NULL,        NULL,        emitDivInt,  emitDivReal, emitDivReal,NULL,       NULL      },
 /* OP_EXP  */ {NULL,       NULL,        NULL,        NULL,        NULL,        NULL,       NULL,       NULL      },
-/* OP_MUL  */ {NULL,       NULL,        NULL,        emitMulInt,  emitMulReal, NULL,       NULL,       NULL      },
-/* OP_SUB  */ {NULL,       NULL,        NULL,        emitSubInt,  emitSubReal, NULL,       NULL,       NULL      },
+/* OP_MUL  */ {NULL,       NULL,        NULL,        emitMulInt,  emitMulReal, emitMulReal,NULL,       NULL      },
+/* OP_SUB  */ {NULL,       NULL,        NULL,        emitSubInt,  emitSubReal, emitSubReal,NULL,       NULL      },
 /* OP_AND  */ {NULL,       NULL,        emitAndInt,  emitAndInt,  NULL,        NULL,       NULL,       NULL      },
 /* OP_OR   */ {NULL,       NULL,        emitOrInt,   emitOrInt,   NULL,        NULL,       NULL,       NULL      },
 /* OP_EQV  */ {NULL,       NULL,        emitEqvInt,  emitEqvInt,  NULL,        NULL,       NULL,       NULL      },
 /* OP_NEQV */ {NULL,       NULL,        emitNeqvInt, emitNeqvInt, NULL,        NULL,       NULL,       NULL      },
-/* OP_EQ   */ {NULL,       emitEqChar,  emitEqLog,   emitEqInt,   emitEqReal,  NULL,       NULL,       emitEqLog },
-/* OP_GE   */ {NULL,       emitGeChar,  emitGeLog,   emitGeInt,   emitGeReal,  NULL,       NULL,       emitGeLog },
-/* OP_GT   */ {NULL,       emitGtChar,  emitGtLog,   emitGtInt,   emitGtReal,  NULL,       NULL,       emitGtLog },
-/* OP_LE   */ {NULL,       emitLeChar,  emitLeLog,   emitLeInt,   emitLeReal,  NULL,       NULL,       emitLeLog },
-/* OP_LT   */ {NULL,       emitLtChar,  emitLtLog,   emitLtInt,   emitLtReal,  NULL,       NULL,       emitLtLog },
-/* OP_NE   */ {NULL,       emitNeChar,  emitNeLog,   emitNeInt,   emitNeReal,  NULL,       NULL,       emitNeLog },
+/* OP_EQ   */ {NULL,       emitEqChar,  emitEqLog,   emitEqInt,   emitEqReal,  emitEqReal, NULL,       emitEqLog },
+/* OP_GE   */ {NULL,       emitGeChar,  emitGeLog,   emitGeInt,   emitGeReal,  emitGeReal, NULL,       emitGeLog },
+/* OP_GT   */ {NULL,       emitGtChar,  emitGtLog,   emitGtInt,   emitGtReal,  emitGtReal, NULL,       emitGtLog },
+/* OP_LE   */ {NULL,       emitLeChar,  emitLeLog,   emitLeInt,   emitLeReal,  emitLeReal, NULL,       emitLeLog },
+/* OP_LT   */ {NULL,       emitLtChar,  emitLtLog,   emitLtInt,   emitLtReal,  emitLtReal, NULL,       emitLtLog },
+/* OP_NE   */ {NULL,       emitNeChar,  emitNeLog,   emitNeInt,   emitNeReal,  emitNeReal, NULL,       emitNeLog },
 /* OP_CAT  */ {NULL,       emitCatChar, NULL,        NULL,        NULL,        NULL,       NULL,       NULL      }
 };

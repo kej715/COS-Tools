@@ -136,6 +136,13 @@ static BaseType coerceDoubleToComplex(OperatorArgument *arg, BaseType fromType, 
 }
 
 static BaseType coerceDoubleToInt(OperatorArgument *arg, BaseType fromType, BaseType toType) {
+    if (arg->class == ArgClass_Constant) {
+        arg->details.constant.dt.type = toType;
+        arg->details.constant.value.integer = arg->details.constant.value.real;
+    }
+    else {
+        emitRealToInt(arg);
+    }
     return toType;
 }
 
@@ -148,6 +155,13 @@ static BaseType coerceIntToComplex(OperatorArgument *arg, BaseType fromType, Bas
 }
 
 static BaseType coerceIntToDouble(OperatorArgument *arg, BaseType fromType, BaseType toType) {
+    if (arg->class == ArgClass_Constant) {
+        arg->details.constant.dt.type = toType;
+        arg->details.constant.value.real = arg->details.constant.value.integer;
+    }
+    else {
+        emitIntToReal(arg);
+    }
     return toType;
 }
 

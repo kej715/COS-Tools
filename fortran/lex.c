@@ -352,7 +352,7 @@ char *getNextChar(char *s) {
     return s;
 }
 
-char *getNextToken(char *s, Token *token) {
+char *getNextToken(char *s, Token *token, bool doMatchKeywords) {
     char *start;
 
     memset(token, 0, sizeof(Token));
@@ -366,8 +366,13 @@ char *getNextToken(char *s, Token *token) {
     case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
     case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't':
     case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
-        s = matchKeyword(s, token);
-        if (token->type == TokenType_Invalid) {
+        if (doMatchKeywords) {
+            s = matchKeyword(s, token);
+            if (token->type == TokenType_Invalid) {
+                s = getIdentifier(s, token);
+            }
+        }
+        else {
             s = getIdentifier(s, token);
         }
         break;
@@ -449,8 +454,8 @@ static char *getNumber(char *s, Token *token) {
     else if (*s == 'H' || *s == 'h') {
         token->type = TokenType_Constant;
         token->details.constant.dt.type = BaseType_Character;
-        token->details.constant.value.chr.length = value;
-        token->details.constant.value.chr.string = cp = (char *)allocate(value + 1);
+        token->details.constant.value.character.length = value;
+        token->details.constant.value.character.string = cp = (char *)allocate(value + 1);
         s += 1;
         while (*s != '\0' && value > 0) {
             *cp++ = *s++;
@@ -496,8 +501,8 @@ static char *getString(char *s, Token *token) {
     len = s - start;
     token->type = TokenType_Constant;
     token->details.constant.dt.type = BaseType_Character;
-    token->details.constant.value.chr.length = len;
-    token->details.constant.value.chr.string = cp = (char *)allocate(len + 1);
+    token->details.constant.value.character.length = len;
+    token->details.constant.value.character.string = cp = (char *)allocate(len + 1);
     s = start;
     for (;;) {
         if (*s == quote) {

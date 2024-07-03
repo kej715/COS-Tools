@@ -211,17 +211,20 @@ typedef struct complexValue {
     f64 imaginary;
 } ComplexValue;
 
+typedef union dataValue {
+    i64 integer;
+    u64 logical;
+    f64 real;
+    CharacterValue character;
+    ComplexValue complex;
+} DataValue;
+
 typedef struct dataType {
     BaseType type;
     int constraint;
     int rank;
     Bounds bounds[7];
 } DataType;
-
-typedef struct doubleValue {
-   f64 high;
-   f64 low;
-} DoubleValue;
 
 typedef struct invalidDetails {
     int lineNo;
@@ -230,14 +233,7 @@ typedef struct invalidDetails {
 
 typedef struct constantDetails {
     DataType dt;
-    union val {
-        i64 integer;
-        u64 logical;
-        f64 real;
-        CharacterValue chr;
-        DoubleValue dp;
-        ComplexValue complex;
-    } value;
+    DataValue value;
 } ConstantDetails;
 
 typedef struct keywordDetails {
@@ -265,11 +261,6 @@ typedef struct token {
     TokenDetails details;
 } Token;
 
-typedef struct formalParam {
-    struct formalParam *next;
-    struct symbol *sym;
-} FormalParam;
-
 typedef struct labelDetails {
     StatementClass class;
     bool forwardRef;
@@ -283,7 +274,6 @@ typedef struct pointeeDetails {
 
 typedef struct progUnitDetails {
     char frameSizeLabel[8];
-    FormalParam *params;
     DataType dt;
     int offset;
 } ProgUnitDetails;

@@ -39,7 +39,7 @@ Symbol *findSymbol(char *identifier);
 void freeAllSymbols(void);
 void generateLabel(char *label);
 char *getNextChar(char *s);
-char *getNextToken(char *s, Token *token);
+char *getNextToken(char *s, Token *token, bool doMatchKeywords);
 void printSymbols(FILE *f);
 void *reallocate(void *old, int oldSize, int newSize);
 
