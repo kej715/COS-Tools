@@ -28,6 +28,7 @@
 #define MAX_ALLOCATED_UNITS  20
 #define MAX_FILE_NAME_LEN     7
 #define MAX_FMT_DESC         50
+#define MAX_FMT_LEN        1024
 #define MAX_FMT_RECL        152
 #define MAX_UNIT_NUMBER     102
 

@@ -45,6 +45,7 @@ static int        descIdx;
 static FormatDesc descriptors[MAX_FMT_DESC];
 static int        doPlusSigns;
 static FormatDesc *firstDesc;
+static char       fmtBuf[MAX_FMT_LEN+1];
 static int        isBlankZero;
 static char       *limit;
 static FormatDesc *nextDesc;
@@ -109,11 +110,26 @@ char *_getrcd(void) {
     return currentRecord;
 }
 
-void _lstchr(int unitNum, DataValue *value) {
+void _inpchr(int unitNum, unsigned long ref) {
+}
+
+void _inpdbl(int unitNum, DataValue *ref) {
+}
+
+void _inpint(int unitNum, DataValue *ref) {
+}
+
+void _inplog(int unitNum, DataValue *ref) {
+}
+
+void _lstchr(int unitNum, unsigned long value) {
+    int len;
     char *s;
 
-    for (s = value->character.string; *s != '\0'; s++) {
-        if (cursor < limit) *cursor++ = *s;
+    s = (char *)(value & 0xffffffff);
+    len = value >> 32;
+    while (len-- > 0) {
+        if (cursor < limit) *cursor++ = *s++;
     }
 }
 
@@ -227,7 +243,7 @@ void _outfmt(DataValue *value, int *eor) {
     outfmtHelper(value, 0, eor);
 }
 
-void _prsfmt(char *s) {
+void _przfmt(char *s) {
     descIdx = 0;
     currentParent = NULL;
     revertDesc = NULL;
@@ -592,7 +608,10 @@ static char *getPrecision(char *s, FormatDesc *fdp) {
 }
 
 static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor) {
+    unsigned long charRef;
     int fieldWidth;
+    int len;
+    int n;
     char *s;
 
     *eor = FALSE;
@@ -618,6 +637,22 @@ static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor) {
         switch (nextDesc->class) {
         case Fmt_A:
             if (doEndOnRep == 0) {
+                charRef = (unsigned long)value;
+                s = (char *)(charRef & 0xffffffff);
+                len = charRef >> 32;
+                fieldWidth = nextDesc->width;
+                if (len < fieldWidth) {
+                    n = fieldWidth - len;
+                    fieldWidth -= n;
+                    while (n-- > 0) {
+                        if (cursor < limit) *cursor++ = ' ';
+                    }
+                }
+                while (fieldWidth > 0 && len > 0) {
+                    if (cursor < limit) *cursor++ = *s++;
+                    fieldWidth -= 1;
+                    len -= 1;
+                }
             }
             return;
         case Fmt_B:

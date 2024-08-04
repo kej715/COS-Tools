@@ -60,33 +60,55 @@ typedef enum parsingState {
 static char *baseTypeToStr(BaseType type);
 static char *collectStmt(void);
 static Token *copyToken(Token *token);
-static Symbol *defineLocalVariable(char *id, DataType *dt);
+static Token *createIntegerConstant(int value);
+static void defineType(Symbol *symbol);
 static char *eatWsp(char *s);
 static void err(char *format, ...);
+static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset);
 static bool evaluateExpression(Token *expression, OperatorArgument *result);
 static bool evaluateExprHelper(Token *expression);
-static bool evaluateIdentifier(char *id);
+static bool evaluateFmtSpec(ControlInfoList *ciList);
+static bool evaluateFunction(Token *fn, Symbol *symbol);
+static bool evaluateIdentifier(Token *id);
+static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, bool *isScalar);
+static bool evaluateStringIndex(Token *expression, OperatorArgument *index);
+static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgument *offset, OperatorArgument *length);
+static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int idx, OperatorArgument *subscript);
 static bool executeOperator(OperatorId op);
+static void freeControlInfoList(ControlInfoList *list);
+static void freeStorageReference(StorageReference *reference);
+static void freeStringRange(StringRange *range);
 static void freeToken(Token *token);
+static void freeTokenList(TokenListItem *item);
 static DataType *getDataType(OperatorArgument *arg);
+static char *getIntValue(char *s, int *value);
 static char *getLabel(char *s, char *label);
+static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx);
+static void inputFini(ControlInfoList *ciList);
+static void inputInit(ControlInfoList *ciList);
 static void list(char *format, ...);
+static void loadValue(OperatorArgument *value);
 static char *opIdToStr(OperatorId id);
+static void outputFini(ControlInfoList *ciList);
+static void outputInit(ControlInfoList *ciList);
+static char *parseActualArguments(char *s, int *frameSize);
 static void parseArithmeticIF(char *s, Register reg);
-static void parseAssignment(char *s, char *id);
-static char *parseCallParameters(char *s, int *frameSize);
-static char *parseCharConstraint(char *s, DataType *dt);
+static void parseAssignment(char *s, Token *id);
+static char *parseCharConstraint(char *s, Token *token, DataType *dt);
+static char *parseControlInfoList(char *s, ControlInfoList **ciList, int defaultUnit);
 static char *parseDataType(char *s, Token *token, DataType *type);
 static char *parseDimDecl(char *s, Symbol *symbol);
 static char *parseExpression(char *s, Token **expression);
-static char *parseFmtSpec(char *s, bool *isListDirected);
-static char *parseFormalParameters(char *s);
-static void parseInputList(char *s);
+static char *parseExpressionList(char *s, TokenListItem **list);
+static char *parseFmtSpec(char *s, ControlInfoList *ciList);
+static char *parseFormalArguments(char *s);
+static void parseInputList(char *s, ControlInfoList *ciList);
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf);
-static void parseOutputList(char *s, bool isListDirected);
+static void parseOutputList(char *s, ControlInfoList *ciList);
 static void parseOutputStmt(char *s, int unitNum);
+static char *parseStorageReference(char *s, Token *id, StorageReference *reference);
+static char *parseStringRange(char *s, StringRange **range);
 static char *parseTypeDecl(char *s, DataType *dt);
-static char *parseUnitAndFmt(char *s, int defaultUnit, bool *isListDirected);
 static void popArg(OperatorArgument *arg);
 static void popOp(OperatorDetails *op);
 static void presetImplicit(void);
@@ -112,7 +134,7 @@ static void parseENTRY(char *s);
 static void parseEQUIVALENCE(char *s);
 static void parseEXTERNAL(char *s);
 static void parseFORMAT(char *s);
-static void parseFUNCTION(char *s);
+static void parseFUNCTION(char *s, DataType *dt);
 static void parseGOTO(char *s);
 static void parseIF(char *s, bool isFromLogIf);
 static void parseINCLUDE(char *s);
@@ -137,6 +159,20 @@ static char *tokenIdToStr(TokenId id);
 static char *tokenTypeToStr(TokenType type);
 #endif
 
+static ArgumentClass argClassForSymClass[] = {
+    ArgClass_Undefined,  /* SymClass_Undefined   */
+    ArgClass_Undefined,  /* SymClass_Program     */
+    ArgClass_Undefined,  /* SymClass_Subroutine  */
+    ArgClass_Function,   /* SymClass_Function    */
+    ArgClass_Undefined,  /* SymClass_BlockData   */
+    ArgClass_Undefined,  /* SymClass_NamedCommon */
+    ArgClass_Local,      /* SymClass_Local       */
+    ArgClass_Global,     /* SymClass_Global      */
+    ArgClass_Argument,   /* SymClass_Argument    */
+    ArgClass_Constant,   /* SymClass_Parameter   */
+    ArgClass_Pointee,    /* SymClass_Pointee     */
+    ArgClass_Undefined   /* SymClass_Label       */
+};
 static Symbol defaultProgSym = {
     NULL, NULL, NULL, "MAIN", SymClass_Program
 };
@@ -295,7 +331,7 @@ void compile(char *name) {
                     presetProgUnit();
                     continue;
                 case FUNCTION:
-                    parseFUNCTION(s);
+                    parseFUNCTION(s, NULL);
                     continue;
                 case PROGRAM:
                     parsePROGRAM(s);
@@ -303,6 +339,24 @@ void compile(char *name) {
                 case SUBROUTINE:
                     parseSUBROUTINE(s);
                     continue;
+                case CHARACTER:
+                case COMPLEX:
+                case INTEGER:
+                case LOGICAL:
+                case DOUBLEPRECISION:
+                case POINTER:
+                case REAL:
+                    start = s;
+                    s = parseDataType(s, &token, &dt);
+                    s = eatWsp(s);
+                    if (strncasecmp(s, "FUNCTION", 8) == 0) {
+                        parseFUNCTION(s + 8, &dt);
+                        continue;
+                    }
+                    else {
+                        s = start;
+                    }
+                    break;
                 default:
                     break;
                 }
@@ -429,10 +483,6 @@ void compile(char *name) {
                     break;
                 case BACKSPACE:
                     break;
-                case BUFFERIN:
-                    break;
-                case BUFFEROUT:
-                    break;
                 case CALL:
                     parseCALL(s);
                     break;
@@ -497,7 +547,7 @@ void compile(char *name) {
                 }
             }
             else if (token.type == TokenType_Identifier) {
-                parseAssignment(s, token.details.identifier);
+                parseAssignment(s, &token);
             }
             else {
                 err("Invalid statement");
@@ -532,6 +582,9 @@ void compile(char *name) {
 static Token *copyToken(Token *token) {
     int len;
     Token *new;
+    TokenListItem *newQ;
+    TokenListItem *prvQ;
+    TokenListItem *qualifier;
 
     if (token == NULL) return NULL;
 
@@ -539,10 +592,24 @@ static Token *copyToken(Token *token) {
     memcpy(new, token, sizeof(Token));
     switch (token->type) {
     case TokenType_Identifier:
-        if (token->details.identifier != NULL) {
-            len = strlen(token->details.identifier);
-            new->details.identifier = (char *)allocate(len + 1);
-            memcpy(new->details.identifier, token->details.identifier, len);
+        if (token->details.identifier.name != NULL) {
+            len = strlen(token->details.identifier.name);
+            new->details.identifier.name = (char *)allocate(len + 1);
+            memcpy(new->details.identifier.name, token->details.identifier.name, len);
+        }
+        for (qualifier = token->details.identifier.qualifiers, prvQ = NULL; qualifier != NULL; qualifier = qualifier->next) {
+            newQ = (TokenListItem *)allocate(sizeof(TokenListItem));
+            newQ->item = copyToken(qualifier->item);
+            if (prvQ == NULL)
+                new->details.identifier.qualifiers = newQ;
+            else
+                prvQ->next = newQ;
+            prvQ = newQ;
+        }
+        if (token->details.identifier.range != NULL) {
+            new->details.identifier.range = (StringRange *)allocate(sizeof(StringRange));
+            new->details.identifier.range->first = copyToken(token->details.identifier.range->first);
+            new->details.identifier.range->last = copyToken(token->details.identifier.range->last);
         }
         break;
     case TokenType_Constant:
@@ -563,15 +630,19 @@ static Token *copyToken(Token *token) {
     return new;
 }
 
-static Symbol *defineLocalVariable(char *id, DataType *dt) {
-    Symbol *symbol;
+static Token *createIntegerConstant(int value) {
+    Token *token;
 
-    symbol = addSymbol(id, SymClass_Local);
-    if (symbol != NULL) {
-        symbol->details.variable.dt = *dt;
-    }
+    token = (Token *)allocate(sizeof(Token));
+    token->type = TokenType_Constant;
+    token->details.constant.dt.type = BaseType_Integer;
+    token->details.constant.value.integer = value;
+    return token;
+}
 
-    return symbol;
+static void defineType(Symbol *symbol) {
+    if (symbol->details.variable.dt.type == BaseType_Undefined)
+        symbol->details.variable.dt = implicitTypes[toupper(symbol->identifier[0]) - 'A'];
 }
 
 static char *eatWsp(char *s) {
@@ -589,6 +660,71 @@ static void err(char *format, ...) {
     list(" *ERROR*   %s\n", buf);
     fprintf(stderr, "ERROR line %d : %s\n", lineNo, buf);
     errorCount += 1;
+}
+
+static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset) {
+    void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
+    int d;
+    OperatorArgument dim;
+    int rank;
+    OperatorArgument subscript;
+    OperatorArgument sum;
+
+    /*
+     *  Initialize sum with last subscript
+     */
+    rank = symbol->details.variable.dt.rank;
+    if (evaluateSubscript(symbol, subscriptList, rank - 1, &sum)) return TRUE;
+
+    if (rank > 1) { // 2 or more dimensional array
+        memset(&dim, 0, sizeof(OperatorArgument));
+        dim.details.constant.dt.type = BaseType_Integer;
+        for (d = rank - 2; d >= 0; d--) {
+            dim.class = ArgClass_Constant;
+            dim.details.constant.value.integer = (symbol->details.variable.dt.bounds[d].upper - symbol->details.variable.dt.bounds[d].lower) + 1;
+            if (isConstant(sum)) {
+                sum.details.constant.value.integer *= dim.details.constant.value.integer;
+            }
+            else {
+                emitLoadConst(&dim);
+                binop = genBinOps[OP_MUL - OP_ADD][BaseType_Integer];
+                if (isLoadable(sum)) emitLoadValue(&sum);
+                (*binop)(&dim, &sum);
+                freeRegister(dim.reg);
+            }
+            if (evaluateSubscript(symbol, subscriptList, d, &subscript)) {
+                if (isCalculation(sum)) freeRegister(sum.reg);
+                return TRUE;
+            }
+            if (isConstant(subscript) && isConstant(sum)) {
+                sum.details.constant.value.integer += subscript.details.constant.value.integer;
+            }
+            else {
+                loadValue(&subscript);
+                loadValue(&sum);
+                binop = genBinOps[OP_ADD - OP_ADD][BaseType_Integer];
+                (*binop)(&subscript, &sum);
+                freeRegister(subscript.reg);
+            }
+        }
+    }
+    if (symbol->details.variable.dt.type == BaseType_Character) {
+        if (isConstant(sum)) {
+            sum.details.constant.value.integer *= symbol->details.variable.dt.constraint;
+        }
+        else {
+            dim.class = ArgClass_Constant;
+            dim.details.constant.value.integer = symbol->details.variable.dt.constraint;
+            emitLoadConst(&dim);
+            binop = genBinOps[OP_MUL - OP_ADD][BaseType_Integer];
+            if (isLoadable(sum)) emitLoadValue(&sum);
+            (*binop)(&dim, &sum);
+            freeRegister(dim.reg);
+        }
+    }
+    *offset = sum;
+
+    return FALSE;
 }
 
 static bool evaluateExpression(Token *expression, OperatorArgument *result) {
@@ -614,7 +750,7 @@ static bool evaluateExprHelper(Token *expression) {
     err = FALSE;
     switch (expression->type) {
     case TokenType_Identifier:
-        err = evaluateIdentifier(expression->details.identifier);
+        err = evaluateIdentifier(expression);
         break;
     case TokenType_Constant:
         arg.class = ArgClass_Constant;
@@ -656,40 +792,212 @@ static bool evaluateExprHelper(Token *expression) {
     return err;
 }
 
-static bool evaluateIdentifier(char *id) {
+static bool evaluateFmtSpec(ControlInfoList *ciList) {
+    DataType *dt;
+    char *formatter;
+    char lineLabel[16];
+    Register reg;
+    OperatorArgument result;
+    Symbol *sym;
+
+    if (ciList->format == NULL) {
+        emitPrimCall("@_prslst");
+        return FALSE;
+    }
+    if (evaluateExpression(ciList->format, &result)) return TRUE;
+    dt = getDataType(&result);
+    if (result.class == ArgClass_Constant && dt->type == BaseType_Integer) {
+        sprintf(lineLabel, "%ld", result.details.constant.value.integer);
+        sym = findLabel(lineLabel);
+        if (sym == NULL) {
+            sym = addLabel(lineLabel);
+            sym->details.label.class = StmtClass_Format;
+            sym->details.label.forwardRef = TRUE;
+        }
+        reg = emitLabelReference(sym);
+        emitConvertToByteAddress(reg);
+        emitPushReg(reg);
+        freeRegister(reg);
+        formatter = "@_przfmt";
+    }
+    else if (dt->type == BaseType_Character) {
+        loadValue(&result);
+        emitPushReg(result.reg);
+        freeRegister(result.reg);
+        formatter = "@_prsfmt";
+    }
+    else {
+        err("Format specification is not character type or FORMAT label");
+        if (isCalculation(result)) freeRegister(result.reg);
+        return TRUE;
+    }
+    emitPrimCall(formatter);
+    emitAdjustSP(1);
+
+    return FALSE;
+}
+
+static bool evaluateFunction(Token *fn, Symbol *symbol) {
+    bool evalStatus;
+    int frameSize;
+    int parmIdx;
+    int pass;
+    TokenListItem *qualifier;
+    Register reg;
+    u8 registerMap;
+    OperatorArgument result;
+    int tempIdx;
+
+    registerMap = getRegisterMap();
+    emitSaveRegs(registerMap);
+    enableEmission(FALSE);
+    frameSize = 0;
+    evalStatus = FALSE;
+    for (pass = 1; pass <= 2; pass++) {
+        if (pass == 2) {
+            enableEmission(TRUE);
+            emitAdjustSP(-frameSize);
+            tempIdx = parmIdx;
+        }
+        parmIdx = 0;
+        for (qualifier = fn->details.identifier.qualifiers; qualifier != NULL; qualifier = qualifier->next) {
+            if (qualifier->item == NULL) continue;
+            if (evaluateExpression(qualifier->item, &result)) {
+                evalStatus = TRUE;
+            }
+            else if (isConstant(result)) {
+                if (pass == 1) {
+                    frameSize += 2;
+                }
+                else {
+                    emitLoadConst(&result);
+                    emitStoreStack(result.reg, tempIdx);
+                    reg = emitLoadStackAddr(tempIdx);
+                    emitStoreStack(reg, parmIdx);
+                    freeRegister(reg);
+                    freeRegister(result.reg);
+                    tempIdx += 1;
+                }
+            }
+            else if (isLoadable(result)) {
+                if (pass == 1) {
+                    frameSize += 1;
+                }
+                else {
+                    emitLoadReference(&result);
+                    emitStoreStack(result.reg, parmIdx);
+                    freeRegister(result.reg);
+                }
+            }
+            else {
+                if (pass == 1) {
+                    frameSize += 2;
+                }
+                else {
+                    emitStoreStack(result.reg, tempIdx);
+                    reg = emitLoadStackAddr(tempIdx);
+                    emitStoreStack(reg, parmIdx);
+                    freeRegister(reg);
+                    freeRegister(result.reg);
+                    tempIdx += 1;
+                }
+            }
+            parmIdx += 1;
+        }
+    }
+    emitSubprogramCall(fn->details.identifier.name);
+    emitAdjustSP(frameSize);
+    emitRestoreRegs(registerMap);
+    reg = allocateRegister();
+    emitCopyRegister(reg, RESULT_REG);
+    result.class = ArgClass_Calculation;
+    result.details.calculation = symbol->details.variable.dt;
+    result.reg = reg;
+    pushArg(&result);
+
+    return evalStatus;
+}
+
+static bool evaluateIdentifier(Token *id) {
     OperatorArgument arg;
+    char *name;
+    OperatorArgument offset;
+    u8 registerMap;
+    OperatorArgument strLength;
+    OperatorArgument strOffset;
     Symbol *symbol;
 
-    symbol = findSymbol(id);
+    name = id->details.identifier.name;
+    symbol = findSymbol(name);
     if (symbol == NULL) {
-        symbol = defineLocalVariable(id, &implicitTypes[toupper(id[0]) - 'A']);
-        localOffset -= calculateSize(symbol);
-        symbol->details.variable.offset = localOffset;
+        symbol = addSymbol(name, SymClass_Undefined);
+    }
+    if (symbol->class == SymClass_Undefined) {
+        if (id->details.identifier.qualifiers == NULL) { // simple variable reference
+            symbol->class = SymClass_Local;
+            defineType(symbol);
+            localOffset -= calculateSize(symbol);
+            symbol->details.variable.offset = localOffset;
+        }
+        else {
+            defineType(symbol);
+            return evaluateFunction(id, symbol);
+        }
     }
     else if (symbol->class == SymClass_Argument && symbol->details.variable.dt.type == BaseType_Undefined) {
-        symbol->details.variable.dt = implicitTypes[toupper(id[0]) - 'A'];
+        symbol->details.variable.dt = implicitTypes[toupper(name[0]) - 'A'];
+    }
+    else if (symbol->class == SymClass_Function && symbol->details.progUnit.dt.type == BaseType_Undefined) {
+        symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
+        localOffset -= calculateSize(symbol);
+        symbol->details.progUnit.offset = localOffset;
     }
 
+    arg.class = argClassForSymClass[symbol->class];
     switch (symbol->class) {
     case SymClass_Local:
-        arg.class = ArgClass_Local;
-        arg.details.symbol = symbol;
-        break;
     case SymClass_Global:
-        arg.class = ArgClass_Global;
-        arg.details.symbol = symbol;
-        break;
     case SymClass_Argument:
-        arg.class = ArgClass_Argument;
-        arg.details.symbol = symbol;
-        break;
+    case SymClass_Pointee:
     case SymClass_Function:
-        arg.class = ArgClass_Function;
-        arg.details.symbol = symbol;
-        // TODO: handle external/intrinsic function call
+        arg.details.reference.symbol = symbol;
+        if (id->details.identifier.qualifiers == NULL) {
+            arg.details.reference.offsetClass = ArgClass_Undefined;
+            if (id->details.identifier.range != NULL) {
+                if (evaluateStringRange(symbol, id->details.identifier.range, &strOffset, &strLength)) return TRUE;
+                emitLoadReference(&arg);
+                emitUpdateStringRef(&arg, &strOffset, &strLength);
+            }
+        }
+        else if (symbol->details.variable.dt.rank > 0) {
+            if (evaluateArrayRef(symbol, id->details.identifier.qualifiers, &offset)) return TRUE;
+            arg.details.reference.offsetClass = offset.class;
+            switch (offset.class) {
+            case ArgClass_Constant:
+                arg.details.reference.offset.constant = offset.details.constant.value.integer;
+                break;
+            case ArgClass_Calculation:
+                arg.details.reference.offset.reg = offset.reg;
+                break;
+            default:
+                fprintf(stderr, "Invalid class of array reference offset: %d\n", offset.class);
+                exit(1);
+            }
+            if (id->details.identifier.range != NULL) {
+                if (evaluateStringRange(symbol, id->details.identifier.range, &strOffset, &strLength)) {
+                    if (isCalculation(offset)) freeRegister(offset.reg);
+                    return TRUE;
+                }
+                emitLoadReference(&arg);
+                emitUpdateStringRef(&arg, &strOffset, &strLength);
+            }
+        }
+        else {
+            err("%s is not an array", symbol->identifier);
+            return TRUE;
+        }
         break;
     case SymClass_Parameter:
-        arg.class = ArgClass_Constant;
         arg.details.constant = symbol->details.param;
         break;
     default:
@@ -698,6 +1006,174 @@ static bool evaluateIdentifier(char *id) {
     }
 
     pushArg(&arg);
+    return FALSE;
+}
+
+static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, bool *isScalar) {
+    DataType *dt;
+    OperatorArgument offset;
+    OperatorArgument strLength;
+    OperatorArgument strOffset;
+
+    *isScalar = FALSE;
+    target->class = argClassForSymClass[reference->symbol->class];
+    target->details.reference.symbol = reference->symbol;
+    if (reference->expressionList == NULL) {
+        target->details.reference.offsetClass = ArgClass_Undefined;
+        if (reference->strRange == NULL) {
+            dt = getSymbolType(reference->symbol);
+            if (dt->type == BaseType_Character) {
+                emitLoadReference(target);
+            }
+            else {
+                *isScalar = TRUE;
+            }
+            return FALSE;
+        }
+        else {
+            if (evaluateStringRange(reference->symbol, reference->strRange, &strOffset, &strLength)) return TRUE;
+            emitLoadReference(target);
+            emitUpdateStringRef(target, &strOffset, &strLength);
+        }
+    }
+    else if (reference->symbol->details.variable.dt.rank > 0) {
+        if (evaluateArrayRef(reference->symbol, reference->expressionList, &offset)) return TRUE;
+        target->details.reference.offsetClass = offset.class;
+        switch (offset.class) {
+        case ArgClass_Constant:
+            target->details.reference.offset.constant = offset.details.constant.value.integer;
+            break;
+        case ArgClass_Calculation:
+            target->details.reference.offset.reg = offset.reg;
+            break;
+        default:
+            fprintf(stderr, "Invalid class of array reference offset: %d\n", offset.class);
+            exit(1);
+        }
+        if (reference->strRange == NULL) {
+            emitLoadReference(target);
+        }
+        else {
+            if (evaluateStringRange(reference->symbol, reference->strRange, &strOffset, &strLength)) {
+                if (isCalculation(offset)) freeRegister(offset.reg);
+                return TRUE;
+            }
+            emitLoadReference(target);
+            emitUpdateStringRef(target, &strOffset, &strLength);
+        }
+    }
+    else {
+        err("%s is not an array", reference->symbol->identifier);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+static bool evaluateStringIndex(Token *expression, OperatorArgument *index) {
+    void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
+    DataType *dt;
+
+    if (evaluateExpression(expression, index)) {
+        err("Incorrect string index");
+        return TRUE;
+    }
+    dt = getDataType(index);
+    if (dt->type != BaseType_Integer) dt->type = coerceArgument(index, dt->type, BaseType_Integer);
+
+    return dt->type == BaseType_Undefined;
+}
+
+static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgument *offset, OperatorArgument *length) {
+    void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
+    OperatorArgument negOne;
+
+    memset(offset, 0, sizeof(OperatorArgument));
+    offset->class = ArgClass_Constant;
+    offset->details.constant.dt.type = BaseType_Integer;
+    offset->details.constant.value.integer = 0;
+    memset(length, 0, sizeof(OperatorArgument));
+    length->class = ArgClass_Constant;
+    length->details.constant.dt.type = BaseType_Integer;
+    length->details.constant.value.integer = symbol->details.variable.dt.constraint;
+    if (range != NULL) {
+        if (range->first != NULL) {
+            if (evaluateStringIndex(range->first, offset)) return TRUE;
+            if (offset->class == ArgClass_Constant) {
+                offset->details.constant.value.integer -= 1;
+            }
+            else {
+                memset(&negOne, 0, sizeof(OperatorArgument));
+                negOne.class = ArgClass_Constant;
+                negOne.details.constant.dt.type = BaseType_Integer;
+                negOne.details.constant.value.integer = -1;
+                emitLoadConst(&negOne);
+                if (offset->class > ArgClass_Function) emitLoadValue(offset);
+                binop = genBinOps[OP_ADD - OP_ADD][BaseType_Integer];
+                (*binop)(&negOne, offset);
+                freeRegister(negOne.reg);
+                offset->class = ArgClass_Calculation;
+            }
+        }
+        if (range->last != NULL && evaluateStringIndex(range->last, length)) {
+            if (offset->class == ArgClass_Calculation) freeRegister(offset->reg);
+            return TRUE;
+        }
+        if (offset->class == ArgClass_Constant) {
+            if (length->class == ArgClass_Constant) {
+                length->details.constant.value.integer -= offset->details.constant.value.integer;
+                return FALSE;
+            }
+            else if (offset->details.constant.value.integer == 0) {
+                return FALSE;
+            }
+        }
+        loadValue(length);
+        loadValue(offset);
+        emitPushReg(offset->reg);
+        binop = genBinOps[OP_SUB - OP_ADD][BaseType_Integer];
+        (*binop)(length, offset);
+        freeRegister(length->reg);
+        length->reg = offset->reg;
+        offset->reg = allocateRegister();
+        emitPopReg(offset->reg);
+    }
+    
+    return FALSE;
+}
+
+static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int idx, OperatorArgument *subscript) {
+    void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
+    DataType *dt;
+    bool isConst;
+    OperatorArgument lowerBound;
+    TokenListItem *qualifier;
+
+    qualifier = getQualifier(subscriptList, idx);
+    if (qualifier == NULL || qualifier->item == NULL || evaluateExpression(qualifier->item, subscript)) {
+        err("Incorrect array index");
+        return TRUE;
+    }
+    dt = getDataType(subscript);
+    if (dt->type != BaseType_Integer) dt->type = coerceArgument(subscript, dt->type, BaseType_Integer);
+    if (symbol->details.variable.dt.bounds[idx].lower != 0) {
+        if (subscript->class == ArgClass_Constant) {
+            subscript->details.constant.value.integer -= symbol->details.variable.dt.bounds[idx].lower;
+        }
+        else {
+            memset(&lowerBound, 0, sizeof(OperatorArgument));
+            lowerBound.class = ArgClass_Constant;
+            lowerBound.details.constant.dt.type = BaseType_Integer;
+            lowerBound.details.constant.value.integer = -symbol->details.variable.dt.bounds[idx].lower;
+            emitLoadConst(&lowerBound);
+            if (subscript->class > ArgClass_Function) emitLoadValue(subscript);
+            binop = genBinOps[OP_ADD - OP_ADD][BaseType_Integer];
+            (*binop)(&lowerBound, subscript);
+            freeRegister(lowerBound.reg);
+            subscript->class = ArgClass_Calculation;
+        }
+    }
+
     return FALSE;
 }
 
@@ -715,10 +1191,7 @@ static bool executeOperator(OperatorId op) {
     rightType = getDataType(&rightArg);
     isConstResult = isConstant(rightArg);
     if (isLoadable(rightArg)) {
-        emitLoadVar(&rightArg);
-    }
-    else if (isFunction(rightArg)) {
-        emitFnCall(&rightArg);
+        emitLoadValue(&rightArg);
     }
     isBop = isBinaryOp(op);
     if (isBop) {
@@ -731,10 +1204,7 @@ static bool executeOperator(OperatorId op) {
             return TRUE;
         }
         if (isLoadable(leftArg)) {
-            emitLoadVar(&leftArg);
-        }
-        else if (isFunction(leftArg)) {
-            emitFnCall(&leftArg);
+            emitLoadValue(&leftArg);
         }
         if (leftType->type  != argType) leftType->type  = coerceArgument(&leftArg,  leftType->type,  argType);
         if (rightType->type != argType) rightType->type = coerceArgument(&rightArg, rightType->type, argType);
@@ -869,11 +1339,38 @@ static bool executeOperator(OperatorId op) {
     return FALSE;
 }
 
+static void freeControlInfoList(ControlInfoList *ciList) {
+    if (ciList != NULL) {
+        if (ciList->unit != NULL) freeToken(ciList->unit);
+        if (ciList->format != NULL) freeToken(ciList->format);
+        if (ciList->recordNumber != NULL) freeToken(ciList->recordNumber);
+        freeStorageReference(&ciList->iostat);
+        free(ciList);
+    }
+}
+
+static void freeStorageReference(StorageReference *reference) {
+    if (reference != NULL) {
+        freeTokenList(reference->expressionList);
+        freeStringRange(reference->strRange);
+    }
+}
+
+static void freeStringRange(StringRange *range) {
+    if (range != NULL) {
+        freeToken(range->first);
+        freeToken(range->last);
+        free(range);
+    }
+}
+
 static void freeToken(Token *token) {
     if (token != NULL) {
         switch (token->type) {
         case TokenType_Identifier:
-            if (token->details.identifier != NULL) free(token->details.identifier);
+            if (token->details.identifier.name != NULL) free(token->details.identifier.name);
+            freeTokenList(token->details.identifier.qualifiers);
+            freeStringRange(token->details.identifier.range);
             break;
         case TokenType_Constant:
             if (token->details.constant.dt.type == BaseType_Character) {
@@ -891,11 +1388,18 @@ static void freeToken(Token *token) {
     }
 }
 
-static DataType undefinedType = { BaseType_Undefined };
+static void freeTokenList(TokenListItem *item) {
+    TokenListItem *nextItem;
+
+    while (item != NULL) {
+        nextItem = item->next;
+        freeToken(item->item);
+        free(item);
+        item = nextItem;
+    }
+}
 
 static DataType *getDataType(OperatorArgument *arg) {
-    Symbol *sym;
-
     switch (arg->class) {
     case ArgClass_Constant:
         return &arg->details.constant.dt;
@@ -904,27 +1408,29 @@ static DataType *getDataType(OperatorArgument *arg) {
     case ArgClass_Argument:
     case ArgClass_Pointee:
     case ArgClass_Function:
-        sym = arg->details.symbol;
-        switch (sym->class) {
-        case SymClass_Function:
-        case SymClass_Local:
-        case SymClass_Global:
-        case SymClass_Argument:
-            return &sym->details.variable.dt;
-        case SymClass_Parameter:
-            return &sym->details.param.dt;
-        case SymClass_Pointee:
-            return &sym->details.pointee.dt;
-        default:
-            return &undefinedType;
-        }
-        break;
+        return getSymbolType(arg->details.reference.symbol);
     case ArgClass_Calculation:
         return &arg->details.calculation;
     default:
         fprintf(stderr, "Unrecognized operator argument class: %d\n", arg->class);
         exit(1);
     }
+}
+
+static char *getIntValue(char *s, int *value) {
+    *value = 0;
+    for (;;) {
+        if (isdigit(*s)) {
+            *value = (*value * 10) + (*s++ - '0');
+        }
+        else if (isspace(*s)) {
+            s += 1;
+        }
+        else {
+            break;
+        }
+    }
+    return s;
 }
 
 static char *getLabel(char *s, char *label) {
@@ -955,6 +1461,33 @@ static char *getLabel(char *s, char *label) {
     return NULL;
 }
 
+static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx) {
+    TokenListItem *qualifier;
+
+    qualifier = qualifierList;
+    while (qualifier != NULL && idx > 0) {
+        qualifier = qualifier->next;
+        idx -= 1;
+    }
+
+    return (idx == 0) ? qualifier : NULL;
+}
+
+static void inputFini(ControlInfoList *ciList) {
+    emitAdjustSP(2);
+}
+
+static void inputInit(ControlInfoList *ciList) {
+    OperatorArgument unit;
+
+    if (evaluateFmtSpec(ciList) || evaluateExpression(ciList->unit, &unit)) return;
+    emitAdjustSP(-2);
+    loadValue(&unit);
+    emitStoreStack(unit.reg, 0);
+    freeRegister(unit.reg);
+    emitPrimCall("@_rdurec");
+}
+
 static void list(char *format, ...) {
     va_list ap;
 
@@ -962,6 +1495,15 @@ static void list(char *format, ...) {
         va_start(ap, format);
         vfprintf(listingFile, format, ap);
         va_end(ap);
+    }
+}
+
+static void loadValue(OperatorArgument *value) {
+    if (value->class == ArgClass_Constant) {
+        emitLoadConst(value);
+    }
+    else if (value->class > ArgClass_Function) {
+        emitLoadValue(value);
     }
 }
 
@@ -1004,48 +1546,75 @@ static void parseArithmeticIF(char *s, Register reg) {
     emitBranch3Way(reg, labels[0], labels[1], labels[2]);
 }
 
-static void parseAssignment(char *s, char *id) {
-    DataType dt;
+static void parseAssignment(char *s, Token *id) {
+    DataType *dt;
     Token *expression;
+    bool isScalar;
+    StorageReference reference;
     OperatorArgument result;
-    Symbol *symbol;
+    OperatorArgument target;
 
+    s = parseStorageReference(s, id, &reference);
+    if (s == NULL) return;
     s = eatWsp(s);
     if (*s != '=') {
         err("Invalid statement");
+        freeStorageReference(&reference);
         return;
-    }
-
-    symbol = findSymbol(id);
-    if (symbol == NULL) {
-        symbol = defineLocalVariable(id, &implicitTypes[toupper(id[0]) - 'A']);
-        localOffset -= calculateSize(symbol);
-        symbol->details.variable.offset = localOffset;
     }
 
     s = eatWsp(parseExpression(s + 1, &expression));
     if (expression == NULL) {
         err("Expression syntax");
+        freeStorageReference(&reference);
         return;
     }
     if (evaluateExpression(expression, &result) == FALSE) {
-        if (coerceArgument(&result, getDataType(&result)->type, symbol->details.variable.dt.type) == BaseType_Undefined) {
+        dt = getSymbolType(reference.symbol);
+        if (coerceArgument(&result, getDataType(&result)->type, dt->type) == BaseType_Undefined) {
             err("Invalid type conversion");
+            if (isCalculation(result)) freeRegister(result.reg);
+            freeToken(expression);
+            freeStorageReference(&reference);
+            return;
         }
-        if (isConstant(result)) {
-            emitLoadConst(&result);
+        if (evaluateStorageReference(&reference, &target, &isScalar)) {
+            if (isCalculation(result)) freeRegister(result.reg);
+            freeToken(expression);
+            freeStorageReference(&reference);
+            return;
         }
-        else if (isLoadable(result)) {
-            emitLoadVar(&result);
+        loadValue(&result);
+        if (isScalar) {
+            emitStoreArg(reference.symbol, &result);
         }
-        emitStoreArg(symbol, &result);
+        else {
+            emitStoreByReference(&target, &result);
+            freeRegister(target.reg);
+        }
         freeRegister(result.reg);
     }
     freeToken(expression);
+    freeStorageReference(&reference);
     verifyEOS(s);
 }
 
-static char *parseCallParameters(char *s, int *frameSize) {
+static void outputFini(ControlInfoList *ciList) {
+    emitPrimCall((ciList->format == NULL) ? "@_flulst" : "@_flufmt");
+    emitAdjustSP(3);
+}
+
+static void outputInit(ControlInfoList *ciList) {
+    OperatorArgument unit;
+
+    if (evaluateFmtSpec(ciList) || evaluateExpression(ciList->unit, &unit)) return;
+    emitAdjustSP(-3);
+    loadValue(&unit);
+    emitStoreStack(unit.reg, 0);
+    freeRegister(unit.reg);
+}
+
+static char *parseActualArguments(char *s, int *frameSize) {
     Token *expression;
     int parmIdx;
     int pass;
@@ -1092,9 +1661,9 @@ static char *parseCallParameters(char *s, int *frameSize) {
                         *frameSize += 1;
                     }
                     else {
-                        reg = emitLoadVarAddr(result.details.symbol);
-                        emitStoreStack(reg, parmIdx);
-                        freeRegister(reg);
+                        emitLoadReference(&result);
+                        emitStoreStack(result.reg, parmIdx);
+                        freeRegister(result.reg);
                     }
                 }
                 else {
@@ -1126,7 +1695,7 @@ static char *parseCallParameters(char *s, int *frameSize) {
                 break;
             }
             else {
-                err("Output list syntax");
+                err("Argument list syntax");
                 return s;
             }
         }
@@ -1135,9 +1704,11 @@ static char *parseCallParameters(char *s, int *frameSize) {
     return s;
 }
 
-static char *parseCharConstraint(char *s, DataType *dt) {
+static char *parseCharConstraint(char *s, Token *token, DataType *dt) {
+    Token *expression;
+    OperatorArgument result;
+    Token savedToken;
     char *start;
-    int value;
 
     s = eatWsp(s);
     start = s;
@@ -1145,11 +1716,7 @@ static char *parseCharConstraint(char *s, DataType *dt) {
     if (*s == '*') {
         s = eatWsp(s + 1);
         if (isdigit(*s)) {
-            value = 0;
-            while (isdigit(*s)) {
-                value = (value * 10) + (*s++ - '0');
-            }
-            dt->constraint = value;
+            s = getIntValue(s, &dt->constraint);
         }
         else if (*s == '(') {
             s = eatWsp(s + 1);
@@ -1163,6 +1730,29 @@ static char *parseCharConstraint(char *s, DataType *dt) {
                     s = start;
                 }
             }
+            else {
+                savedToken = *token;
+                s = parseExpression(s, &expression);
+                *token = savedToken;
+                if (expression == NULL
+                    || evaluateExpression(expression, &result)
+                    || !isConstant(result)
+                    || result.details.constant.dt.type != BaseType_Integer
+                    || result.details.constant.value.integer < 1) {
+                    err("Invalid character length");
+                }
+                else {
+                    dt->constraint = result.details.constant.value.integer;
+                    s = eatWsp(s);
+                    if (*s == ')') {
+                        s += 1;
+                    }
+                    else {
+                        err("Character length syntax");
+                    }
+                }
+                freeToken(expression);
+            }
         }
         else {
             s = start;
@@ -1170,6 +1760,233 @@ static char *parseCharConstraint(char *s, DataType *dt) {
     }
 
     return s;
+}
+
+static char *parseControlInfoList(char *s, ControlInfoList **ciList, int defaultUnit) {
+    DataType *dt;
+    Token *expression;
+    bool isListDirected;
+    ControlInfoList *list;
+    Symbol *labelSym;
+    char lineLabel[16];
+    StorageReference reference;
+    char *start;
+    Token token;
+
+    list = (ControlInfoList *)allocate(sizeof(ControlInfoList));
+    *ciList = list;
+    isListDirected = FALSE;
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("I/O control info list syntax");
+        return NULL;
+    }
+    for (;;) {
+        s = eatWsp(s + 1);
+        if (*s == '*') {
+            if (list->unit == NULL && isListDirected == FALSE) {
+                list->unit = createIntegerConstant(defaultUnit);
+            }
+            else if (list->format == NULL && isListDirected == FALSE) {
+                isListDirected = TRUE;
+            }
+            else {
+                err("I/O control info list syntax");
+                freeControlInfoList(list);
+                return NULL;
+            }
+            s += 1;
+        }
+        else {
+            start = s;
+            s = getNextToken(s, &token, FALSE);
+            s = eatWsp(s);
+            if (token.type == TokenType_Identifier && *s == '=') {
+                s = eatWsp(s + 1);
+                if (*s == '*') {
+                    if (list->unit == NULL && isListDirected == FALSE) {
+                        list->unit = createIntegerConstant(defaultUnit);
+                    }
+                    else if (list->format == NULL && isListDirected == FALSE) {
+                        isListDirected = TRUE;
+                    }
+                    else {
+                        err("I/O control info list syntax");
+                        freeControlInfoList(list);
+                        return NULL;
+                    }
+                    s += 1;
+                }
+                else {
+                    start = s;
+                    s = parseExpression(s, &expression);
+                    if (expression == NULL) {
+                        err("Invalid expression in I/O control list");
+                        freeControlInfoList(list);
+                        return NULL;
+                    }
+                    if (strncasecmp(token.details.identifier.name, "UNIT", 5) == 0) {
+                        if (list->unit != NULL) {
+                            err("UNIT specified more than once");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                        list->unit = expression;
+                    }
+                    else if (strncasecmp(token.details.identifier.name, "FMT", 4) == 0) {
+                        if (list->format != NULL || isListDirected) {
+                            err("FMT specified more than once");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                        list->format = expression;
+                    }
+                    else if (strncasecmp(token.details.identifier.name, "END", 4) == 0) {
+                        if (list->endLabel != NULL) {
+                            err("END specified more than once");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                        else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
+                            sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
+                            freeToken(expression);
+                            labelSym = findLabel(lineLabel);
+                            if (labelSym != NULL) {
+                                if (labelSym->details.label.class != StmtClass_Executable) {
+                                    err("END= label does not reference executable statement");
+                                    freeControlInfoList(list);
+                                    return NULL;
+                                }
+                            }
+                            else {
+                                labelSym = addLabel(lineLabel);
+                                labelSym->details.label.class = StmtClass_None;
+                                labelSym->details.label.forwardRef = TRUE;
+                            }
+                            list->endLabel = labelSym;
+                        }
+                        else {
+                            err("Invalid statement label in END=");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                    }
+                    else if (strncasecmp(token.details.identifier.name, "ERR", 4) == 0) {
+                        if (list->errLabel != NULL) {
+                            err("ERR specified more than once");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                        else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
+                            sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
+                            freeToken(expression);
+                            labelSym = findLabel(lineLabel);
+                            if (labelSym != NULL) {
+                                if (labelSym->details.label.class != StmtClass_Executable) {
+                                    err("ERR= label does not reference executable statement");
+                                    freeControlInfoList(list);
+                                    return NULL;
+                                }
+                            }
+                            else {
+                                labelSym = addLabel(lineLabel);
+                                labelSym->details.label.class = StmtClass_None;
+                                labelSym->details.label.forwardRef = TRUE;
+                            }
+                            list->errLabel = labelSym;
+                        }
+                        else {
+                            err("Invalid statement label in ERR=");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                    }
+                    else if (strncasecmp(token.details.identifier.name, "REC", 4) == 0) {
+                        if (list->recordNumber != NULL) {
+                            err("REC specified more than once");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                        list->recordNumber = expression;
+                    }
+                    else if (strncasecmp(token.details.identifier.name, "IOSTAT", 7) == 0) {
+                        if (list->iostat.symbol != NULL) {
+                            err("IOSTAT specified more than once");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                        else if (expression->type == TokenType_Identifier) {
+                            s = parseStorageReference(start, expression, &reference);
+                            freeToken(expression);
+                            if (s == NULL) {
+                                freeControlInfoList(list);
+                                return NULL;
+                            }
+                            dt = getSymbolType(reference.symbol);
+                            if (dt->type != BaseType_Integer) {
+                                err("%s is not integer", reference.symbol->identifier);
+                                freeControlInfoList(list);
+                                return NULL;
+                            }
+                            list->iostat = reference;
+                        }
+                        else {
+                            err("IOSTAT= syntax");
+                            freeToken(expression);
+                            freeControlInfoList(list);
+                            return NULL;
+                        }
+                    }
+                    else {
+                        err("Invalid keyword: %s", token.details.identifier.name);
+                        freeControlInfoList(list);
+                        return NULL;
+                    }
+                }
+            }
+            else {
+                s = parseExpression(start, &expression);
+                if (expression == NULL) {
+                    err("Invalid expression in I/O control list");
+                    freeControlInfoList(list);
+                    return NULL;
+                }
+                if (list->unit == NULL) {
+                    list->unit = expression;
+                }
+                else if (list->format == NULL && isListDirected == FALSE) {
+                    list->format = expression;
+                }
+                else {
+                    err("I/O control info list syntax");
+                    freeToken(expression);
+                    freeControlInfoList(list);
+                    return NULL;
+                }
+            }
+        }
+        s = eatWsp(s);
+        if (*s == ',') {
+            s += 1;
+        }
+        else if (*s == ')') {
+            break;
+        }
+        else {
+            err("I/O control info list syntax");
+            freeControlInfoList(list);
+            return NULL;
+        }
+    }
+    return s + 1;
 }
 
 static char *parseDataType(char *s, Token *token, DataType *dt) {
@@ -1185,7 +2002,7 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
             dt->type = BaseType_Character;
             s = eatWsp(s);
             if (*s == '*') {
-                s = parseCharConstraint(s, dt);
+                s = parseCharConstraint(s, token, dt);
             }
             else {
                 dt->constraint = 1;
@@ -1227,7 +2044,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
     OperatorArgument result;
     int upperBound;
 
-    dt = &symbol->details.variable.dt;
+    dt = getSymbolType(symbol);
     dt->rank = 0;
 
     for (;;) {
@@ -1299,10 +2116,13 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
 }
 
 static char *parseExpression(char *s, Token **expression) {
+    TokenListItem *expressionList;
     Token *leftArg;
     Token *op;
     Token *rightArg;
+    StringRange *strRange;
     Token token;
+    Token *tp;
 
     s = eatWsp(s);
     if (*s == '(') {
@@ -1326,6 +2146,9 @@ static char *parseExpression(char *s, Token **expression) {
     else {
         leftArg = NULL;
     }
+    tp = NULL;
+    expressionList = NULL;
+    strRange = NULL;
     s = getNextToken(s, &token, FALSE);
     switch (token.type) {
     case TokenType_None:
@@ -1338,16 +2161,56 @@ static char *parseExpression(char *s, Token **expression) {
         }
         break;
     case TokenType_Identifier:
+        if (*s == '(') {
+            s = eatWsp(s);
+            if (*s == ')') { // maybe a parameter-less function call
+                expressionList = (TokenListItem *)allocate(sizeof(TokenListItem));
+                s = eatWsp(s + 1);
+            }
+            else {
+                tp = copyToken(&token);
+                s = parseExpressionList(s, &expressionList);
+                if (s == NULL) {
+                    freeToken(tp);
+                    freeToken(leftArg);
+                    *expression = NULL;
+                    return NULL;
+                }
+                s = eatWsp(s);
+                if (*s == '(') {
+                    s = parseStringRange(s, &strRange);
+                    if (s == NULL) {
+                        freeTokenList(expressionList);
+                        freeToken(tp);
+                        freeToken(leftArg);
+                        *expression = NULL;
+                        return NULL;
+                    }
+                }
+            }
+        }
+        /*
+         *  Fall through
+         */
     case TokenType_Constant:
         if (leftArg != NULL) {
+            freeTokenList(expressionList);
+            freeToken(tp);
             freeToken(leftArg);
             *expression = NULL;
+            return s;
         }
-        else if (*s == '\0' || *s == ',' || *s == ')' || *s == ':') {
-            *expression = copyToken(&token);
+        if (tp == NULL) tp = copyToken(&token);
+        if (*s == '\0' || *s == ',' || *s == ')' || *s == ':') {
+            if (tp->type == TokenType_Identifier) {
+                tp->details.identifier.qualifiers = expressionList;
+                tp->details.identifier.range = strRange;
+            }
+            *expression = tp;
         }
         else {
-            leftArg = copyToken(&token);
+            leftArg = tp;
+            if (leftArg->type == TokenType_Identifier) leftArg->details.identifier.qualifiers = expressionList;
             s = getNextToken(s, &token, FALSE);
             if (token.type == TokenType_Operator) {
                 switch (token.details.operator.id) {
@@ -1451,89 +2314,82 @@ static char *parseExpression(char *s, Token **expression) {
     return s;
 }
 
-static char *parseFmtSpec(char *s, bool *isListDirected) {
+static char *parseExpressionList(char *s, TokenListItem **list) {
+    TokenListItem *elem;
     Token *expression;
-    int i;
-    char label[8];
-    char lineLabel[6];
-    char *lp;
-    Register reg;
-    OperatorArgument result;
-    Symbol *sym;
+    TokenListItem *firstExpression;
+    TokenListItem *lastExpression;
+    int n;
+    char *start;
 
-    *isListDirected = FALSE;
-    s = eatWsp(s);
-    if (*s == '*') {
-        *isListDirected = TRUE;
-        emitPrimCall("@_prslst");
-        return s + 1;
+    firstExpression = NULL;
+    *list = NULL;
+    start = s;
+    n = 0;
+
+    s = eatWsp(s + 1);
+    if (*s == ':') { // possible character index
+        return start;
     }
 
-    if (isdigit(*s)) {
-        lp = lineLabel;
-        *lp++ = *s++;
-        for (;;) {
-            s = eatWsp(s);
-            if (isdigit(*s)) {
-                if (lp - lineLabel < sizeof(lineLabel)) {
-                    *lp++ = *s++;
-                }
-                else {
-                    err("Invalid line label");
-                    return NULL;
-                }
-            }
-            else {
-                *lp = '\0';
-                break;
-            }
-        }
-        sym = findLabel(lineLabel);
-        if (sym == NULL) {
-            sym = addLabel(lineLabel);
-            sym->details.label.class = StmtClass_Format;
-            sym->details.label.forwardRef = TRUE;
-        }
-        reg = emitLoadByteAddr(sym->details.label.label);
-        emitPushReg(reg);
-        freeRegister(reg);
-    }
-    else {
+    for (;;) {
         s = parseExpression(s, &expression);
-        if (expression == NULL) {
-            err("Expression syntax");
+        if (s == NULL) {
+            freeTokenList(firstExpression);
+            *list = NULL;
             return NULL;
         }
-        if (evaluateExpression(expression, &result) == FALSE) {
-            if (getDataType(&result)->type != BaseType_Character) {
-                err("Format specification is not character type or FORMAT label");
-                freeRegister(result.reg);
-                freeToken(expression);
-                return NULL;
-            }
-            if (isConstant(result)) {
-                generateLabel(label);
-                emitString(result.details.constant.value.character.string, label);
-                reg = emitLoadByteAddr(label);
-                emitPushReg(reg);
-                freeRegister(reg);
-            }
-            else {
-                if (isLoadable(result)) emitLoadVar(&result);
-                emitPushReg(result.reg);
-                freeRegister(result.reg);
-            }
+        n += 1;
+        elem = (TokenListItem *)allocate(sizeof(TokenListItem));
+        elem->item = copyToken(expression);
+        if (firstExpression == NULL)
+            firstExpression = elem;
+        else
+            lastExpression->next = elem;
+        lastExpression = elem;
+        if (*s == ')') {
+            s = eatWsp(s + 1);
+            break;
         }
-        freeToken(expression);
+        else if (*s == ',') {
+            s += 1;
+        }
+        else if (*s == ':' && n < 2) { // possible character index
+            freeTokenList(firstExpression);
+            *list = NULL;
+            return start;
+        }
+        else {
+            err("Invalid expression list");
+            freeTokenList(firstExpression);
+            *list = NULL;
+            return NULL;
+        }
     }
-
-    emitPrimCall("@_prsfmt");
-    emitAdjustSP(1);
+    *list = firstExpression;
 
     return s;
 }
 
-static char *parseFormalParameters(char *s) {
+static char *parseFmtSpec(char *s, ControlInfoList *ciList) {
+    Token *expression;
+
+    s = eatWsp(s);
+    if (*s == '*') {
+        s += 1;
+    }
+    else {
+        s = parseExpression(s, &expression);
+        if (expression == NULL) {
+            err("Invalid format specification");
+            return NULL;
+        }
+        ciList->format = expression;
+    }
+    return s;
+}
+
+static char *parseFormalArguments(char *s) {
     int argIdx;
     char *id;
     Symbol *symbol;
@@ -1543,7 +2399,7 @@ static char *parseFormalParameters(char *s) {
     for (;;) {
         s = getNextToken(s + 1, &token, FALSE);
         if (token.type == TokenType_Identifier) {
-            id = token.details.identifier;
+            id = token.details.identifier.name;
             symbol = addSymbol(id, SymClass_Argument);
             if (symbol == NULL) {
                 err("Previously declared parameter name: %s", id);
@@ -1572,10 +2428,12 @@ static char *parseFormalParameters(char *s) {
     return s;
 }
 
-static void parseInputList(char *s) {
-    char *id;
+static void parseInputList(char *s, ControlInfoList *ciList) {
+    DataType *dt;
+    bool isScalar;
+    StorageReference reference;
     Register reg;
-    Symbol *symbol;
+    OperatorArgument target;
     Token token;
 
     for (;;) {
@@ -1584,16 +2442,46 @@ static void parseInputList(char *s) {
             err("Input list item is not a variable");
             return;
         }
-        id = token.details.identifier;
-        symbol = findSymbol(id);
-        if (symbol == NULL) {
-            fprintf(stderr, "Symbol should have been defined: %s\n", id);
-            exit(1);
+        s = parseStorageReference(s, &token, &reference);
+        if (s == NULL) return;
+        if (evaluateStorageReference(&reference, &target, &isScalar)) {
+            freeStorageReference(&reference);
+            return;
         }
-        reg = emitLoadVarByteAddr(symbol);
-        emitStoreStack(reg, 1);
-        freeRegister(reg);
-        emitPrimCall("@_infmt");
+        freeStorageReference(&reference);
+        emitLoadReference(&target);
+        dt = getDataType(&target);
+        if (dt->type != BaseType_Character) emitConvertToByteAddress(target.reg);
+        emitStoreStack(target.reg, 1);
+        freeRegister(target.reg);
+        if (ciList->format == NULL) {
+            switch (dt->type) {
+            case BaseType_Character:
+                emitPrimCall("@_inpchr");
+                break;
+            case BaseType_Logical:
+                emitPrimCall("@_inplog");
+                break;
+            case BaseType_Integer:
+            case BaseType_Pointer:
+                emitPrimCall("@_inpint");
+                break;
+            case BaseType_Real:
+            case BaseType_Double:
+                emitPrimCall("@_inpdbl");
+                break;
+/*  TODO
+            case BaseType_Complex:
+                break;
+*/
+            default:
+                err("Invalid data type of list-directed I/O element");
+                return;
+            }
+        }
+        else {
+            emitPrimCall("@_rdufmt");
+        }
         s = eatWsp(s);
         if (*s == '\0') {
             break;
@@ -1614,7 +2502,7 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
     Token token;
 
     s = getNextToken(s, &token, TRUE);
-    if (token.type == TokenType_Identifier && strcasecmp(token.details.identifier, "THEN") == 0) {
+    if (token.type == TokenType_Identifier && strcasecmp(token.details.identifier.name, "THEN") == 0) {
         if (isFromLogIf) {
             err("Block IF not allowed from logical IF");
             return;
@@ -1640,10 +2528,6 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
                 parseASSIGN(s);
                 break;
             case BACKSPACE:
-                break;
-            case BUFFERIN:
-                break;
-            case BUFFEROUT:
                 break;
             case CALL:
                 parseCALL(s);
@@ -1691,7 +2575,7 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
             }
         }
         else if (token.type == TokenType_Identifier) {
-            parseAssignment(s, token.details.identifier);
+            parseAssignment(s, &token);
         }
         else {
             err("Invalid IF syntax");
@@ -1700,9 +2584,10 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
     }
 }
 
-static void parseOutputList(char *s, bool isListDirected) {
-    DataType *dtp;
+static void parseOutputList(char *s, ControlInfoList *ciList) {
+    DataType *dt;
     Token *expression;
+    bool isChar;
     Register reg;
     OperatorArgument result;
 
@@ -1713,29 +2598,37 @@ static void parseOutputList(char *s, bool isListDirected) {
             return;
         }
         if (evaluateExpression(expression, &result) == FALSE) {
+            dt = getDataType(&result);
+            isChar = dt->type == BaseType_Character;
             if (isConstant(result)) {
                 emitLoadConst(&result);
-                emitStoreStack(result.reg, 2);
-                reg = emitLoadStackByteAddr(2);
-                emitStoreStack(reg, 1);
-                freeRegister(reg);
-                freeRegister(result.reg);
+                if (isChar) {
+                    emitStoreStack(result.reg, 1);
+                }
+                else {
+                    emitStoreStack(result.reg, 2);
+                    reg = emitLoadStackByteAddr(2);
+                    emitStoreStack(reg, 1);
+                    freeRegister(reg);
+                }
             }
             else if (isLoadable(result)) {
-                reg = emitLoadVarByteAddr(result.details.symbol);
-                emitStoreStack(reg, 1);
-                freeRegister(reg);
+                emitLoadReference(&result);
+                if (!isChar) emitConvertToByteAddress(result.reg);
+                emitStoreStack(result.reg, 1);
+            }
+            else if (isChar) {
+                emitStoreStack(result.reg, 1);
             }
             else {
                 emitStoreStack(result.reg, 2);
                 reg = emitLoadStackByteAddr(2);
                 emitStoreStack(reg, 1);
                 freeRegister(reg);
-                freeRegister(result.reg);
             }
-            if (isListDirected) {
-                dtp = getDataType(&result);
-                switch (dtp->type) {
+            freeRegister(result.reg);
+            if (ciList->format == NULL) {
+                switch (dt->type) {
                 case BaseType_Character:
                     emitPrimCall("@_lstchr");
                     break;
@@ -1756,6 +2649,7 @@ static void parseOutputList(char *s, bool isListDirected) {
 */
                 default:
                     err("Invalid data type of list-directed I/O element");
+                    freeToken(expression);
                     return;
                 }
             }
@@ -1778,6 +2672,125 @@ static void parseOutputList(char *s, bool isListDirected) {
     }
 }
 
+static char *parseStorageReference(char *s, Token *id, StorageReference *reference) {
+    DataType *dt;
+    TokenListItem *expressionList;
+    bool isChrAsgn;
+    char *name;
+    StringRange *strRange;
+    Symbol *symbol;
+
+    s = eatWsp(s);
+    expressionList = NULL;
+    strRange = NULL;
+    name = id->details.identifier.name;
+
+    symbol = findSymbol(name);
+    if (symbol == NULL) {
+        symbol = addSymbol(name, SymClass_Undefined);
+    }
+    switch (symbol->class) {
+    case SymClass_Undefined:
+        if (*s == '(') {
+            err("Undefined array %s", name);
+            return NULL;
+        }
+        symbol->class = SymClass_Local;
+        defineType(symbol);
+        localOffset -= calculateSize(symbol);
+        symbol->details.variable.offset = localOffset;
+        /* fall through */
+    case SymClass_Local:
+    case SymClass_Global:
+    case SymClass_Argument:
+    case SymClass_Pointee:
+        dt = &symbol->details.variable.dt;
+        break;
+    case SymClass_Function:
+        if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
+            symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
+            localOffset -= calculateSize(symbol);
+            symbol->details.progUnit.offset = localOffset;
+        }
+        dt = &symbol->details.progUnit.dt;
+        break;
+    default:
+        err("Invalid storage reference to %s", name);
+        return NULL;
+    }
+    isChrAsgn = dt->type == BaseType_Character;
+    if (*s == '(') {
+        if (dt->rank > 0) {
+            s = parseExpressionList(s, &expressionList);
+            if (s == NULL) return NULL;
+            if (expressionList == NULL) {
+                err("Invalid array index");
+                return NULL;
+            }
+            s = eatWsp(s);
+            if (*s == '(') {
+                if (isChrAsgn) {
+                    s = parseStringRange(s, &strRange);
+                    if (s == NULL) {
+                        freeTokenList(expressionList);
+                        return NULL;
+                    }
+                }
+                else {
+                    err("Unexpected '('");
+                    freeTokenList(expressionList);
+                    return NULL;
+                }
+            }
+        }
+        else if (isChrAsgn) {
+            s = parseStringRange(s, &strRange);
+            if (s == NULL) return NULL;
+        }
+    }
+    reference->symbol = symbol;
+    reference->expressionList = expressionList;
+    reference->strRange = strRange;
+
+    return s;
+}
+
+static char *parseStringRange(char *s, StringRange **range) {
+    Token *expression;
+    StringRange *sr;
+
+    *range = NULL;
+    sr = (StringRange *)allocate(sizeof(StringRange));
+    s = eatWsp(s + 1);
+    if (*s != ':' && *s != ')') {
+        s = parseExpression(s, &expression);
+        if (s == NULL) {
+            freeStringRange(sr);
+            return NULL;
+        }
+        sr->first = copyToken(expression);
+    }
+    if (*s == ':') {
+        s = eatWsp(s + 1);
+        if (*s != ')') {
+            s = parseExpression(s, &expression);
+            if (s == NULL) {
+                freeStringRange(sr);
+                return NULL;
+            }
+            sr->last = copyToken(expression);
+        }
+    }
+    if (*s != ')') {
+        err("Invalid character range");
+        freeStringRange(sr);
+        return NULL;
+    }
+    *range = sr;
+
+    return s + 1;
+}
+
 static char *parseTypeDecl(char *s, DataType *dt) {
     char *id;
     Symbol *symbol;
@@ -1786,13 +2799,17 @@ static char *parseTypeDecl(char *s, DataType *dt) {
     for (;;) {
         s = getNextToken(s, &token, FALSE);
         if (token.type == TokenType_Identifier) {
-            id = token.details.identifier;
+            id = token.details.identifier.name;
             symbol = findSymbol(id);
             if (symbol == NULL) {
-                symbol = defineLocalVariable(id, dt);
+                symbol = addSymbol(id, SymClass_Undefined);
+                symbol->details.variable.dt = *dt;
             }
             else if (symbol->class == SymClass_Argument && symbol->details.variable.dt.type == BaseType_Undefined) {
                 symbol->details.variable.dt = *dt;
+            }
+            else if (symbol->class == SymClass_Function && symbol->details.progUnit.dt.type == BaseType_Undefined) {
+                symbol->details.progUnit.dt = *dt;
             }
             else {
                 err("Duplicate declaration of %s", id);
@@ -1801,7 +2818,7 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             if (dt->type == BaseType_Character) {
                 s = eatWsp(s);
                 if (*s == '*') {
-                    s = parseCharConstraint(s, &symbol->details.variable.dt);
+                    s = parseCharConstraint(s, &token, &symbol->details.variable.dt);
                 }
             }
             symbol->details.variable.dt.rank = 0;
@@ -1814,6 +2831,7 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             }
             else if (*s == '(') {
                 s = parseDimDecl(s + 1, symbol);
+                symbol->class = SymClass_Local;
                 s = eatWsp(s);
                 if (*s == ',')
                     s = eatWsp(s + 1);
@@ -1833,70 +2851,7 @@ static char *parseTypeDecl(char *s, DataType *dt) {
     return s;
 }
 
-static char *parseUnitAndFmt(char *s, int defaultUnit, bool *isListDirected) {
-    Token *expression;
-    OperatorArgument unit;
-
-    s = eatWsp(s);
-    if (*s != '(') {
-        err("Missing '('");
-        return NULL;
-    }
-    s = eatWsp(s + 1);
-    if (*s == '*') {
-        unit.class = ArgClass_Constant;
-        unit.details.constant.dt.type = BaseType_Integer;
-        unit.details.constant.dt.rank = 0;
-        unit.details.constant.value.integer = defaultUnit;
-        s += 1;
-    }
-    else {
-        s = parseExpression(s, &expression);
-        if (expression == NULL) {
-            err("Invalid unit number expression");
-            return NULL;
-        }
-        if (evaluateExpression(expression, &unit)) {
-            freeToken(expression);
-            return NULL;
-        }
-        freeToken(expression);
-        if (getDataType(&unit)->type != BaseType_Integer) {
-            err("Unit must be type integer");
-            return NULL;
-        }
-    }
-    emitAdjustSP(-3);
-    if (isConstant(unit)) {
-        emitLoadConst(&unit);
-    }
-    else if (isLoadable(unit)) {
-        emitLoadVar(&unit);
-    }
-    emitStoreStack(unit.reg, 0);
-    freeRegister(unit.reg);
-
-    s = eatWsp(s);
-    if (*s != ',') {
-        err("Invalid format specification");
-        return NULL;
-    }
-
-    s = parseFmtSpec(s + 1, isListDirected);
-
-    if (s == NULL) return NULL;
-
-    s = eatWsp(s);
-    if (*s != ')') {
-        err("Missing ')' after format specifier");
-        return NULL;
-    }
-
-    return s + 1;
-}
-
 static void parseASSIGN(char *s) {
-    DataType dt;
     char *id;
     Symbol *labelSym;
     char lineLabel[8];
@@ -1936,20 +2891,18 @@ static void parseASSIGN(char *s) {
         err("Invalid target of ASSIGN");
         return;
     }
-    id = token.details.identifier;
+    id = token.details.identifier.name;
     sym = findSymbol(id);
     if (sym == NULL) {
-        dt = implicitTypes[toupper(id[0]) - 'A'];
-        if (dt.type != BaseType_Integer) {
-            err("Invalid type of ASSIGN variable: %s", baseTypeToStr(dt.type));
-            return;
-        }
-        dt.type = BaseType_Label;
-        sym = defineLocalVariable(id, &dt);
-        localOffset -= calculateSize(sym);
-        sym->details.variable.offset = localOffset;
+        sym = addSymbol(id, SymClass_Undefined);
     }
     switch (sym->class) {
+    case SymClass_Undefined:
+        sym->class = SymClass_Local;
+        defineType(sym);
+        localOffset -= calculateSize(sym);
+        sym->details.variable.offset = localOffset;
+        /* fall through */
     case SymClass_Local:
     case SymClass_Global:
     case SymClass_Argument:
@@ -1963,10 +2916,10 @@ static void parseASSIGN(char *s) {
         return;
     }
     if (type != BaseType_Label && type != BaseType_Integer) {
-        err("Invalid type of ASSIGN variable: %s", baseTypeToStr(dt.type));
+        err("Invalid type of ASSIGN variable: %s", baseTypeToStr(type));
         return;
     }
-    reg = emitLoadVarAddr(labelSym);
+    reg = emitLabelReference(labelSym);
     emitStoreReg(sym, reg);
     freeRegister(reg);
     verifyEOS(s);
@@ -1988,7 +2941,7 @@ static void parseCALL(char *s) {
         err("Invalid subroutine name");
         return;
     }
-    strcpy(name, token.details.identifier);
+    strcpy(name, token.details.identifier.name);
     sym = findSymbol(name);
     if (sym == NULL) {
         sym = addSymbol(name, SymClass_Subroutine);
@@ -1999,7 +2952,7 @@ static void parseCALL(char *s) {
     }
     s = eatWsp(s);
     if (*s == '(') {
-        s = parseCallParameters(s, &frameSize);
+        s = parseActualArguments(s, &frameSize);
     }
     else if (*s != '\0') {
         err("Invalid CALL statement");
@@ -2016,6 +2969,73 @@ static void parseDATA(char *s) {
 }
 
 static void parseDIMENSION(char *s) {
+    char *id;
+    Symbol *symbol;
+    Token token;
+
+    for (;;) {
+        s = getNextToken(s, &token, FALSE);
+        if (token.type == TokenType_Identifier) {
+            id = token.details.identifier.name;
+            if (*s != '(') {
+                err("No dimensions specified for %s", id);
+                return;
+            }
+            symbol = findSymbol(id);
+            if (symbol == NULL) {
+                symbol = addSymbol(id, SymClass_Undefined);
+            }
+            switch (symbol->class) {
+            case SymClass_Undefined:
+                symbol->class = SymClass_Local;
+                defineType(symbol);
+                /* fall through */
+            case SymClass_Local:
+            case SymClass_Global:
+            case SymClass_Pointee:
+                if (symbol->details.variable.dt.rank != 0) {
+                    err("Duplicate declaration of %s", id);
+                    return;
+                }
+                break;
+            case SymClass_Argument:
+                if (symbol->details.variable.dt.type == BaseType_Undefined) {
+                    defineType(symbol);
+                }
+                else if (symbol->details.variable.dt.rank != 0) {
+                    err("Duplicate declaration of %s", id);
+                    return;
+                }
+                break;
+            case SymClass_Function:
+                if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
+                    defineType(symbol);
+                }
+                else if (symbol->details.progUnit.dt.rank != 0) {
+                    err("Duplicate declaration of %s", id);
+                    return;
+                }
+                break;
+            default:
+                err("Invalid array declaration");
+                return;
+            }
+            s = parseDimDecl(s + 1, symbol);
+            s = eatWsp(s);
+            if (*s == ',')
+                s = eatWsp(s + 1);
+            else if (*s == '\0')
+                break;
+            else {
+                err("Invalid array declaration");
+                break;
+            }
+        }
+        else {
+            err("Invalid array declaration");
+            break;
+        }
+    }
 }
 
 static void parseDO(char *s) {
@@ -2061,14 +3081,18 @@ static void parseDO(char *s) {
         err("Missing or invalid DO loop variable");
         return;
     }
-    id = token.details.identifier;
+    id = token.details.identifier.name;
     sym = findSymbol(id);
     if (sym == NULL) {
-        sym = defineLocalVariable(id, &implicitTypes[toupper(id[0]) - 'A']);
-        localOffset -= calculateSize(sym);
-        sym->details.variable.offset = localOffset;
+        sym = addSymbol(id, SymClass_Undefined);
     }
     switch (sym->class) {
+    case SymClass_Undefined:
+        sym->class = SymClass_Local;
+        defineType(sym);
+        localOffset -= calculateSize(sym);
+        sym->details.variable.offset = localOffset;
+        /* fall through */
     case SymClass_Local:
     case SymClass_Global:
     case SymClass_Argument:
@@ -2113,12 +3137,7 @@ static void parseDO(char *s) {
     if (coerceArgument(&result, getDataType(&result)->type, type) == BaseType_Undefined) {
         err("Invalid type conversion");
     }
-    if (isConstant(result)) {
-        emitLoadConst(&result);
-    }
-    else if (isLoadable(result)) {
-        emitLoadVar(&result);
-    }
+    loadValue(&result);
     emitStoreStack(result.reg, 0);
     freeRegister(result.reg);
     /*
@@ -2141,12 +3160,7 @@ static void parseDO(char *s) {
     if (coerceArgument(&result, getDataType(&result)->type, type) == BaseType_Undefined) {
         err("Invalid type conversion");
     }
-    if (isConstant(result)) {
-        emitLoadConst(&result);
-    }
-    else if (isLoadable(result)) {
-        emitLoadVar(&result);
-    }
+    loadValue(&result);
     emitStoreStack(result.reg, 1);
     freeRegister(result.reg);
     /*
@@ -2177,12 +3191,7 @@ static void parseDO(char *s) {
     if (coerceArgument(&result, getDataType(&result)->type, type) == BaseType_Undefined) {
         err("Invalid type conversion");
     }
-    if (isConstant(result)) {
-        emitLoadConst(&result);
-    }
-    else if (isLoadable(result)) {
-        emitLoadVar(&result);
-    }
+    loadValue(&result);
     emitStoreStack(result.reg, 2);
     reg1 = emitLoadStack(0);
     reg2 = emitLoadStack(1);
@@ -2260,15 +3269,10 @@ static void parseELSEIF(char *s) {
         freeToken(expression);
         return;
     }
-    if (isConstant(result)) {
-        emitLoadConst(&result);
-    }
-    else if (isLoadable(result)) {
-        emitLoadVar(&result);
-    }
+    loadValue(&result);
     if (getDataType(&result)->type == BaseType_Logical) {
         s = getNextToken(s, &token, FALSE);
-        if (token.type == TokenType_Identifier && strcasecmp(token.details.identifier, "THEN") == 0) {
+        if (token.type == TokenType_Identifier && strcasecmp(token.details.identifier.name, "THEN") == 0) {
             generateLabel(entry->blockEndLabel);
             emitBranchOnFalse(result.reg, entry->blockEndLabel);
             verifyEOS(s);
@@ -2328,6 +3332,7 @@ static void parseEXTERNAL(char *s) {
 }
 
 static void parseFORMAT(char *s) {
+    CharacterValue cval;
     char *end;
     char *start;
 
@@ -2349,20 +3354,23 @@ static void parseFORMAT(char *s) {
         err("FORMAT does not end with '('");
         return;
     }
-    emitString(start, currentLabel->details.label.label);
+    cval.length = strlen(start);
+    cval.string = start;
+    emitLabeledString(&cval, currentLabel->details.label.label, TRUE);
 }
 
-static void parseFUNCTION(char *s) {
+static void parseFUNCTION(char *s, DataType *dt) {
     Symbol *symbol;
     Token token;
 
     s = getNextToken(s, &token, FALSE);
     if (token.type == TokenType_Identifier) {
-        symbol = addSymbol(token.details.identifier, SymClass_Function);
+        symbol = addSymbol(token.details.identifier.name, SymClass_Function);
         if (symbol == NULL) {
             err("Function name not unique");
             return;
         }
+        if (dt != NULL) symbol->details.progUnit.dt = *dt;
         progUnitSym = symbol;
         emitProlog(progUnitSym);
     }
@@ -2371,7 +3379,7 @@ static void parseFUNCTION(char *s) {
     }
     s = eatWsp(s);
     if (*s == '(') {
-        s = parseFormalParameters(s);
+        s = parseFormalArguments(s);
         s = eatWsp(s);
     }
     if (*s != '\0') {
@@ -2380,7 +3388,6 @@ static void parseFUNCTION(char *s) {
 }
 
 static void parseGOTO(char *s) {
-    DataType dt;
     Token *expression;
     char *id;
     char lineLabel[8];
@@ -2450,12 +3457,7 @@ static void parseGOTO(char *s) {
                 freeToken(expression);
                 return;
             }
-            if (isConstant(result)) {
-                emitLoadConst(&result);
-            }
-            else if (isLoadable(result)) {
-                emitLoadVar(&result);
-            }
+            loadValue(&result);
             type = getDataType(&result)->type;
             if (type != BaseType_Integer) {
                 err("Invalid type of GOTO expression: %s", baseTypeToStr(type));
@@ -2472,20 +3474,18 @@ static void parseGOTO(char *s) {
             err("Invalid target of GOTO");
             return;
         }
-        id = token.details.identifier;
+        id = token.details.identifier.name;
         sym = findSymbol(id);
         if (sym == NULL) {
-            dt = implicitTypes[toupper(id[0]) - 'A'];
-            if (dt.type != BaseType_Integer) {
-                err("Invalid type of assigned GOTO variable: %s", baseTypeToStr(dt.type));
-                return;
-            }
-            dt.type = BaseType_Label;
-            sym = defineLocalVariable(id, &dt);
-            localOffset -= calculateSize(sym);
-            sym->details.variable.offset = localOffset;
+            sym = addSymbol(id, SymClass_Undefined);
         }
         switch (sym->class) {
+        case SymClass_Undefined:
+            sym->class = SymClass_Local;
+            defineType(sym);
+            localOffset -= calculateSize(sym);
+            sym->details.variable.offset = localOffset;
+            /* fall through */
         case SymClass_Local:
         case SymClass_Global:
         case SymClass_Argument:
@@ -2499,11 +3499,11 @@ static void parseGOTO(char *s) {
             return;
         }
         if (type != BaseType_Label && type != BaseType_Integer) {
-            err("Invalid type of assigned GOTO variable: %s", baseTypeToStr(dt.type));
+            err("Invalid type of assigned GOTO variable: %s", baseTypeToStr(type));
             return;
         }
         if (evaluateExpression(&token, &result)) return;
-        emitLoadVar(&result);
+        emitLoadValue(&result);
         emitBranchReg(result.reg);
         freeRegister(result.reg);
         s = eatWsp(s);
@@ -2558,12 +3558,7 @@ static void parseIF(char *s, bool isFromLogIf) {
         freeToken(expression);
         return;
     }
-    if (isConstant(result)) {
-        emitLoadConst(&result);
-    }
-    else if (isLoadable(result)) {
-        emitLoadVar(&result);
-    }
+    loadValue(&result);
     type = getDataType(&result)->type;
     switch (type) {
     case BaseType_Logical:
@@ -2672,34 +3667,98 @@ static void parseNAMELIST(char *s) {
 }
 
 static void parseOutputStmt(char *s, int unitNum) {
-    bool isListDirected;
+    ControlInfoList *ciList;
     OperatorArgument unit;
 
-    s = parseFmtSpec(s, &isListDirected);
-
-    if (s == NULL) return;
-
-    emitAdjustSP(-3);
-
+    ciList = (ControlInfoList *)allocate(sizeof(ControlInfoList));
+    s = parseFmtSpec(s, ciList);
+    if (s == NULL) {
+        freeControlInfoList(ciList);
+        return;
+    }
     s = eatWsp(s);
-    if (*s == ',') {
-        unit.class = ArgClass_Constant;
-        unit.details.constant.dt.type = BaseType_Integer;
-        unit.details.constant.dt.rank = 0;
-        unit.details.constant.value.integer = unitNum;
-        emitLoadConst(&unit);
-        emitStoreStack(unit.reg, 0);
-        freeRegister(unit.reg);
-        parseOutputList(s + 1, isListDirected);
+    if (*s != ',') {
+        err("Comma missing after format specification");
+        freeControlInfoList(ciList);
+        return;
     }
-    else {
-        err("Comma missing after format specifier");
-    }
-    emitPrimCall(isListDirected ? "@_flulst" : "@_flufmt");
-    emitAdjustSP(3);
+    ciList->unit = createIntegerConstant(unitNum);
+    outputInit(ciList);
+    parseOutputList(s + 1, ciList);
+    outputFini(ciList);
+    freeControlInfoList(ciList);
 }
 
 static void parsePARAMETER(char *s) {
+    Token *expression;
+    char *name;
+    OperatorArgument result;
+    Symbol *symbol;
+    Token token;
+
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("PARAMETER statement syntax");
+        return;
+    }
+    for (;;) {
+        s = getNextToken(s + 1, &token, FALSE);
+        if (token.type != TokenType_Identifier) {
+            err("Invalid parameter name");
+            return;
+        }
+        name = token.details.identifier.name;
+        symbol = findSymbol(name);
+        if (symbol == NULL) {
+            symbol = addSymbol(name, SymClass_Parameter);
+        }
+        if (symbol->class == SymClass_Parameter && symbol->details.variable.dt.type == BaseType_Undefined) {
+            defineType(symbol);
+        }
+        else {
+            err("Duplicate parameter: %s", name);
+            return;
+        }
+        s = eatWsp(s);
+        if (*s != '=') {
+            err("Invalid parameter declaration");
+            return;
+        }
+        s = eatWsp(parseExpression(s + 1, &expression));
+        if (expression == NULL) {
+            err("Expression syntax");
+            return;
+        }
+        if (evaluateExpression(expression, &result)) {
+            freeToken(expression);
+            return;
+        }
+        freeToken(expression);
+        if (coerceArgument(&result, getDataType(&result)->type, symbol->details.variable.dt.type) == BaseType_Undefined) {
+            err("Invalid type conversion");
+            if (isCalculation(result)) freeRegister(result.reg);
+            return;
+        }
+        if (!isConstant(result)) {
+            err("Non-constant expression in declaration of %s", symbol->identifier);
+            if (isCalculation(result)) freeRegister(result.reg);
+            return;
+        }
+        symbol->details.param = result.details.constant;
+        s = eatWsp(s);
+        if (*s == ')') {
+            s += 1;
+            break;
+        }
+        else if (*s == ',') {
+            s += 1;
+        }
+        else {
+            err("PARAMETER statement syntax");
+            return;
+        }
+    }
+    verifyEOS(s);
 }
 
 static void parsePRINT(char *s) {
@@ -2712,7 +3771,7 @@ static void parsePROGRAM(char *s) {
 
     s = getNextToken(s, &token, FALSE);
     if (token.type == TokenType_Identifier) {
-        symbol = addSymbol(token.details.identifier, SymClass_Program);
+        symbol = addSymbol(token.details.identifier.name, SymClass_Program);
         if (symbol == NULL) {
             err("Program name not unique");
         }
@@ -2749,56 +3808,32 @@ static void parsePUNCH(char *s) {
 }
 
 static void parseREAD(char *s) {
-    char *cp;
-    char *id;
-    bool isListDirected;
-    char *start;
-    Symbol *symbol;
-    Token token;
+    ControlInfoList *ciList;
 
-    start = s;
-    cp = NULL;
-    while (*s != '\0') {
-        if (*s == ')') cp = s;
-        s += 1;
+    s = eatWsp(s);
+    if (*s == '(') {
+        s = parseControlInfoList(s, &ciList, DEFAULT_INPUT_UNIT);
+        if (s == NULL) return;
     }
-    if (cp != NULL) {
-        /*
-         *  Pre-parse the input list to allocate space for and define any undeclared
-         *  local variables that might be referenced in it.
-         */
-        s = cp + 1;
-        for (;;) {
-            s = getNextToken(s, &token, FALSE);
-            if (token.type != TokenType_Identifier) {
-                err("Input list item is not a variable");
-                return;
-            }
-            id = token.details.identifier;
-            symbol = findSymbol(id);
-            if (symbol == NULL) {
-                symbol = defineLocalVariable(id, &implicitTypes[toupper(id[0]) - 'A']);
-                localOffset -= calculateSize(symbol);
-                symbol->details.variable.offset = localOffset;
-            }
-            s = eatWsp(s);
-            if (*s == '\0') {
-                break;
-            }
-            else if (*s == ',') {
-                s += 1;
-            }
-            else {
-                err("Input list syntax");
-                return;
-            }
+    else {
+        ciList = (ControlInfoList *)allocate(sizeof(ControlInfoList));
+        s = parseFmtSpec(s, ciList);
+        if (s == NULL) {
+            freeControlInfoList(ciList);
+            return;
         }
+        s = eatWsp(s);
+        if (*s != ',') {
+            err("Comma missing after format specification");
+            freeControlInfoList(ciList);
+            return;
+        }
+        ciList->unit = createIntegerConstant(DEFAULT_INPUT_UNIT);
     }
-    s = parseUnitAndFmt(start, DEFAULT_INPUT_UNIT, &isListDirected);
-    if (s == NULL) return;
-    parseInputList(s);
-    emitPrimCall("@_endfmt");
-    emitAdjustSP(2);
+    inputInit(ciList);
+    parseInputList(s, ciList);
+    inputFini(ciList);
+    freeControlInfoList(ciList);
 }
 
 static void parseSAVE(char *s) {
@@ -2810,7 +3845,7 @@ static void parseSUBROUTINE(char *s) {
 
     s = getNextToken(s, &token, FALSE);
     if (token.type == TokenType_Identifier) {
-        symbol = addSymbol(token.details.identifier, SymClass_Subroutine);
+        symbol = addSymbol(token.details.identifier.name, SymClass_Subroutine);
         if (symbol == NULL) {
             err("Subroutine name not unique");
             return;
@@ -2824,7 +3859,7 @@ static void parseSUBROUTINE(char *s) {
     }
     s = eatWsp(s);
     if (*s == '(') {
-        s = parseFormalParameters(s);
+        s = parseFormalArguments(s);
         s = eatWsp(s);
     }
     if (*s != '\0') {
@@ -2833,13 +3868,19 @@ static void parseSUBROUTINE(char *s) {
 }
 
 static void parseWRITE(char *s) {
-    bool isListDirected;
+    ControlInfoList *ciList;
 
-    s = parseUnitAndFmt(s, DEFAULT_OUTPUT_UNIT, &isListDirected);
+    s = eatWsp(s);
+    if (*s != '(') {
+        parsePRINT(s);
+        return;
+    }
+    s = parseControlInfoList(s, &ciList, DEFAULT_OUTPUT_UNIT);
     if (s == NULL) return;
-    parseOutputList(s, isListDirected);
-    emitPrimCall(isListDirected ? "@_flulst" : "@_flufmt");
-    emitAdjustSP(3);
+    outputInit(ciList);
+    parseOutputList(s, ciList);
+    outputFini(ciList);
+    freeControlInfoList(ciList);
 }
 
 static void popArg(OperatorArgument *arg) {
@@ -2877,8 +3918,9 @@ static void presetImplicit(void) {
 }
 
 static void presetProgUnit(void) {
-    progUnitSym = NULL;
-    state = STATE_PROG_UNIT;
+    list("1\n");
+    progUnitSym  = NULL;
+    state        = STATE_PROG_UNIT;
     doStackPtr   = 0;
     ifStackPtr   = 0;
     errorCount   = 0;
@@ -3019,7 +4061,7 @@ static void printToken(FILE *f, Token *token) {
             fputs(tokenIdToStr(token->details.keyword.id), f);
             break;
         case TokenType_Identifier:
-            fputs(token->details.identifier, f);
+            fputs(token->details.identifier.name, f);
             break;
         case TokenType_Operator:
             fputs(opIdToStr(token->details.operator.id), f);
@@ -3075,8 +4117,6 @@ static char *tokenIdToStr(TokenId id) {
     case ASSIGN:          return "ASSIGN";
     case BACKSPACE:       return "BACKSPACE";
     case BLOCKDATA:       return "BLOCKDATA";
-    case BUFFERIN:        return "BUFFERIN";
-    case BUFFEROUT:       return "BUFFEROUT";
     case CALL:            return "CALL";
     case CHARACTER:       return "CHARACTER";
     case CLOSE:           return "CLOSE";

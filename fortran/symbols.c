@@ -41,6 +41,8 @@ static Symbol *labels = NULL;
 static int labelCounter = 0;
 static Symbol *lastSymbol = NULL;
 static Symbol *symbols = NULL;
+static DataType undefinedType = { BaseType_Undefined };
+
 
 Symbol *addLabel(char *label) {
     Symbol *symbol;
@@ -111,13 +113,12 @@ static Symbol *allocNode(char *identifier, SymbolClass class) {
     Symbol *symbol;
     char *s;
 
+    symbol = (Symbol *)allocate(sizeof(Symbol));
     len = strlen(identifier);
     s = (char *)allocate(len + 1);
-    symbol = (Symbol *)allocate(sizeof(Symbol));
     memcpy(s, identifier, len);
     symbol->identifier = s;
     symbol->class = class;
-    memset(&symbol->details, 0, sizeof(SymbolDetails));
 
     return symbol;
 }
@@ -279,11 +280,31 @@ void generateLabel(char *label) {
     sprintf(label, "L%d", ++labelCounter);
 }
 
+DataType *getSymbolType(Symbol *sym) {
+    switch (sym->class) {
+    case SymClass_Undefined:
+    case SymClass_Local:
+    case SymClass_Global:
+    case SymClass_Argument:
+        return &sym->details.variable.dt;
+    case SymClass_Function:
+        return &sym->details.progUnit.dt;
+    case SymClass_Parameter:
+        return &sym->details.param.dt;
+    case SymClass_Pointee:
+        return &sym->details.pointee.dt;
+    default:
+        return &undefinedType;
+    }
+}
+
 void printSymbols(FILE *f) {
 
     if (f == NULL) return;
 
-    fputs("1 Symbols\n", f);
+    fputs(" \n", f);
+    fputs(" \n", f);
+    fputs("  Symbols\n", f);
     fputs("  Name                            Class      Type           Size    Location\n", f);
     fputs("  ------------------------------- ---------- -------------- ------- --------\n", f);
     printTree(f, symbols);
@@ -297,11 +318,12 @@ static void printTree(FILE *f, Symbol *symbol) {
         fprintf(f, "  %-31s", symbol->identifier);
         fprintf(f, " %-10s", symClassToStr(symbol->class));
         switch (symbol->class) {
+        case SymClass_Undefined:
         case SymClass_Function:
         case SymClass_Local:
         case SymClass_Global:
         case SymClass_Argument:
-        SymClass_Parameter:
+        case SymClass_Parameter:
             fprintf(f, " %-14s", dataTypeToStr(&symbol->details.variable.dt));
             size = calculateSize(symbol);
             if (size > 0)
@@ -314,7 +336,8 @@ static void printTree(FILE *f, Symbol *symbol) {
                 fprintf(f, " %d", symbol->details.variable.offset);
                 break;
             case SymClass_Function:
-                fprintf(f, " %d", symbol->details.progUnit.offset);
+                if (symbol->details.progUnit.offset != 0)
+                    fprintf(f, " %d", symbol->details.progUnit.offset);
                 break;
             case SymClass_Global:
                 break;

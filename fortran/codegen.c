@@ -32,16 +32,18 @@
 #include "proto.h"
 #include "types.h"
 
+static void emit(char *format, ...);
+
+static int emissionDepth = 0;
 static Register lastReg = 0;
-static u8 registerMap = 0x01;
-static bool isEmissionEnabled = TRUE;
+static u8 registerMap = 0x81;
 
 Register allocateRegister(void) {
     u8 mask;
 
     if (registerMap == 0xff) {
         fputs("All registers allocated\n", stderr);
-        return -1;
+        exit(1);
     }
     for (;;) {
         mask = 1 << lastReg;
@@ -56,7 +58,7 @@ Register allocateRegister(void) {
 static void emit(char *format, ...) {
     va_list ap;
 
-    if (objectFile != NULL && isEmissionEnabled) {
+    if (objectFile != NULL && emissionDepth < 1) {
         va_start(ap, format);
         vfprintf(objectFile, format, ap);
         va_end(ap);
@@ -118,6 +120,51 @@ void emitAndInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o&S%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
+void emitBranch(char *label) {
+    emit("         J         %s\n", label);
+}
+
+void emitBranch3Way(Register reg, char *label1, char *label2, char *label3) {
+    emit("         S0        S%o\n", reg);
+    if (label1 != NULL) emit("         JSM       %s\n", label1);
+    if (label3 != NULL) emit("         JSN       %s\n", label3);
+    if (label2 != NULL) emit("         JSZ       %s\n", label2);
+}
+
+void emitBranchIfEndTrips(char *label) {
+    emit("         S0        1,A7\n");
+    emit("         JSZ       %s\n", label);
+    emit("         JSM       %s\n", label);
+}
+
+void emitBranchIndexed(char *tableLabel, int tableSize, Register reg) {
+    char endLabel[8];
+
+    generateLabel(endLabel);
+    emit("         A1        S%o\n", reg);
+    emit("         A2        %d\n", tableSize);
+    emit("         A0        A2-A1\n");
+    emit("         JAM       %s\n", endLabel);
+    emit("         A1        A1-1\n");
+    emit("         A0        A1\n");
+    emit("         JAM       %s\n", endLabel);
+    emit("         A0        %s,A1\n", tableLabel);
+    emit("         B00       A0\n");
+    emit("         J         B00\n");
+    emitLabel(endLabel);
+}
+
+void emitBranchOnFalse(Register reg, char *label) {
+    emit("         S0        S%o\n", reg);
+    emit("         JSZ       %s\n", label);
+}
+
+void emitBranchReg(Register reg) {
+    emit("         A0        S%o\n", reg);
+    emit("         B00       A0\n");
+    emit("         J         B00\n");
+}
+
 /*
  *  emitCalcTrip - emit code to calculate initial trip count for DO loop
  *
@@ -175,53 +222,26 @@ void emitCalcTrip1(Register init, Register lim, BaseType type) {
     }
 }
 
-void emitBranch(char *label) {
-    emit("         J         %s\n", label);
-}
-
-void emitBranch3Way(Register reg, char *label1, char *label2, char *label3) {
-    emit("         S0        S%o\n", reg);
-    emit("         JSM       %s\n", label1);
-    emit("         JSZ       %s\n", label2);
-    emit("         J         %s\n", label3);
-}
-
-void emitBranchIfEndTrips(char *label) {
-    emit("         S0        1,A7\n");
-    emit("         JSZ       %s\n", label);
-    emit("         JSM       %s\n", label);
-}
-
-void emitBranchIndexed(char *tableLabel, int tableSize, Register reg) {
-    char endLabel[8];
-
-    generateLabel(endLabel);
-    emit("         A1        S%o\n", reg);
-    emit("         A2        %d\n", tableSize);
-    emit("         A0        A2-A1\n");
-    emit("         JAM       %s\n", endLabel);
-    emit("         A1        A1-1\n");
-    emit("         A0        A1\n");
-    emit("         JAM       %s\n", endLabel);
-    emit("         A0        %s,A1\n", tableLabel);
-    emit("         B00       A0\n");
-    emit("         J         B00\n");
-    emitLabel(endLabel);
-}
-
-void emitBranchOnFalse(Register reg, char *label) {
-    emit("         S0        S%o\n", reg);
-    emit("         JSZ       %s\n", label);
-}
-
-void emitBranchReg(Register reg) {
-    emit("         A0        S%o\n", reg);
-    emit("         B00       A0\n");
-    emit("         J         B00\n");
-}
-
 void emitCatChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    // TODO: implement
+    u8 mask;
+
+    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(rightArg->reg);
+    emitPushReg(leftArg->reg);
+    emitPrimCall("@_catstr");
+    emitAdjustSP(2);
+    if (rightArg->reg != RESULT_REG) emit("         S%o        S7\n", rightArg->reg);
+    emitRestoreRegs(mask);
+}
+
+void emitConvertToByteAddress(Register reg) {
+    emit("         S%o        S%o<3\n", reg, reg);
+}
+
+void emitCopyRegister(Register r1, Register r2) {
+    emit("         S%o        S%o\n", r1, r2);
+    
 }
 
 void emitDeactivateSection(char *name) {
@@ -292,7 +312,19 @@ void emitEpilog(Symbol *sym, int frameSize) {
 }
 
 void emitEqChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    // TODO: implement
+    u8 mask;
+
+    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(rightArg->reg);
+    emitPushReg(leftArg->reg);
+    emitPrimCall("@_cmpstr");
+    emitAdjustSP(2);
+    emitRestoreRegs(mask);
+    emit("         S0        S7\n");
+    emit("         S%o        <64\n", rightArg->reg);
+    emit("         JSZ       *+3\n");
+    emit("         S%o        0\n", rightArg->reg);
 }
 
 void emitEqInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -321,13 +353,20 @@ void emitEqvInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        #S%o\n", rightArg->reg, rightArg->reg);
 }
 
-void emitFnCall(OperatorArgument *arg) {
-// TODO: emit function call
-    arg->reg = allocateRegister();
-}
-
 void emitGeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    // TODO: implement
+    u8 mask;
+
+    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(rightArg->reg);
+    emitPushReg(leftArg->reg);
+    emitPrimCall("@_cmpstr");
+    emitAdjustSP(2);
+    emitRestoreRegs(mask);
+    emit("         S0        S7\n");
+    emit("         S%o        <64\n", rightArg->reg);
+    emit("         JSP       *+3\n");
+    emit("         S%o        0\n", rightArg->reg);
 }
 
 void emitGeInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -352,7 +391,19 @@ void emitGeReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitGtChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    // TODO: implement
+    u8 mask;
+
+    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(leftArg->reg);
+    emitPushReg(rightArg->reg);
+    emitPrimCall("@_cmpstr");
+    emitAdjustSP(2);
+    emitRestoreRegs(mask);
+    emit("         S0        S7\n");
+    emit("         S%o        <64\n", rightArg->reg);
+    emit("         JSM       *+3\n");
+    emit("         S%o        0\n", rightArg->reg);
 }
 
 void emitGtInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -395,8 +446,37 @@ void emitLabelDatum(char *label) {
     emit("         DATA      %s\n", label);
 }
 
+void emitLabeledString(CharacterValue *cvp, char *label, bool hasZByte) {
+    emitActivateSection("DATA", "DATA");
+    if (label != NULL) emitWordLabel(label);
+    emit("         DATA      ");
+    emitString(cvp, hasZByte);
+    emit("\n");
+    emitDeactivateSection("DATA");
+}
+
+Register emitLabelReference(Symbol *sym) {
+    Register reg;
+
+    reg = allocateRegister();
+    emit("         S%o        %s\n", reg, sym->details.label.label);
+    return reg;
+}
+
 void emitLeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    // TODO: implement
+    u8 mask;
+
+    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(leftArg->reg);
+    emitPushReg(rightArg->reg);
+    emitPrimCall("@_cmpstr");
+    emitAdjustSP(2);
+    emitRestoreRegs(mask);
+    emit("         S0        S7\n");
+    emit("         S%o        <64\n", rightArg->reg);
+    emit("         JSP       *+3\n");
+    emit("         S%o        0\n", rightArg->reg);
 }
 
 void emitLeInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -420,29 +500,24 @@ void emitLeReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        0\n", rightArg->reg);
 }
 
-Register emitLoadByteAddr(char *label) {
-    Register reg;
-
-    reg = allocateRegister();
-    emit("         S%o        %s\n", reg, label);
-    emit("         S%o        S%o<3\n", reg, reg);
-
-    return reg;
-}
-
 void emitLoadConst(OperatorArgument *arg) {
     char buf[32];
     char *cp;
+    DataType dt;
     i64 i;
     u64 l;
 
     arg->reg = allocateRegister();
+    dt = arg->details.constant.dt;
     switch (arg->details.constant.dt.type) {
     case BaseType_Character:
-        generateLabel(buf);
-        emitString(arg->details.constant.value.character.string, buf);
-        freeRegister(arg->reg);
-        arg->reg = emitLoadByteAddr(buf);
+        emit("         S%o        =", arg->reg);
+        emitString(&arg->details.constant.value.character, FALSE);
+        emit("\n");
+        emit("         S%o        S%o<3\n", arg->reg, arg->reg);
+        emit("         S7        %d\n", arg->details.constant.value.character.length);
+        emit("         S7        S7<32\n");
+        emit("         S%o        S%o!S7\n", arg->reg, arg->reg);
         break;
     case BaseType_Logical:
         l = arg->details.constant.value.logical;
@@ -480,6 +555,206 @@ void emitLoadConst(OperatorArgument *arg) {
         fprintf(stderr, "emitLoadConst: Invalid type: %d\n", arg->details.constant.dt.type);
         exit(1);
     }
+    arg->class = ArgClass_Calculation;
+    arg->details.calculation = dt;
+}
+
+void emitLoadReference(OperatorArgument *arg) {
+    DataType *dt;
+    Symbol *sym;
+
+    arg->reg = allocateRegister();
+    sym = arg->details.reference.symbol;
+    dt = getSymbolType(sym);
+    if (dt->type == BaseType_Character) {
+        switch (sym->class) {
+        case SymClass_Local:
+            emit("         S%o        %d\n", arg->reg, sym->details.variable.offset);
+            emit("         S7        A6\n");
+            emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+            emit("         S%o        S%o<3\n", arg->reg, arg->reg);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Argument:
+            emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Function:
+            emit("         S%o        %d\n", arg->reg, sym->details.progUnit.offset);
+            emit("         S7        A6\n");
+            emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+            emit("         S%o        S%o<3\n", arg->reg, arg->reg);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Global:
+        case SymClass_Pointee:
+            emit("         S%o        %s\n", arg->reg, sym->identifier);
+            emit("         S%o        S%o<3\n", arg->reg, arg->reg);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        default:
+            fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
+            exit(1);
+        }
+        emit("         S7        %d\n", dt->constraint);
+        emit("         S7        S7<32\n");
+        emit("         S%o        S%o!S7\n", arg->reg, arg->reg);
+    }
+    else { // dt->type != BaseType_Character
+        switch (sym->class) {
+        case SymClass_Local:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S7        A6\n");
+                emit("         S%o        %d\n", arg->reg, sym->details.variable.offset);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Constant:
+                emit("         S7        A6\n");
+                emit("         S%o        %d\n", arg->reg, sym->details.variable.offset + arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        A6\n", arg->reg);
+                emit("         S7        %d\n", sym->details.variable.offset);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Argument:
+            emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Function:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S7        A6\n");
+                emit("         S%o        %d\n", arg->reg, sym->details.progUnit.offset);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Constant:
+                emit("         S7        A6\n");
+                emit("         S%o        %d\n", arg->reg, sym->details.progUnit.offset + arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        A6\n", arg->reg);
+                emit("         S7        %d\n", sym->details.progUnit.offset);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Global:
+        case SymClass_Pointee:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        %s\n", arg->reg, sym->identifier);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %s+%d\n", arg->reg, sym->identifier, arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        %s\n", arg->reg, sym->identifier);
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        default:
+            fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
+            exit(1);
+        }
+    }
+    arg->class = ArgClass_Calculation;
+    arg->details.calculation = sym->details.variable.dt;
 }
 
 Register emitLoadStack(int offset) {
@@ -522,71 +797,136 @@ Register emitLoadStackByteAddr(int offset) {
     return reg;
 }
 
-void emitLoadVar(OperatorArgument *arg) {
+void emitLoadValue(OperatorArgument *arg) {
+    DataType *dt;
     Symbol *sym;
 
-    arg->reg = allocateRegister();
-    sym = arg->details.symbol;
-    switch (sym->class) {
-    case SymClass_Local:
-        emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
-        break;
-    case SymClass_Argument:
-        emit("         A1        %d,A6\n", sym->details.variable.offset);
-        emit("         S%o        ,A1\n", arg->reg);
-        break;
-    case SymClass_Global:
-    case SymClass_Pointee:
-        emit("         S%o        %s,\n", arg->reg, sym->identifier);
-        break;
-    default:
-        fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
-        exit(1);
+    sym = arg->details.reference.symbol;
+    dt = getSymbolType(sym);
+    if (dt->type == BaseType_Character) {
+        emitLoadReference(arg);
+    }
+    else {
+        arg->reg = allocateRegister();
+        switch (sym->class) {
+        case SymClass_Local:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset + arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         A1        S%o\n", arg->details.reference.offset.reg);
+                emit("         A1        A1+A6\n");
+                emit("         S%o        %d,A1\n", arg->reg, sym->details.variable.offset);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Argument:
+            emit("         A1        %d,A6\n", sym->details.variable.offset);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        ,A1\n", arg->reg);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %d,A1\n", arg->reg, arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         A2        S%o\n", arg->details.reference.offset.reg);
+                emit("         A1        A1+A2\n");
+                emit("         S%o        ,A1\n", arg->reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Function:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        %d,A6\n", arg->reg, sym->details.progUnit.offset);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %d,A6\n", arg->reg, sym->details.progUnit.offset + arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         A1        S%o\n", arg->details.reference.offset.reg);
+                emit("         A1        A1+A6\n");
+                emit("         S%o        %d,A1\n", arg->reg, sym->details.progUnit.offset);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Global:
+        case SymClass_Pointee:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        %s,\n", arg->reg, sym->identifier);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %s+%d,\n", arg->reg, sym->identifier, arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         A1        S%o\n", arg->details.reference.offset.reg);
+                emit("         S%o        %s,A1\n", arg->reg, sym->identifier);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        default:
+            fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
+            exit(1);
+        }
+        arg->class = ArgClass_Calculation;
+        arg->details.calculation = sym->details.variable.dt;
     }
 }
 
-Register emitLoadVarAddr(Symbol *sym) {
-    Register offsetReg;
-    Register resultReg;
-
-    resultReg = allocateRegister();
-    switch (sym->class) {
-    case SymClass_Local:
-        offsetReg = allocateRegister();
-        emit("         S%o        %d\n", offsetReg, sym->details.variable.offset);
-        emit("         S%o        A6\n", resultReg);
-        emit("         S%o        S%o+S%o\n", resultReg, resultReg, offsetReg);
-        freeRegister(offsetReg);
-        break;
-    case SymClass_Argument:
-        emit("         S%o        %d,A6\n", resultReg, sym->details.variable.offset);
-        break;
-    case SymClass_Global:
-    case SymClass_Pointee:
-        emit("         S%o        %s\n", resultReg, sym->identifier);
-        break;
-    case SymClass_Label:
-        emit("         S%o        %s\n", resultReg, sym->details.label.label);
-        break;
-    default:
-        fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
-        exit(1);
-    }
-
-    return resultReg;
-}
-
-Register emitLoadVarByteAddr(Symbol *sym) {
+Register emitLoadZStrAddr(char *label) {
     Register reg;
 
-    reg = emitLoadVarAddr(sym);
+    reg = allocateRegister();
+    emit("         S%o        %s\n", reg, label);
+    emitPushReg(reg);
+    freeRegister(reg);
+    emitPrimCall("@strlen");
+    emitAdjustSP(1);
+    reg = allocateRegister();
+    emit("         S%o        %s\n", reg, label);
     emit("         S%o        S%o<3\n", reg, reg);
+    emit("         S7        S7<32\n");
+    emit("         S%o        S%o!S7\n", reg, reg);
 
     return reg;
 }
 
 void emitLtChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    // TODO: implement
+    u8 mask;
+
+    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(rightArg->reg);
+    emitPushReg(leftArg->reg);
+    emitPrimCall("@_cmpstr");
+    emitAdjustSP(2);
+    emitRestoreRegs(mask);
+    emit("         S0        S7\n");
+    emit("         S%o        <64\n", rightArg->reg);
+    emit("         JSM       *+3\n");
+    emit("         S%o        0\n", rightArg->reg);
 }
 
 void emitLtInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -627,7 +967,19 @@ void emitMulReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitNeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    // TODO: implement
+    u8 mask;
+
+    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(rightArg->reg);
+    emitPushReg(leftArg->reg);
+    emitPrimCall("@_cmpstr");
+    emitAdjustSP(2);
+    emitRestoreRegs(mask);
+    emit("         S0        S7\n");
+    emit("         S%o        <64\n", rightArg->reg);
+    emit("         JSN       *+3\n");
+    emit("         S%o        0\n", rightArg->reg);
 }
 
 void emitNeInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -721,20 +1073,26 @@ void emitRealToIntReg(Register arg) {
 
 void emitRestoreRegs(u8 mask) {
     u8 reg;
+    u8 selector;
 
-    for (reg = 7; reg > 0; reg--) {
-        if ((mask & (1 << reg)) != 0) {
+    for (reg = 6; reg > 0; reg--) {
+        selector = 1 << reg;
+        if ((mask & selector) != 0) {
             emitPopReg(reg);
+            registerMap |= selector;
         }
     }
 }
 
 void emitSaveRegs(u8 mask) {
     u8 reg;
+    u8 selector;
 
-    for (reg = 1; reg < 8; reg++) {
-        if ((mask & (1 << reg)) != 0) {
+    for (reg = 1; reg < 7; reg++) {
+        selector = 1 << reg;
+        if ((mask & selector) != 0) {
             emitPushReg(reg);
+            registerMap &= ~selector;
         }
     }
 }
@@ -748,6 +1106,19 @@ void emitStoreArg(Symbol *sym, OperatorArgument *arg) {
     emitStoreReg(sym, arg->reg);
 }
 
+void emitStoreByReference(OperatorArgument *target, OperatorArgument *value) {
+    if (target->details.calculation.type == BaseType_Character) {
+        emitPushReg(value->reg);
+        emitPushReg(target->reg);
+        emitPrimCall("@_cpystr");
+        emitAdjustSP(2);
+    }
+    else {
+        emit("         A1        S%o\n", target->reg);
+        emit("         ,A1       S%o\n", value->reg);
+    }
+}
+
 void emitStoreReg(Symbol *sym, Register reg) {
     char buf[32];
 
@@ -759,6 +1130,10 @@ void emitStoreReg(Symbol *sym, Register reg) {
     case SymClass_Argument:
         emit("         A1        %d,A6\n", sym->details.variable.offset);
         emit("         ,A1       S%o\n", reg);
+        break;
+    case SymClass_Function:
+        sprintf(buf, "%d,A6", sym->details.progUnit.offset);
+        emit("         %-9s S%o\n", buf, reg);
         break;
     case SymClass_Global:
     case SymClass_Parameter:
@@ -779,22 +1154,86 @@ void emitStoreStack(Register reg, int offset) {
     emit("         %-9s S%o\n", buf, reg);
 }
 
-void emitString(char *s, char *label) {
-    emitActivateSection("DATA", "DATA");
-    if (label != NULL) emitWordLabel(label);
-    emit("         DATA      '");
-    while (*s != '\0') {
-        while (*s != '\0' && *s != '\'') {
+void emitStoreString(Symbol *sym, OperatorArgument *offset, OperatorArgument *length, OperatorArgument *string) {
+    char buf[32];
+    Register reg;
+
+    reg = allocateRegister();
+    switch (sym->class) {
+    case SymClass_Argument:
+        emit("         S%o        %d,A6\n", reg, sym->details.variable.offset);
+        emit("         S7        <32\n");
+        emit("         S%o        S%o&S7\n", reg, reg);
+        break;
+    case SymClass_Local:
+        emit("         A1        %d\n", sym->details.variable.offset);
+        emit("         A1        A1+A6\n");
+        break;
+    case SymClass_Function:
+        emit("         A1        %d\n", sym->details.progUnit.offset);
+        emit("         A1        A1+A6\n");
+        break;
+    case SymClass_Global:
+    case SymClass_Parameter:
+    case SymClass_Pointee:
+        emit("         A1        %s\n", sym->identifier);
+        break;
+    default:
+        fprintf(stderr, "Invalid class for store request: %d\n", sym->class);
+        exit(1);
+    }
+    if (sym->class != SymClass_Argument) {
+        emit("         S%o        A1\n", reg);
+        emit("         S%o         S%o<3\n", reg, reg);
+    }
+    if (offset->class != ArgClass_Constant || offset->details.constant.value.integer != 0) {
+        if (offset->class == ArgClass_Constant) {
+            emitLoadConst(offset);
+        }
+        else if (offset->class > ArgClass_Function) {
+            emitLoadValue(offset);
+        }
+        emit("         S%o         S%o+S%o\n", reg, reg, offset->reg);
+    }
+    if (length->class == ArgClass_Constant) {
+        emitLoadConst(length);
+    }
+    else if (length->class > ArgClass_Function) {
+        emitLoadValue(length);
+    }
+    emit("         S%o         S%o<32\n", length->reg, length->reg);
+    emit("         S%o         S%o!S%o\n", reg, reg, length->reg);
+    emitPushReg(string->reg);
+    emitPushReg(reg);
+    freeRegister(reg);
+    emitPrimCall("@_cpystr");
+    emitAdjustSP(2);
+}
+
+void emitString(CharacterValue *cvp, bool hasZByte) {
+    int len;
+    char *s;
+
+    len = cvp->length;
+    s = cvp->string;
+    emit("'");
+    while (len > 0 && *s != '\0') {
+        while (len > 0 && *s != '\0' && *s != '\'') {
             emit("%c", *s);
             s += 1;
+            len -= 1;
         }
         if (*s == '\'') {
             emit("''");
             s += 1;
+            len -= 1;
         }
     }
-    emit("'Z\n");
-    emitDeactivateSection("DATA");
+    while (len-- > 0) emit(" ");
+    if (hasZByte)
+        emit("'Z");
+    else
+        emit("'");
 }
 
 void emitSubInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -812,6 +1251,33 @@ void emitSubReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o-FS%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
+void emitUpdateStringRef(OperatorArgument *strRef, OperatorArgument *strOffset, OperatorArgument *strLength) {
+    if (strOffset->class == ArgClass_Constant) {
+        if (strOffset->details.constant.value.integer > 0) {
+            emit("         S7        %d\n", strOffset->details.constant.value.integer);
+            emit("         S%o        S%o+S7\n", strRef->reg, strRef->reg);
+        }
+    }
+    else {
+        if (strOffset->class > ArgClass_Function) emitLoadValue(strOffset);
+        emit("         S%o        S%o+S%o\n", strRef->reg, strRef->reg, strOffset->reg);
+        freeRegister(strOffset->reg);
+    }
+    emit("         S7        <32\n");
+    emit("         S%o        S%o&S7\n", strRef->reg, strRef->reg);
+    if (strLength->class == ArgClass_Constant) {
+        emit("         S7        %d\n", strLength->details.constant.value.integer);
+        emit("         S7        S7<32\n");
+        emit("         S%o        S%o!S7\n", strRef->reg, strRef->reg);
+    }
+    else {
+        if (strLength->class > ArgClass_Function) emitLoadValue(strLength);
+        emit("         S%o        S%o<32\n", strLength->reg, strLength->reg);
+        emit("         S%o        S%o!S%o\n", strRef->reg, strRef->reg, strLength->reg);
+        freeRegister(strLength->reg);
+    }
+}
+
 void emitWordLabel(char *label) {
     emit("%-8s BSS       0\n", label);
 }
@@ -822,17 +1288,24 @@ void freeAllRegisters(void) {
 }
 
 void enableEmission(bool isEnabled) {
-    isEmissionEnabled = isEnabled;
+    if (isEnabled)
+        emissionDepth += 1;
+    else
+        emissionDepth -= 1;
 }
 
 void freeRegister(Register reg) {
     u8 mask;
 
-    if (reg > 0 && reg <= 7) {
+    if (reg > 0 && reg <= 6) {
         mask = 1 << reg;
         if ((registerMap & mask) != 0) {
             lastReg = reg;
             registerMap &= ~mask;
         }
     }
+}
+
+u8 getRegisterMap(void) {
+    return registerMap;
 }

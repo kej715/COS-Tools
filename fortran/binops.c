@@ -202,7 +202,22 @@ void cstNeReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstCatChar(OperatorArgument *left, OperatorArgument *right) {
-    // TODO: implement CAT
+    char *cp;
+    char *dp;
+    int len;
+    char *s;
+
+    len = left->details.constant.value.character.length + right->details.constant.value.character.length;
+    s = (char *)allocate(len + 1);
+    dp = s;
+    cp = left->details.constant.value.character.string;
+    while (*cp != '\0') *dp++ = *cp++;
+    cp = right->details.constant.value.character.string;
+    while (*cp != '\0') *dp++ = *cp++;
+    *dp = '\0';
+    free(right->details.constant.value.character.string);
+    right->details.constant.value.character.string = s;
+    right->details.constant.value.character.length = len;
 }
 
 /*

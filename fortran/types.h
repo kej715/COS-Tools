@@ -32,8 +32,6 @@ typedef enum tokenId {
     ASSIGN,
     BACKSPACE,
     BLOCKDATA,
-    BUFFERIN,
-    BUFFEROUT,
     CALL,
     CHARACTER,
     CLOSE,
@@ -151,7 +149,8 @@ typedef struct keyword {
 } Keyword;
 
 typedef enum argumentClass {
-    ArgClass_Constant = 0,
+    ArgClass_Undefined = 0,
+    ArgClass_Constant,
     ArgClass_Calculation,
     ArgClass_Function,
     ArgClass_Local,
@@ -216,6 +215,7 @@ typedef union dataValue {
     u64 logical;
     f64 real;
     CharacterValue character;
+    u64 charRef;
     ComplexValue complex;
 } DataValue;
 
@@ -236,6 +236,12 @@ typedef struct constantDetails {
     DataValue value;
 } ConstantDetails;
 
+typedef struct identifierDetails {
+    char *name;
+    struct tokenListItem *qualifiers; // subscripts or function arguments
+    struct stringRange *range;
+} IdentifierDetails;
+
 typedef struct keywordDetails {
     TokenId id;
     StatementClass class;
@@ -250,7 +256,7 @@ typedef struct operatorDetails {
 
 typedef union tokenDetails {
     KeywordDetails keyword;
-    char *identifier;
+    IdentifierDetails identifier;
     OperatorDetails operator;
     ConstantDetails constant;
     InvalidDetails invalid;
@@ -260,6 +266,16 @@ typedef struct token {
     TokenType type;
     TokenDetails details;
 } Token;
+
+typedef struct tokenListItem {
+    struct tokenListItem *next;
+    Token *item;
+} TokenListItem;
+
+typedef struct stringRange {
+    Token *first;
+    Token *last;
+} StringRange;
 
 typedef struct labelDetails {
     StatementClass class;
@@ -273,9 +289,9 @@ typedef struct pointeeDetails {
 } PointeeDetails;
 
 typedef struct progUnitDetails {
-    char frameSizeLabel[8];
     DataType dt;
     int offset;
+    char frameSizeLabel[8];
 } ProgUnitDetails;
 
 typedef struct variableDetails {
@@ -303,10 +319,27 @@ typedef struct symbol {
 
 typedef int Register;
 
+typedef union arrayOffset {
+    int constant;
+    Register reg;
+} ArrayOffset;
+
+typedef struct reference {
+    Symbol *symbol;
+    ArgumentClass offsetClass;
+    ArrayOffset offset;
+} Reference;
+
+typedef struct storageRefeerence {
+    Symbol *symbol;
+    TokenListItem *expressionList;
+    StringRange *strRange;
+} StorageReference;
+
 typedef union argumentDetails {
     ConstantDetails constant;
     DataType calculation;
-    Symbol *symbol;
+    Reference reference;
 } ArgumentDetails;
 
 typedef struct operatorArgument {
@@ -314,6 +347,15 @@ typedef struct operatorArgument {
     ArgumentDetails details;
     Register reg;
 } OperatorArgument;
+
+typedef struct controlInfoList {
+    Token *unit;
+    Token *format;
+    Symbol *endLabel;
+    Symbol *errLabel;
+    Token *recordNumber;
+    StorageReference iostat;
+} ControlInfoList;
 
 #define isCalculation(arg) ((arg).class == ArgClass_Calculation)
 #define isConstant(arg) ((arg).class == ArgClass_Constant)

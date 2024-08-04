@@ -21,8 +21,8 @@
 #
 #--------------------------------------------------------------------------
 
-CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
-#CFLAGS  = -O0 -g $(INCL) $(EXTRACFLAGS)
+#CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
+CFLAGS  = -O0 -g $(INCL) $(EXTRACFLAGS)
 PREFIX = /usr/local
 COSOBJS = $(PREFIX)/share/ack/cos/boot.o $(PREFIX)/share/ack/cos/c-ansi.o
 

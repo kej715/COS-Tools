@@ -99,8 +99,10 @@ void _flufmt(int unitNum) {
         _outfin(&eor);
         s = _getrcd();
         len = strlen(s);
+        errno = 0;
         if (write(fd, s, len) != len || write(fd, "\n", 1) != 1) {
             up = _findu(unitNum);
+            up->ioStat = (errno != 0) ? errno : EIO;
             perror(up->fileName);
             exit(1);
         }
@@ -117,8 +119,10 @@ void _flulst(int unitNum) {
     fd = fdForUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
     s = _getrcd();
     len = strlen(s);
+    errno = 0;
     if (write(fd, s, len) != len || write(fd, "\n", 1) != 1) {
         up = _findu(unitNum);
+        up->ioStat = (errno != 0) ? errno : EIO;
         perror(up->fileName);
         exit(1);
     }
@@ -154,6 +158,13 @@ void _inifio(void) {
     strcpy(up->fileName, "$OUT");
 }
 
+int _iostat(int unitNum) {
+    Unit *up;
+
+    up = _findu(unitNum);
+    return (up != NULL) ? up->ioStat : EBADF;
+}
+
 int _openu(char *fileName, int unitNum, int flags, int recLen) {
     Unit *up;
 
@@ -181,6 +192,14 @@ int _openu(char *fileName, int unitNum, int flags, int recLen) {
     return 0;
 }
 
+void _rdufmt(int unitNum, void *value) {
+// TODO
+}
+
+void _rdurec(int unitNum) {
+// TODO: read record from unit
+}
+
 void _wrufmt(int unitNum, DataValue *value) {
     int eor;
     int fd;
@@ -195,8 +214,10 @@ void _wrufmt(int unitNum, DataValue *value) {
             eor = 0;
             s = _getrcd();
             len = strlen(s);
+            errno = 0;
             if (write(fd, s, len) != len || write(fd, "\n", 1) != 1) {
                 up = _findu(unitNum);
+                up->ioStat = (errno != 0) ? errno : EIO;
                 perror(up->fileName);
                 exit(1);
             }

@@ -28,7 +28,8 @@
 #include <stdio.h>
 #include "types.h"
 
-#define RESULT_REG ((Register)7)
+#define ALL_REG_MASK 0x7e
+#define RESULT_REG   ((Register)7)
 
 Register allocateRegister(void);
 void emitActivateSection(char *name, char *type);
@@ -46,6 +47,8 @@ void emitBranchReg(Register reg);
 void emitCalcTrip(Register init, Register lim, Register incr, BaseType type);
 void emitCalcTrip1(Register init, Register lim, BaseType type);
 void emitCatChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
+void emitConvertToByteAddress(Register reg);
+void emitCopyRegister(Register r1, Register r2);
 void emitDeactivateSection(char *name);
 void emitDecrTrip(void);
 void emitDivInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
@@ -59,7 +62,6 @@ void emitEqInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqvInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
-void emitFnCall(OperatorArgument *arg);
 void emitGeChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitGeInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitGeLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
@@ -71,18 +73,19 @@ void emitGtReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitIntToReal(OperatorArgument *arg);
 void emitLabel(char *label);
 void emitLabelDatum(char *label);
+void emitLabeledString(CharacterValue *cvp, char *label, bool hasZByte);
+Register emitLabelReference(Symbol *sym);
 void emitLeChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLeInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLeLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLeReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
-Register emitLoadByteAddr(char *label);
 void emitLoadConst(OperatorArgument *arg);
+void emitLoadReference(OperatorArgument *arg);
 Register emitLoadStack(int offset);
 Register emitLoadStackAddr(int offset);
 Register emitLoadStackByteAddr(int offset);
-void emitLoadVar(OperatorArgument *arg);
-Register emitLoadVarAddr(Symbol *sym);
-Register emitLoadVarByteAddr(Symbol *sym);
+void emitLoadValue(OperatorArgument *arg);
+Register emitLoadZStrAddr(char *label);
 void emitLtChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLtInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLtLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
@@ -105,15 +108,19 @@ void emitRestoreRegs(u8 mask);
 void emitSaveRegs(u8 mask);
 void emitStart(char *name);
 void emitStoreArg(Symbol *sym, OperatorArgument *arg);
+void emitStoreByReference(OperatorArgument *target, OperatorArgument *value);
 void emitStoreReg(Symbol *sym, Register reg);
 void emitStoreStack(Register reg, int offset);
-void emitString(char *s, char *label);
+void emitStoreString(Symbol *sym, OperatorArgument *offset, OperatorArgument *length, OperatorArgument *string);
+void emitString(CharacterValue *cvp, bool hasZByte);
 void emitSubInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitSubprogramCall(char *id);
 void emitSubReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
+void emitUpdateStringRef(OperatorArgument *strRef, OperatorArgument *strOffset, OperatorArgument *strLength);
 void emitWordLabel(char *label);
 void enableEmission(bool isEnabled);
 void freeAllRegisters(void);
 void freeRegister(Register register);
+u8 getRegisterMap(void);
 
 #endif

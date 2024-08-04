@@ -33,7 +33,7 @@
  *
  *   Bit  Meaning
  *    0   NEW         : 0 if OLD, 1 if NEW
- *    1   DIRECT      : 0 if DIRECT, 0 if SEQUENTIAL
+ *    1   DIRECT      : 0 if SEQUENTIAL, 1 if DIRECT
  *    2   UNFORMATTED : 0 if FORMATTED, 1 if UNFORMATTED
  *    3   BLANK       : 0 if NULL, 1 if ZERO
  *    4   SCRATCH     : 0 if ordinary file, 1 if scratch file
@@ -58,6 +58,10 @@ typedef struct unit {
     int  number;      /* unit number                      */
     int  fd;          /* OS file descriptor               */
     int  ioStat;      /* current I/O status               */
+                      /*   =0 Transfer complete, no error */
+                      /*      not end of file             */
+                      /*   >0 Error code                  */
+                      /*   <0 End of file                 */
     int  recLen;      /* unformatted record length        */
     int  nextRec;     /* next direct access record number */
     int  flags;       /* flag bits                        */
@@ -71,7 +75,10 @@ void _flufmt(int unitNum);
 void _flulst(int unitNum);
 void _freeu(int unitNum);
 void _inifio(void);
+int  _iostat(int unitNum);
 int  _openu(char *fileName, int unitNum, int flags, int recLen);
+void _rdufmt(int unitNum, void *value);
+void _rdurec(int unitNum);
 void _wrufmt(int unitNum, DataValue *value);
 
 #endif

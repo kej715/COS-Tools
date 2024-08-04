@@ -43,8 +43,6 @@ static Keyword keywordTable[] = {
     {"ASSIGN", ASSIGN, StmtClass_Executable},
     {"BACKSPACE", BACKSPACE, StmtClass_Executable},
     {"BLOCKDATA", BLOCKDATA, StmtClass_Nonexecutable},
-    {"BUFFERIN", BUFFERIN, StmtClass_Executable},
-    {"BUFFEROUT", BUFFEROUT, StmtClass_Executable},
     {"CALL", CALL, StmtClass_Executable},
     {"CHARACTER", CHARACTER, StmtClass_Nonexecutable},
     {"CLOSE", CLOSE, StmtClass_Executable},
@@ -94,7 +92,7 @@ static Keyword keywordTable[] = {
     {"WRITE", WRITE}
 };
 
-#define KEYWORD_TBL_LEN 52
+#define KEYWORD_TBL_LEN 50
 
 /*
  *  DOUBLEPRECISION is the longest keyword, and
@@ -156,7 +154,8 @@ static char *getIdentifier(char *s, Token *token) {
         else {
             id[len] = '\0';
             token->type = TokenType_Identifier;
-            token->details.identifier = id;
+            token->details.identifier.name = id;
+            token->details.identifier.qualifiers = NULL;
             return s;
         }
     }

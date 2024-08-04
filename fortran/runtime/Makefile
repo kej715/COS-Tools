@@ -32,7 +32,7 @@ HDRS = const.h \
        fmt.h   \
        units.h
 
-OBJS = fmt.o units.o
+OBJS = catstr.o cmpstr.o cpystr.o fmt.o fmt2.o units.o
 
 all: libio.a
 
@@ -51,7 +51,19 @@ test: test.o libio.a
 test.o: test.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
 
+catstr.o: catstr.c $(HDRS)
+	$(CC) $(CFLAGS) -c $<
+
+cmpstr.o: cmpstr.c $(HDRS)
+	$(CC) $(CFLAGS) -c $<
+
+cpystr.o: cpystr.c $(HDRS)
+	$(CC) $(CFLAGS) -c $<
+
 fmt.o: fmt.c $(HDRS)
+	$(CC) $(CFLAGS) -c $<
+
+fmt2.o: fmt2.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
 
 units.o: units.c $(HDRS)
