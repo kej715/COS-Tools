@@ -70,10 +70,14 @@ typedef struct formatDesc {
 } FormatDesc;
 
 void _endfmt(void);
-void _infmt(DataValue *value);
+void _inpfmt(DataValue *value);
 FormatDesc *_getfdl(void);
-char *_getrcd(void);
+unsigned long _getrcd(void);
 void _inircd(void);
+void _inpchr(int unitNum, unsigned long value);
+void _inpdbl(int unitNum, DataValue *value);
+void _inpint(int unitNum, DataValue *value);
+void _inplog(int unitNum, DataValue *value);
 void _lstchr(int unitNum, unsigned long value);
 void _lstdbl(int unitNum, DataValue *value);
 void _lstint(int unitNum, DataValue *value);
@@ -83,8 +87,9 @@ void _outfmt(DataValue *value, int *eor);
 void _prsfmt(unsigned long strDesc);
 void _przfmt(char *s);
 void _prslst(void);
+void _setdrc(void);
 void _setfdl(FormatDesc *fdp);
-void _setrcd(char *record);
+void _setrcd(unsigned long strRef);
 void _setrfd(FormatDesc *fdp);
 
 #endif

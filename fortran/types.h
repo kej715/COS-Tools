@@ -350,6 +350,7 @@ typedef struct operatorArgument {
 
 typedef struct controlInfoList {
     Token *unit;
+    BaseType unitType;
     Token *format;
     Symbol *endLabel;
     Symbol *errLabel;

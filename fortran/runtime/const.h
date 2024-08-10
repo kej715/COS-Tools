@@ -26,6 +26,7 @@
 #define CONST_H
 
 #define MAX_ALLOCATED_UNITS  20
+#define MAX_BUF_SIZE        256
 #define MAX_FILE_NAME_LEN     7
 #define MAX_FMT_DESC         50
 #define MAX_FMT_LEN        1024

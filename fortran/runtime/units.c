@@ -38,7 +38,8 @@ static char unitName[8] = {'U','N','I','T','0','0','0',0};
 
 static Unit units[MAX_ALLOCATED_UNITS];
 
-static int fdForUnit(int unitNum, int flags, int recLen);
+static Unit *getUnit(int unitNum, int flags, int recLen);
+static int writer(Unit *up, void *buf, size_t nbyte);
 
 Unit *_allocu(int unitNum) {
     Unit *up;
@@ -67,6 +68,15 @@ int _closeu(int unitNum, int doDelete) {
     return 0;
 }
 
+void _clrios(int unitNum) {
+    Unit *up;
+
+    up = _findu(unitNum);
+    if (up != NULL) {
+        up->ioStat = 0;
+    }
+}
+
 void _endfio(void) {
     int i;
     Unit *up;
@@ -89,42 +99,33 @@ Unit *_findu(int unitNum) {
 
 void _flufmt(int unitNum) {
     int eor;
-    int fd;
     int len;
+    unsigned long ref;
     char *s;
     Unit *up;
 
-    fd = fdForUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
-    for (;;) {
+    up = getUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
+    while (up->ioStat == 0) {
         _outfin(&eor);
-        s = _getrcd();
-        len = strlen(s);
-        errno = 0;
-        if (write(fd, s, len) != len || write(fd, "\n", 1) != 1) {
-            up = _findu(unitNum);
-            up->ioStat = (errno != 0) ? errno : EIO;
-            perror(up->fileName);
-            exit(1);
-        }
-        if (eor == 0) break;
+        ref = _getrcd();
+        s = (char *)(ref & 0xffffffff);
+        len = ref >> 32;
+        if (writer(up, s, len) != len || eor == 0) break;
     }
 }
 
 void _flulst(int unitNum) {
-    int fd;
     int len;
+    unsigned long ref;
     char *s;
     Unit *up;
 
-    fd = fdForUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
-    s = _getrcd();
-    len = strlen(s);
-    errno = 0;
-    if (write(fd, s, len) != len || write(fd, "\n", 1) != 1) {
-        up = _findu(unitNum);
-        up->ioStat = (errno != 0) ? errno : EIO;
-        perror(up->fileName);
-        exit(1);
+    up = getUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
+    if (up->ioStat == 0) {
+        ref = _getrcd();
+        s = (char *)(ref & 0xffffffff);
+        len = ref >> 32;
+        writer(up, s, len);
     }
 }
 
@@ -132,7 +133,13 @@ void _freeu(int unitNum) {
     Unit *up;
 
     up = _findu(unitNum);
-    if (up != NULL) up->number = 0;
+    if (up != NULL) {
+        up->number = 0;
+        if (up->buf != NULL) {
+            free(up->buf);
+            up->buf = NULL;
+        }
+    }
 }
 
 void _inifio(void) {
@@ -193,41 +200,81 @@ int _openu(char *fileName, int unitNum, int flags, int recLen) {
 }
 
 void _rdufmt(int unitNum, void *value) {
-// TODO
+    _inpfmt(value);
 }
 
 void _rdurec(int unitNum) {
-// TODO: read record from unit
-}
-
-void _wrufmt(int unitNum, DataValue *value) {
-    int eor;
-    int fd;
+    char c;
     int len;
+    char *limit;
+    int n;
+    unsigned long ref;
     char *s;
     Unit *up;
 
-    _outfmt(value, &eor);
-    if (eor) {
-        fd = fdForUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
-        while (eor) {
-            eor = 0;
-            s = _getrcd();
-            len = strlen(s);
-            errno = 0;
-            if (write(fd, s, len) != len || write(fd, "\n", 1) != 1) {
-                up = _findu(unitNum);
-                up->ioStat = (errno != 0) ? errno : EIO;
-                perror(up->fileName);
-                exit(1);
+    ref = _getrcd();
+    s = (char *)(ref & 0xffffffff);
+    len = ref >> 32;
+    limit = s + len;
+    up = getUnit(unitNum, 0, MAX_FMT_RECL);
+    if (up->ioStat != 0) return;
+    if (up->buf == NULL) {
+        up->buf = (char *)malloc(MAX_BUF_SIZE);
+        if (up->buf == NULL) {
+            fputs("Out of memory\n", stderr);
+            exit(1);
+        }
+        up->out = up->limit = up->buf + MAX_BUF_SIZE;
+    }
+    while (s < limit) {
+        if (up->out >= up->limit) {
+            n = read(up->fd, up->buf, MAX_BUF_SIZE);
+            if (n > 0) {
+                up->ioStat = 0;
+                up->limit = up->buf + n;
+                up->out = up->buf;
             }
-            _inircd();
-            _outfmt(value, &eor);
+            else if (n == 0) {
+                up->ioStat = -1;
+                return;
+            }
+            else {
+                up->ioStat = errno;
+                return;
+            }
+        }
+        c = *up->out++;
+        if (c == '\n') {
+            while (s < limit) *s++ = ' ';
+            break;
+        }
+        else {
+            *s++ = c;
         }
     }
 }
 
-static int fdForUnit(int unitNum, int flags, int recLen) {
+void _wrufmt(int unitNum, DataValue *value) {
+    int eor;
+    int len;
+    unsigned long ref;
+    char *s;
+    Unit *up;
+
+    up = getUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
+    _outfmt(value, &eor);
+    while (eor && up->ioStat == 0) {
+        eor = 0;
+        ref = _getrcd();
+        s = (char *)(ref & 0xffffffff);
+        len = ref >> 32;
+        if (writer(up, s, len) != len) break;
+        _inircd();
+        _outfmt(value, &eor);
+    }
+}
+
+static Unit *getUnit(int unitNum, int flags, int recLen) {
     char *cp;
     int i;
     char name[8];
@@ -266,5 +313,25 @@ static int fdForUnit(int unitNum, int flags, int recLen) {
             up = _findu(unitNum);
         }
     }
-    return up->fd;
+    return up;
+}
+
+static int writer(Unit *up, void *buf, size_t nbyte) {
+    int n;
+
+    n = write(up->fd, buf, nbyte);
+    if (n == nbyte) {
+        n = write(up->fd, "\n", 1);
+        if (n == 1) {
+            up->ioStat = 0;
+            return nbyte;
+        }
+    }
+    if (n < 0) {
+        up->ioStat = errno;
+    }
+    else {
+        up->ioStat = -1;
+    }
+    return n;
 }

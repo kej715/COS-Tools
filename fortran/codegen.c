@@ -33,6 +33,7 @@
 #include "types.h"
 
 static void emit(char *format, ...);
+static void emitBranchTarget(char *label);
 
 static int emissionDepth = 0;
 static Register lastReg = 0;
@@ -121,14 +122,28 @@ void emitAndInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitBranch(char *label) {
-    emit("         J         %s\n", label);
+    emit("         J         ");
+    emitBranchTarget(label);
+    emit("\n");
 }
 
 void emitBranch3Way(Register reg, char *label1, char *label2, char *label3) {
-    emit("         S0        S%o\n", reg);
-    if (label1 != NULL) emit("         JSM       %s\n", label1);
-    if (label3 != NULL) emit("         JSN       %s\n", label3);
-    if (label2 != NULL) emit("         JSZ       %s\n", label2);
+    if (reg != NO_REG) emit("         S0        S%o\n", reg);
+    if (label1 != NULL) {
+        emit("         JSM       ");
+        emitBranchTarget(label1);
+        emit("\n");
+    }
+    if (label3 != NULL) {
+        emit("         JSN       ");
+        emitBranchTarget(label3);
+        emit("\n");
+    }
+    if (label2 != NULL) {
+        emit("         JSZ       ");
+        emitBranchTarget(label2);
+        emit("\n");
+    }
 }
 
 void emitBranchIfEndTrips(char *label) {
@@ -155,7 +170,7 @@ void emitBranchIndexed(char *tableLabel, int tableSize, Register reg) {
 }
 
 void emitBranchOnFalse(Register reg, char *label) {
-    emit("         S0        S%o\n", reg);
+    if (reg != NO_REG) emit("         S0        S%o\n", reg);
     emit("         JSZ       %s\n", label);
 }
 
@@ -163,6 +178,13 @@ void emitBranchReg(Register reg) {
     emit("         A0        S%o\n", reg);
     emit("         B00       A0\n");
     emit("         J         B00\n");
+}
+
+static void emitBranchTarget(char *label) {
+    while (*label != '\0') {
+        emit("%c", (*label == '_') ? '%' : *label);
+        label += 1;
+    }
 }
 
 /*
@@ -1018,10 +1040,7 @@ void emitPopReg(Register reg) {
 
 void emitPrimCall(char *label) {
     emit("         R         ");
-    while (*label != '\0') {
-        emit("%c", (*label == '_') ? '%' : *label);
-        label += 1;
-    }
+    emitBranchTarget(label);
     emit("\n");
 }
 
@@ -1145,6 +1164,11 @@ void emitStoreReg(Symbol *sym, Register reg) {
         fprintf(stderr, "Invalid class for store request: %d\n", sym->class);
         exit(1);
     }
+}
+
+void emitStoreRegByReference(OperatorArgument *target, Register reg) {
+    emit("         A1        S%o\n", target->reg);
+    emit("         ,A1       S%o\n", reg);
 }
 
 void emitStoreStack(Register reg, int offset) {

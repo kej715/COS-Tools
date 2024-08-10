@@ -29,6 +29,7 @@
 #include "types.h"
 
 #define ALL_REG_MASK 0x7e
+#define NO_REG       ((Register)0)
 #define RESULT_REG   ((Register)7)
 
 Register allocateRegister(void);
@@ -110,6 +111,7 @@ void emitStart(char *name);
 void emitStoreArg(Symbol *sym, OperatorArgument *arg);
 void emitStoreByReference(OperatorArgument *target, OperatorArgument *value);
 void emitStoreReg(Symbol *sym, Register reg);
+void emitStoreRegByReference(OperatorArgument *target, Register reg);
 void emitStoreStack(Register reg, int offset);
 void emitStoreString(Symbol *sym, OperatorArgument *offset, OperatorArgument *length, OperatorArgument *string);
 void emitString(CharacterValue *cvp, bool hasZByte);

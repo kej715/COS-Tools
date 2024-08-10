@@ -55,20 +55,24 @@
 
 typedef struct unit {
     char fileName[MAX_FILE_NAME_LEN+1];
-    int  number;      /* unit number                      */
-    int  fd;          /* OS file descriptor               */
-    int  ioStat;      /* current I/O status               */
-                      /*   =0 Transfer complete, no error */
-                      /*      not end of file             */
-                      /*   >0 Error code                  */
-                      /*   <0 End of file                 */
-    int  recLen;      /* unformatted record length        */
-    int  nextRec;     /* next direct access record number */
-    int  flags;       /* flag bits                        */
+    int  number;  /* unit number                        */
+    int  fd;      /* OS file descriptor                 */
+    int  ioStat;  /* current I/O status                 */
+                  /*   =0 Transfer complete, no error   */
+                  /*      not end of file               */
+                  /*   >0 Error code                    */
+                  /*   <0 End of file                   */
+    int  recLen;  /* unformatted record length          */
+    int  nextRec; /* next direct access record number   */
+    int  flags;   /* flag bits                          */
+    char *buf;    /* dynamically allocated input buffer */
+    char *out;    /* next available char in buffer      */
+    char *limit;  /* last char in buffer + 1            */
 } Unit;
 
 Unit *_allocu(int unitNum);
 int  _closeu(int unitNum, int doDelete);
+void _clrios(int unitNum);
 void _endfio(void);
 Unit *_findu(int unitNum);
 void _flufmt(int unitNum);

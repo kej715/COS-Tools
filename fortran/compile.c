@@ -84,11 +84,13 @@ static DataType *getDataType(OperatorArgument *arg);
 static char *getIntValue(char *s, int *value);
 static char *getLabel(char *s, char *label);
 static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx);
+static void inputCheckIostat(ControlInfoList *ciList);
 static void inputFini(ControlInfoList *ciList);
 static void inputInit(ControlInfoList *ciList);
 static void list(char *format, ...);
 static void loadValue(OperatorArgument *value);
 static char *opIdToStr(OperatorId id);
+static void outputCheckIostat(ControlInfoList *ciList);
 static void outputFini(ControlInfoList *ciList);
 static void outputInit(ControlInfoList *ciList);
 static char *parseActualArguments(char *s, int *frameSize);
@@ -1473,11 +1475,48 @@ static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx) {
     return (idx == 0) ? qualifier : NULL;
 }
 
+static void inputCheckIostat(ControlInfoList *ciList) {
+    bool isScalar;
+    char label[8];
+    Register reg;
+    OperatorArgument target;
+
+    emitPrimCall("@_iostat");
+    reg = RESULT_REG;
+    if (ciList->iostat.symbol != NULL) {
+        reg = allocateRegister();
+        emitCopyRegister(reg, RESULT_REG);
+        if (evaluateStorageReference(&ciList->iostat, &target, &isScalar)) {
+            freeRegister(reg);
+            return;
+        }
+        if (isScalar) {
+            emitStoreReg(ciList->iostat.symbol, reg);
+        }
+        else {
+            emitStoreRegByReference(&target, reg);
+            freeRegister(target.reg);
+        }
+        freeRegister(reg);
+    }
+    generateLabel(label);
+    emitBranchOnFalse(reg, label);
+    emitPopReg(RESULT_REG);
+    emitAdjustSP(1);
+    emitBranch3Way(NO_REG,
+                   ciList->endLabel != NULL ? ciList->endLabel->details.label.label : "@_fioeof",
+                   NULL,
+                   ciList->errLabel != NULL ? ciList->errLabel->details.label.label : "@_fioerr");
+    emitLabel(label);
+}
+
 static void inputFini(ControlInfoList *ciList) {
+    if (ciList->format != NULL) emitPrimCall("@_endfmt");
     emitAdjustSP(2);
 }
 
 static void inputInit(ControlInfoList *ciList) {
+    DataType *dt;
     OperatorArgument unit;
 
     if (evaluateFmtSpec(ciList) || evaluateExpression(ciList->unit, &unit)) return;
@@ -1485,7 +1524,16 @@ static void inputInit(ControlInfoList *ciList) {
     loadValue(&unit);
     emitStoreStack(unit.reg, 0);
     freeRegister(unit.reg);
-    emitPrimCall("@_rdurec");
+    dt = getDataType(&unit);
+    ciList->unitType = dt->type;
+    if (ciList->unitType == BaseType_Character) {
+        emitPrimCall("@_setrcd");
+    }
+    else {
+        emitPrimCall("@_setdrc");
+        emitPrimCall("@_rdurec");
+        inputCheckIostat(ciList);
+    }
 }
 
 static void list(char *format, ...) {
@@ -1599,12 +1647,49 @@ static void parseAssignment(char *s, Token *id) {
     verifyEOS(s);
 }
 
+static void outputCheckIostat(ControlInfoList *ciList) {
+    bool isScalar;
+    char label[8];
+    Register reg;
+    OperatorArgument target;
+
+    emitPrimCall("@_iostat");
+    reg = RESULT_REG;
+    if (ciList->iostat.symbol != NULL) {
+        reg = allocateRegister();
+        emitCopyRegister(reg, RESULT_REG);
+        if (evaluateStorageReference(&ciList->iostat, &target, &isScalar)) {
+            freeRegister(reg);
+            return;
+        }
+        if (isScalar) {
+            emitStoreReg(ciList->iostat.symbol, reg);
+        }
+        else {
+            emitStoreRegByReference(&target, reg);
+            freeRegister(target.reg);
+        }
+        freeRegister(reg);
+    }
+    generateLabel(label);
+    emitBranchOnFalse(reg, label);
+    emitPopReg(RESULT_REG);
+    emitAdjustSP(2);
+    emitBranch3Way(NO_REG, NULL, NULL, ciList->errLabel != NULL ? ciList->errLabel->details.label.label : "@_fioerr");
+    emitLabel(label);
+}
+
 static void outputFini(ControlInfoList *ciList) {
-    emitPrimCall((ciList->format == NULL) ? "@_flulst" : "@_flufmt");
+    if (ciList->unitType != BaseType_Character) {
+        emitPrimCall((ciList->format == NULL) ? "@_flulst" : "@_flufmt");
+        outputCheckIostat(ciList);
+    }
+    if (ciList->format != NULL) emitPrimCall("@_endfmt");
     emitAdjustSP(3);
 }
 
 static void outputInit(ControlInfoList *ciList) {
+    DataType *dt;
     OperatorArgument unit;
 
     if (evaluateFmtSpec(ciList) || evaluateExpression(ciList->unit, &unit)) return;
@@ -1612,6 +1697,14 @@ static void outputInit(ControlInfoList *ciList) {
     loadValue(&unit);
     emitStoreStack(unit.reg, 0);
     freeRegister(unit.reg);
+    dt = getDataType(&unit);
+    ciList->unitType = dt->type;
+    if (ciList->unitType == BaseType_Character) {
+        emitPrimCall("@_setrcd");
+    }
+    else {
+        emitPrimCall("@_setdrc");
+    }
 }
 
 static char *parseActualArguments(char *s, int *frameSize) {
@@ -1768,7 +1861,9 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
     bool isListDirected;
     ControlInfoList *list;
     Symbol *labelSym;
+    int len;
     char lineLabel[16];
+    char keyword[16];
     StorageReference reference;
     char *start;
     Token token;
@@ -1818,6 +1913,10 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                     s += 1;
                 }
                 else {
+                    len = strlen(token.details.identifier.name);
+                    if (len >= sizeof(keyword)) len = sizeof(keyword) - 1;
+                    memcpy(keyword, token.details.identifier.name, len);
+                    keyword[len] = '\0';
                     start = s;
                     s = parseExpression(s, &expression);
                     if (expression == NULL) {
@@ -1825,7 +1924,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                         freeControlInfoList(list);
                         return NULL;
                     }
-                    if (strncasecmp(token.details.identifier.name, "UNIT", 5) == 0) {
+                    if (strcasecmp(keyword, "UNIT") == 0) {
                         if (list->unit != NULL) {
                             err("UNIT specified more than once");
                             freeToken(expression);
@@ -1834,7 +1933,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                         }
                         list->unit = expression;
                     }
-                    else if (strncasecmp(token.details.identifier.name, "FMT", 4) == 0) {
+                    else if (strcasecmp(keyword, "FMT") == 0) {
                         if (list->format != NULL || isListDirected) {
                             err("FMT specified more than once");
                             freeToken(expression);
@@ -1843,7 +1942,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                         }
                         list->format = expression;
                     }
-                    else if (strncasecmp(token.details.identifier.name, "END", 4) == 0) {
+                    else if (strcasecmp(keyword, "END") == 0) {
                         if (list->endLabel != NULL) {
                             err("END specified more than once");
                             freeToken(expression);
@@ -1875,7 +1974,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                             return NULL;
                         }
                     }
-                    else if (strncasecmp(token.details.identifier.name, "ERR", 4) == 0) {
+                    else if (strcasecmp(keyword, "ERR") == 0) {
                         if (list->errLabel != NULL) {
                             err("ERR specified more than once");
                             freeToken(expression);
@@ -1907,7 +2006,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                             return NULL;
                         }
                     }
-                    else if (strncasecmp(token.details.identifier.name, "REC", 4) == 0) {
+                    else if (strcasecmp(keyword, "REC") == 0) {
                         if (list->recordNumber != NULL) {
                             err("REC specified more than once");
                             freeToken(expression);
@@ -1916,16 +2015,16 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                         }
                         list->recordNumber = expression;
                     }
-                    else if (strncasecmp(token.details.identifier.name, "IOSTAT", 7) == 0) {
+                    else if (strcasecmp(keyword, "IOSTAT") == 0) {
+                        freeToken(expression);
                         if (list->iostat.symbol != NULL) {
                             err("IOSTAT specified more than once");
-                            freeToken(expression);
                             freeControlInfoList(list);
                             return NULL;
                         }
-                        else if (expression->type == TokenType_Identifier) {
-                            s = parseStorageReference(start, expression, &reference);
-                            freeToken(expression);
+                        s = getNextToken(start, &token, FALSE);
+                        if (token.type == TokenType_Identifier) {
+                            s = parseStorageReference(s, &token, &reference);
                             if (s == NULL) {
                                 freeControlInfoList(list);
                                 return NULL;
@@ -2655,6 +2754,7 @@ static void parseOutputList(char *s, ControlInfoList *ciList) {
             }
             else {
                 emitPrimCall("@_wrufmt");
+                outputCheckIostat(ciList);
             }
         }
         freeToken(expression);

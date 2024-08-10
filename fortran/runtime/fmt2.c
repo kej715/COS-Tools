@@ -25,7 +25,7 @@
 #include "const.h"
 #include "fmt.h"
 
-static char       fmtBuf[MAX_FMT_LEN+1];
+static char fmtBuf[MAX_FMT_LEN+1];
 
 void _prsfmt(unsigned long strDesc) {
     char *bp;

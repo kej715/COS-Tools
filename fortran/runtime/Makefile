@@ -26,13 +26,15 @@ CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
 AR      ?= ar
 ARFLAGS ?= -r
 PREFIX = /usr/local
+BINDIR = /usr/local/bin
+COSDIR = ../../cos-interface
 COSOBJS = $(PREFIX)/share/ack/cos/boot.o $(PREFIX)/share/ack/cos/c-ansi.o
 
 HDRS = const.h \
        fmt.h   \
        units.h
 
-OBJS = catstr.o cmpstr.o cpystr.o fmt.o fmt2.o units.o
+OBJS = catstr.o cmpstr.o cpystr.o fio.o fmt.o fmt2.o units.o
 
 all: libio.a
 
@@ -59,6 +61,9 @@ cmpstr.o: cmpstr.c $(HDRS)
 
 cpystr.o: cpystr.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
+
+fio.o:	fio.cal
+	$(BINDIR)/cal -t $(COSDIR)/systxt -o fio.o $<
 
 fmt.o: fmt.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
