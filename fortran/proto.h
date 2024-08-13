@@ -31,8 +31,9 @@
 Symbol *addLabel(char *label);
 Symbol *addSymbol(char *identifier, SymbolClass class);
 void *allocate(int size);
-int calculateLocalOffsets(void);
+int calculateAutoOffsets(void);
 int calculateSize(Symbol *symbol);
+int calculateStaticOffsets(void);
 void compile(char *name);
 Symbol *findLabel(char *label);
 Symbol *findSymbol(char *identifier);
@@ -45,9 +46,11 @@ void printSymbols(FILE *f);
 void *reallocate(void *old, int oldSize, int newSize);
 
 extern bool doEchoSource;
+extern bool doStaticLocals;
 extern int lineNo;
 extern FILE *listingFile;
 extern FILE *objectFile;
+extern Symbol *progUnitSym;
 extern FILE *sourceFile;
 extern char stmtBuf[];
 

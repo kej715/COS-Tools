@@ -75,6 +75,7 @@ int main(int argc, char *argv[]) {
 
 #if defined(__cos)
 #define IS_KEY(s) (*((s) + strlen(s) - 1) == '=')
+#define A_KEY "ALLOC="
 #define I_KEY "I="
 #define L_KEY "L="
 #define O_KEY "O="
@@ -82,7 +83,7 @@ int main(int argc, char *argv[]) {
 #define STDOUT "$OUT"
 #else
 #define IS_KEY(s) (*(s) == '-')
-#define I_KEY "-i"
+#define A_KEY "-a"
 #define L_KEY "-l"
 #define O_KEY "-o"
 #define S_KEY "-s"
@@ -91,12 +92,37 @@ int main(int argc, char *argv[]) {
 
 static char *parseOptions(int argc, char *argv[]) {
     int i;
+    char *objectPath;
     char *sourcePath;
 
+#if defined(__cos)
+    sourceFile  = stdin;
+    listingFile = stdout;
+    objectPath  = "ZZZZCAL";
+    sourcePath  = "$IN";
+#else
+    objectPath  = NULL;
+    sourcePath  = NULL;
+#endif
     i = 1;
-    sourcePath = NULL;
     while (i < argc) {
-        if (strcmp(argv[i], I_KEY) == 0) {
+        if (strcmp(argv[i], A_KEY) == 0) {
+            i += 1;
+            if (i >= argc) {
+                usage();
+            }
+            if (strcasecmp(argv[i], "static") == 0) {
+                doStaticLocals = TRUE;
+            }
+            else if (strcasecmp(argv[i], "stack") == 0 || strcasecmp(argv[i], "auto") == 0) {
+                doStaticLocals = FALSE;
+            }
+            else {
+                usage();
+            }
+        }
+#if defined(__cos)
+        else if (strcmp(argv[i], I_KEY) == 0) {
             i += 1;
             if (i >= argc) {
                 usage();
@@ -108,6 +134,7 @@ static char *parseOptions(int argc, char *argv[]) {
             }
             if (sourcePath == NULL) sourcePath = argv[i];
         }
+#endif
         else if (strcmp(argv[i], L_KEY) == 0) {
             i += 1;
             if (i >= argc) {
@@ -116,7 +143,10 @@ static char *parseOptions(int argc, char *argv[]) {
             if (strcmp(argv[i], STDOUT) == 0) {
                 listingFile = stdout;
             }
-            else if (strcmp(argv[i], "0") != 0) {
+            else if (strcmp(argv[i], "0") == 0) {
+                listingFile = NULL;
+            }
+            else {
                 listingFile = fopen(argv[i], "w");
                 if (listingFile == NULL) {
                     perror(argv[i]);
@@ -129,15 +159,26 @@ static char *parseOptions(int argc, char *argv[]) {
             if (i >= argc) {
                 usage();
             }
-            objectFile = fopen(argv[i], "w");
-            if (objectFile == NULL) {
-                perror(argv[i]);
-                exit(1);
+            objectPath = argv[i];
+            if (strcmp(objectPath, "0") == 0) {
+                objectFile = NULL;
+            }
+            else {
+                objectFile = fopen(objectPath, "w");
+                if (objectFile == NULL) {
+                    perror(objectPath);
+                    exit(1);
+                }
             }
         }
         else if (strcmp(argv[i], S_KEY) == 0) {
             doEchoSource = TRUE;
         }
+#if defined(__cos)
+        else {
+            usage();
+        }
+#else
         else if (IS_KEY(argv[i])) {
             usage();
         }
@@ -149,15 +190,32 @@ static char *parseOptions(int argc, char *argv[]) {
             }
             if (sourcePath == NULL) sourcePath = argv[i];
         }
+#endif
         i += 1;
     }
+#if defined(__cos)
+    if (objectFile == NULL && strcmp(objectPath, "0") != 0) {
+        objectFile = fopen(objectPath, "w");
+        if (objectFile == NULL) {
+            perror(objectPath);
+            exit(1);
+        }
+    }
+#endif
 
     return sourcePath;
 }
 
 static void usage(void) {
-    fputs("usage: cft77 [-l lpath][-o opath][-s] spath\n", stderr);
+#if defined(__cos)
+    fputs("usage: KFTC [ALLOC=STATIC|STACK|AUTO][I=idn][L=ldn][O=odn][S]\n", stderr);
+    fputs("  idn - FORTRAN source code dataset name (default $IN)\n", stderr);
+    fputs("  ldn - listing file dataset name (default $OUT)\n", stderr);
+    fputs("  odn - output file dataset name (default ZZZZCAL)\n", stderr);
+#else
+    fputs("usage: kftc [-a static|stack|auto][-l lpath][-o opath][-s] spath\n", stderr);
     fputs("  lpath - pathname of output listing file\n", stderr);
     fputs("  opath - pathname of output object file\n", stderr);
     fputs("  spath - pathname of input source file\n", stderr);
+#endif
 }

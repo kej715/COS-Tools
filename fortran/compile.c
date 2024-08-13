@@ -61,6 +61,7 @@ static char *baseTypeToStr(BaseType type);
 static char *collectStmt(void);
 static Token *copyToken(Token *token);
 static Token *createIntegerConstant(int value);
+static void defineLocalVariable(Symbol *symbol);
 static void defineType(Symbol *symbol);
 static char *eatWsp(char *s);
 static void err(char *format, ...);
@@ -168,7 +169,8 @@ static ArgumentClass argClassForSymClass[] = {
     ArgClass_Function,   /* SymClass_Function    */
     ArgClass_Undefined,  /* SymClass_BlockData   */
     ArgClass_Undefined,  /* SymClass_NamedCommon */
-    ArgClass_Local,      /* SymClass_Local       */
+    ArgClass_Auto,       /* SymClass_Auto        */
+    ArgClass_Static,     /* SymClass_Static      */
     ArgClass_Global,     /* SymClass_Global      */
     ArgClass_Argument,   /* SymClass_Argument    */
     ArgClass_Constant,   /* SymClass_Parameter   */
@@ -178,12 +180,12 @@ static ArgumentClass argClassForSymClass[] = {
 static Symbol defaultProgSym = {
     NULL, NULL, NULL, "MAIN", SymClass_Program
 };
+static int autoOffset = 0;
 static Symbol *currentLabel;
 static int errorCount = 0;
 static DataType implicitTypes[26];
 static char lineBuf[MAX_LINE_LENGTH+1];
-static int localOffset = 0;
-static Symbol *progUnitSym;
+static int staticOffset = 0;
 static ParsingState state;
 static int warningCount = 0;
 
@@ -475,7 +477,8 @@ void compile(char *name) {
              *  possible definition statements.
              */
             state = STATE_EXECUTABLE;
-            localOffset = -calculateLocalOffsets();
+            autoOffset = -calculateAutoOffsets();
+            staticOffset = calculateStaticOffsets();
 
         case STATE_EXECUTABLE:
             if (token.type == TokenType_Keyword) {
@@ -640,6 +643,20 @@ static Token *createIntegerConstant(int value) {
     token->details.constant.dt.type = BaseType_Integer;
     token->details.constant.value.integer = value;
     return token;
+}
+
+static void defineLocalVariable(Symbol *symbol) {
+    defineType(symbol);
+    if (doStaticLocals) {
+        symbol->class = SymClass_Static;
+        symbol->details.variable.offset = staticOffset;
+        staticOffset += calculateSize(symbol);
+    }
+    else {
+        symbol->class = SymClass_Auto;
+        autoOffset -= calculateSize(symbol);
+        symbol->details.variable.offset = autoOffset;
+    }
 }
 
 static void defineType(Symbol *symbol) {
@@ -936,10 +953,7 @@ static bool evaluateIdentifier(Token *id) {
     }
     if (symbol->class == SymClass_Undefined) {
         if (id->details.identifier.qualifiers == NULL) { // simple variable reference
-            symbol->class = SymClass_Local;
-            defineType(symbol);
-            localOffset -= calculateSize(symbol);
-            symbol->details.variable.offset = localOffset;
+            defineLocalVariable(symbol);
         }
         else {
             defineType(symbol);
@@ -951,13 +965,14 @@ static bool evaluateIdentifier(Token *id) {
     }
     else if (symbol->class == SymClass_Function && symbol->details.progUnit.dt.type == BaseType_Undefined) {
         symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
-        localOffset -= calculateSize(symbol);
-        symbol->details.progUnit.offset = localOffset;
+        autoOffset -= calculateSize(symbol);
+        symbol->details.progUnit.offset = autoOffset;
     }
 
     arg.class = argClassForSymClass[symbol->class];
     switch (symbol->class) {
-    case SymClass_Local:
+    case SymClass_Auto:
+    case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
     case SymClass_Pointee:
@@ -1241,6 +1256,13 @@ static bool executeOperator(OperatorId op) {
             }
         }
         else {
+            if (rightType->type == BaseType_Integer || rightType->type == BaseType_Real || rightType->type == BaseType_Logical) {
+                emitNegReg(rightArg.reg, rightType->type);
+            }
+            else {
+                err("Invalid argument type to '%s'", opIdToStr(op));
+                return TRUE;
+            }
         }
         break;
     case OP_NOT:
@@ -1257,6 +1279,13 @@ static bool executeOperator(OperatorId op) {
             }
         }
         else {
+            if (rightType->type == BaseType_Logical || rightType->type == BaseType_Integer) {
+                emitNotReg(rightArg.reg, rightType->type);
+            }
+            else {
+                err("Invalid argument type to '%s'", opIdToStr(op));
+                return TRUE;
+            }
         }
         break;
     case OP_PLUS:
@@ -1405,7 +1434,8 @@ static DataType *getDataType(OperatorArgument *arg) {
     switch (arg->class) {
     case ArgClass_Constant:
         return &arg->details.constant.dt;
-    case ArgClass_Local:
+    case ArgClass_Auto:
+    case ArgClass_Static:
     case ArgClass_Global:
     case ArgClass_Argument:
     case ArgClass_Pointee:
@@ -2795,12 +2825,10 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
             err("Undefined array %s", name);
             return NULL;
         }
-        symbol->class = SymClass_Local;
-        defineType(symbol);
-        localOffset -= calculateSize(symbol);
-        symbol->details.variable.offset = localOffset;
+        defineLocalVariable(symbol);
         /* fall through */
-    case SymClass_Local:
+    case SymClass_Auto:
+    case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
     case SymClass_Pointee:
@@ -2809,8 +2837,8 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
     case SymClass_Function:
         if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
             symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
-            localOffset -= calculateSize(symbol);
-            symbol->details.progUnit.offset = localOffset;
+            autoOffset -= calculateSize(symbol);
+            symbol->details.progUnit.offset = autoOffset;
         }
         dt = &symbol->details.progUnit.dt;
         break;
@@ -2931,7 +2959,7 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             }
             else if (*s == '(') {
                 s = parseDimDecl(s + 1, symbol);
-                symbol->class = SymClass_Local;
+                symbol->class = doStaticLocals ? SymClass_Static : SymClass_Auto;
                 s = eatWsp(s);
                 if (*s == ',')
                     s = eatWsp(s + 1);
@@ -2998,12 +3026,10 @@ static void parseASSIGN(char *s) {
     }
     switch (sym->class) {
     case SymClass_Undefined:
-        sym->class = SymClass_Local;
-        defineType(sym);
-        localOffset -= calculateSize(sym);
-        sym->details.variable.offset = localOffset;
+        defineLocalVariable(sym);
         /* fall through */
-    case SymClass_Local:
+    case SymClass_Auto:
+    case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
         type = sym->details.variable.dt.type;
@@ -3087,10 +3113,11 @@ static void parseDIMENSION(char *s) {
             }
             switch (symbol->class) {
             case SymClass_Undefined:
-                symbol->class = SymClass_Local;
+                symbol->class = doStaticLocals ? SymClass_Static : SymClass_Auto;
                 defineType(symbol);
                 /* fall through */
-            case SymClass_Local:
+            case SymClass_Auto:
+            case SymClass_Static:
             case SymClass_Global:
             case SymClass_Pointee:
                 if (symbol->details.variable.dt.rank != 0) {
@@ -3188,12 +3215,10 @@ static void parseDO(char *s) {
     }
     switch (sym->class) {
     case SymClass_Undefined:
-        sym->class = SymClass_Local;
-        defineType(sym);
-        localOffset -= calculateSize(sym);
-        sym->details.variable.offset = localOffset;
+        defineLocalVariable(sym);
         /* fall through */
-    case SymClass_Local:
+    case SymClass_Auto:
+    case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
         type = sym->details.variable.dt.type;
@@ -3390,7 +3415,7 @@ static void parseELSEIF(char *s) {
 
 static void parseEND(char *s) {
 
-    emitEpilog(progUnitSym, -localOffset);
+    emitEpilog(progUnitSym, -autoOffset, staticOffset);
 
     if (ifStackPtr > 0) err("Missing ENDIF");
     if (doStackPtr > 0) err("Missing DO termination label %s", doStack[doStackPtr - 1].termLabelSym->identifier);
@@ -3581,12 +3606,10 @@ static void parseGOTO(char *s) {
         }
         switch (sym->class) {
         case SymClass_Undefined:
-            sym->class = SymClass_Local;
-            defineType(sym);
-            localOffset -= calculateSize(sym);
-            sym->details.variable.offset = localOffset;
+            defineLocalVariable(sym);
             /* fall through */
-        case SymClass_Local:
+        case SymClass_Auto:
+        case SymClass_Static:
         case SymClass_Global:
         case SymClass_Argument:
             type = sym->details.variable.dt.type;
@@ -4024,8 +4047,9 @@ static void presetProgUnit(void) {
     doStackPtr   = 0;
     ifStackPtr   = 0;
     errorCount   = 0;
-    localOffset  = 0;
     warningCount = 0;
+    autoOffset   = 0;
+    staticOffset = 0;
 }
 
 static void pushArg(OperatorArgument *arg) {
@@ -4203,7 +4227,8 @@ static char *argClassToStr(ArgumentClass class) {
     case ArgClass_Constant:    return "Constant";
     case ArgClass_Calculation: return "Calculation";
     case ArgClass_Function:    return "Function";
-    case ArgClass_Local:       return "Local";
+    case ArgClass_Auto:        return "Auto";
+    case ArgClass_Static:      return "Static";
     case ArgClass_Global:      return "Global";
     case ArgClass_Argument:    return "Argument";
     case ArgClass_Pointee:     return "Pointee";

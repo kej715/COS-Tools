@@ -52,8 +52,8 @@ cos:
 kftc: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
-kftc.abs: $(OBJS)
-	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) cal
+kftc.abs:
+	CC=ack $(MAKE) kftc
 
 clean:
 	rm -f *.o *.abs kftc

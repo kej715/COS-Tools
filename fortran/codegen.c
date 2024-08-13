@@ -313,7 +313,7 @@ void emitEnd(void) {
     emit("         END\n");
 }
 
-void emitEpilog(Symbol *sym, int frameSize) {
+void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
     if (sym->class == SymClass_Program) {
         emitPrimCall("@_endfio");
         emit("         S7        0\n");
@@ -330,6 +330,9 @@ void emitEpilog(Symbol *sym, int frameSize) {
     emit("         J         B00\n");
     emitActivateSection("DATA", "DATA");
     emit("%-8s CON       %d\n", sym->details.progUnit.frameSizeLabel, frameSize);
+    emitDeactivateSection("DATA");
+    emitActivateSection("DATA", "DATA");
+    emit("%-8s BSS       %d\n", sym->details.progUnit.staticDataLabel, staticDataSize);
     emitDeactivateSection("DATA");
 }
 
@@ -590,10 +593,30 @@ void emitLoadReference(OperatorArgument *arg) {
     dt = getSymbolType(sym);
     if (dt->type == BaseType_Character) {
         switch (sym->class) {
-        case SymClass_Local:
+        case SymClass_Auto:
             emit("         S%o        %d\n", arg->reg, sym->details.variable.offset);
             emit("         S7        A6\n");
             emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+            emit("         S%o        S%o<3\n", arg->reg, arg->reg);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", arg->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Static:
+            emit("         S%o        %s+%d\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
             emit("         S%o        S%o<3\n", arg->reg, arg->reg);
             switch (arg->details.reference.offsetClass) {
             case ArgClass_Undefined:
@@ -684,7 +707,7 @@ void emitLoadReference(OperatorArgument *arg) {
     }
     else { // dt->type != BaseType_Character
         switch (sym->class) {
-        case SymClass_Local:
+        case SymClass_Auto:
             switch (arg->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 emit("         S7        A6\n");
@@ -700,6 +723,24 @@ void emitLoadReference(OperatorArgument *arg) {
                 emit("         S%o        A6\n", arg->reg);
                 emit("         S7        %d\n", sym->details.variable.offset);
                 emit("         S%o        S%o+S7\n", arg->reg, arg->reg);
+                emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Static:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        %s+%d\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %s+%d\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset + arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         S%o        %s+%d\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
                 emit("         S%o        S%o+S%o\n", arg->reg, arg->reg, arg->details.reference.offset.reg);
                 freeRegister(arg->details.reference.offset.reg);
                 break;
@@ -831,7 +872,7 @@ void emitLoadValue(OperatorArgument *arg) {
     else {
         arg->reg = allocateRegister();
         switch (sym->class) {
-        case SymClass_Local:
+        case SymClass_Auto:
             switch (arg->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
@@ -843,6 +884,24 @@ void emitLoadValue(OperatorArgument *arg) {
                 emit("         A1        S%o\n", arg->details.reference.offset.reg);
                 emit("         A1        A1+A6\n");
                 emit("         S%o        %d,A1\n", arg->reg, sym->details.variable.offset);
+                freeRegister(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
+        case SymClass_Static:
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        %s+%d,\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %s+%d,\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset + arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         A1        S%o\n", arg->details.reference.offset.reg);
+                emit("         S%o        %s+%d,A1\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
                 freeRegister(arg->details.reference.offset.reg);
                 break;
             default:
@@ -1004,6 +1063,24 @@ void emitNeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        0\n", rightArg->reg);
 }
 
+void emitNegReg(Register reg, BaseType type) {
+    switch (type) {
+    case BaseType_Integer:
+        emit("         S%o        -S%o\n", reg, reg);
+        break;
+    case BaseType_Real:
+    case BaseType_Double:
+        emit("         S%o        -FS%o\n", reg, reg);
+        break;
+    case BaseType_Logical:
+        emit("         S%o        #S%o\n", reg, reg);
+        break;
+    default:
+       fprintf(stderr, "emitNegReg unexpected type: %d\n", type);
+       exit(1);
+    }
+}
+
 void emitNeInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S0        S%o-S%o\n", leftArg->reg, rightArg->reg);
     emit("         S%o        <64\n", rightArg->reg);
@@ -1027,6 +1104,18 @@ void emitNeReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 
 void emitNeqvInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o\\S%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
+}
+
+void emitNotReg(Register reg, BaseType type) {
+    switch (type) {
+    case BaseType_Integer:
+    case BaseType_Logical:
+        emit("         S%o        #S%o\n", reg, reg);
+        break;
+    default:
+       fprintf(stderr, "emitNegReg unexpected type: %d\n", type);
+       exit(1);
+    }
 }
 
 void emitOrInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -1057,6 +1146,7 @@ void emitProlog(Symbol *sym) {
         emit("%-8s BSS       0\n", buf);
     }
     generateLabel(sym->details.progUnit.frameSizeLabel);
+    generateLabel(sym->details.progUnit.staticDataLabel);
     emit("         A7        A7-1\n");  /* push base pointer    */
     emit("         ,A7       A6\n");
     emit("         A6        B00\n");   /* push return address  */
@@ -1142,8 +1232,12 @@ void emitStoreReg(Symbol *sym, Register reg) {
     char buf[32];
 
     switch (sym->class) {
-    case SymClass_Local:
+    case SymClass_Auto:
         sprintf(buf, "%d,A6", sym->details.variable.offset);
+        emit("         %-9s S%o\n", buf, reg);
+        break;
+    case SymClass_Static:
+        sprintf(buf, "%s+%d,", progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
         emit("         %-9s S%o\n", buf, reg);
         break;
     case SymClass_Argument:
@@ -1189,9 +1283,12 @@ void emitStoreString(Symbol *sym, OperatorArgument *offset, OperatorArgument *le
         emit("         S7        <32\n");
         emit("         S%o        S%o&S7\n", reg, reg);
         break;
-    case SymClass_Local:
+    case SymClass_Auto:
         emit("         A1        %d\n", sym->details.variable.offset);
         emit("         A1        A1+A6\n");
+        break;
+    case SymClass_Static:
+        emit("         A1        %s+%d\n", progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
         break;
     case SymClass_Function:
         emit("         A1        %d\n", sym->details.progUnit.offset);

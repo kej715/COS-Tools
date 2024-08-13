@@ -153,7 +153,8 @@ typedef enum argumentClass {
     ArgClass_Constant,
     ArgClass_Calculation,
     ArgClass_Function,
-    ArgClass_Local,
+    ArgClass_Auto,
+    ArgClass_Static,
     ArgClass_Global,
     ArgClass_Argument,
     ArgClass_Pointee
@@ -178,7 +179,8 @@ typedef enum symbolClass {
     SymClass_Function,
     SymClass_BlockData,
     SymClass_NamedCommon,
-    SymClass_Local,
+    SymClass_Auto,
+    SymClass_Static,
     SymClass_Global,
     SymClass_Argument,
     SymClass_Parameter,
@@ -292,6 +294,7 @@ typedef struct progUnitDetails {
     DataType dt;
     int offset;
     char frameSizeLabel[8];
+    char staticDataLabel[8];
 } ProgUnitDetails;
 
 typedef struct variableDetails {

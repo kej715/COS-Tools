@@ -43,6 +43,7 @@ static Symbol *lastSymbol = NULL;
 static Symbol *symbols = NULL;
 static DataType undefinedType = { BaseType_Undefined };
 
+Symbol *progUnitSym;
 
 Symbol *addLabel(char *label) {
     Symbol *symbol;
@@ -123,7 +124,7 @@ static Symbol *allocNode(char *identifier, SymbolClass class) {
     return symbol;
 }
 
-int calculateLocalOffsets(void) {
+int calculateAutoOffsets(void) {
     int offset;
     Symbol *symbol;
     int totalSize;
@@ -133,20 +134,23 @@ int calculateLocalOffsets(void) {
      */
     totalSize = 0;
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        totalSize += calculateSize(symbol);;
+        if (symbol->class == SymClass_Auto || symbol->class == SymClass_Function) {
+            totalSize += calculateSize(symbol);;
+        }
     }
     /*
      *  Pass 2. Calculate the offset of each symbol.
      */
     offset = -totalSize;
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        if (symbol->class == SymClass_Local) {
+        if (symbol->class == SymClass_Auto) {
             symbol->details.variable.offset = offset;
+            offset += symbol->size;
         }
         else if (symbol->class == SymClass_Function) {
             symbol->details.progUnit.offset = offset;
+            offset += symbol->size;
         }
-        offset += symbol->size;
     }
 
     return totalSize;
@@ -157,8 +161,8 @@ int calculateSize(Symbol *symbol) {
     DataType *dt;
     int i;
 
-    if (symbol->class == SymClass_Local || symbol->class == SymClass_Function) {
-        dt = (symbol->class == SymClass_Local)
+    if (symbol->class == SymClass_Auto || symbol->class == SymClass_Static || symbol->class == SymClass_Function) {
+        dt = (symbol->class == SymClass_Auto || symbol->class == SymClass_Static)
            ? &symbol->details.variable.dt
            : &symbol->details.progUnit.dt;
         switch (dt->type) {
@@ -170,9 +174,9 @@ int calculateSize(Symbol *symbol) {
         case BaseType_Real:
         case BaseType_Label:
         case BaseType_Pointer:
+        case BaseType_Double: /* TODO: change this in the future */
             symbol->size = 1;
             break;
-        case BaseType_Double:
         case BaseType_Complex:
             symbol->size = 2;
             break;
@@ -190,6 +194,34 @@ int calculateSize(Symbol *symbol) {
     }
 
     return symbol->size;
+}
+
+int calculateStaticOffsets(void) {
+    int offset;
+    Symbol *symbol;
+    int totalSize;
+
+    /*
+     *  Pass 1. Calculate the size of each synbol and the total amount of storage needed.
+     */
+    totalSize = 0;
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        if (symbol->class == SymClass_Static) {
+            totalSize += calculateSize(symbol);;
+        }
+    }
+    /*
+     *  Pass 2. Calculate the offset of each symbol.
+     */
+    offset = 0;
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        if (symbol->class == SymClass_Static) {
+            symbol->details.variable.offset = offset;
+            offset += symbol->size;
+        }
+    }
+
+    return totalSize;
 }
 
 static char *dataTypeToStr(DataType *dt) {
@@ -283,7 +315,8 @@ void generateLabel(char *label) {
 DataType *getSymbolType(Symbol *sym) {
     switch (sym->class) {
     case SymClass_Undefined:
-    case SymClass_Local:
+    case SymClass_Auto:
+    case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
         return &sym->details.variable.dt;
@@ -320,7 +353,8 @@ static void printTree(FILE *f, Symbol *symbol) {
         switch (symbol->class) {
         case SymClass_Undefined:
         case SymClass_Function:
-        case SymClass_Local:
+        case SymClass_Auto:
+        case SymClass_Static:
         case SymClass_Global:
         case SymClass_Argument:
         case SymClass_Parameter:
@@ -331,7 +365,8 @@ static void printTree(FILE *f, Symbol *symbol) {
             else
                 fputs("        ", f);
             switch (symbol->class) {
-            case SymClass_Local:
+            case SymClass_Auto:
+            case SymClass_Static:
             case SymClass_Argument:
                 fprintf(f, " %d", symbol->details.variable.offset);
                 break;
@@ -361,7 +396,8 @@ static char *symClassToStr(SymbolClass class) {
     case SymClass_Subroutine:  return "Subroutine";
     case SymClass_Function:    return "Function";
     case SymClass_NamedCommon: return "Common";
-    case SymClass_Local:       return "Local";
+    case SymClass_Auto:        return "Auto";
+    case SymClass_Static:      return "Static";
     case SymClass_Global:      return "Global";
     case SymClass_Argument:    return "Argument";
     case SymClass_Parameter:   return "Parameter";
