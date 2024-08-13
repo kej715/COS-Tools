@@ -1100,6 +1100,14 @@ static int parseOptions(int argc, char *argv[]) {
     int i;
     int firstSrcIndex;
 
+#if DEBUG
+    for (i = 0; i < argc; i++) {
+        if (i > 0) fputs(" ", stderr);
+        fputs(argv[i], stderr);
+    }
+    fputs("\n", stderr);
+#endif
+
     firstSrcIndex = -1;
     i = 1;
     while (i < argc) {
@@ -1364,11 +1372,13 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
     for (i = 0; i < blockWordCount; i += 2) {
         block = (Block *)allocate(sizeof(Block));
         block->module = currentModule;
-        block->index = idx++;
         memcpy(block->id, table + offset, 8);
         offset += 8;
         word = getWord(table + offset);
         offset += 8;
+        block->length = word & 0xffffff;
+        if (block->length < 1) continue;
+        block->index = idx++;
         if (isSet(word, 1)) {
             eprintf("Warning: Section %s in module %s has error flag set", block->id, currentModule->id);
             block->hasErrorFlag = hasErrorFlag = TRUE;
@@ -1382,7 +1392,6 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
                 block->type = BlockType_Common;
             else
                 block->type = BlockType_Mixed;
-            block->length = word & 0xffffff;
         }
         else {
             blockType = (word >> 54) & 0x3ff;
@@ -1394,7 +1403,6 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
                 block->type = BlockType_Mixed;
             }
             block->isExtMem = ((word >> 48) & 0x3f) == 2;
-            block->length = word & 0xffffff;
         }
         addBlock(currentModule, block);
     }
@@ -1480,6 +1488,9 @@ static int processTXT(Dataset *ds, u64 hdr, int tableLength) {
             errorCount += 1;
             return skipBytes(ds, tableLength);
         }
+#if DEBUG
+        eprintf("Load block %d of module %s to address %o%c", blockIndex, currentModule->id, imageOffset >> 3, 'a' + ((imageOffset >> 1) & 3));
+#endif
         n = cosDsRead(ds, image + imageOffset, tableLength);
         return (n == tableLength) ? 0 : -1;
     }
