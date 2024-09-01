@@ -277,6 +277,7 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
     u32 bitAddress;
     u64 currentWord;
     int emptyBitCount;
+    u64 mask;
     int shiftCount;
     u64 subfield;
     int subfieldLen;
@@ -297,10 +298,12 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
     }
     fieldAttributes |= val->attributes;
     bits = (val->type == NumberType_Integer) ? val->value.intValue : toCrayFloat(val->value.intValue);
+    mask = ~((~(u64)0 >> len) << len);
     currentWord = getWord(section, section->originCounter);
     emptyBitCount = 64 - section->wordBitPosCounter;
     while (len > emptyBitCount) {
         shiftCount = len - emptyBitCount;
+        currentWord &= ~(mask >> shiftCount);
         currentWord |= bits >> shiftCount;
         putWord(section, section->originCounter, currentWord);
         subfieldLen = 64 - fieldStartingBitPos;
@@ -309,7 +312,8 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
         listFlush(section);
         listCodeLocation(section);
         len = shiftCount;
-        bits = extractSubfield(bits, 64 - len, len);
+        mask = ~((~(u64)0 >> len) << len);
+        bits &= mask;
         advanceBitPosition(section, emptyBitCount);
         currentWord = getWord(section, section->originCounter);
         fieldStartingBitPos = 0;
@@ -317,6 +321,7 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
     }
     if (len > 0) {
         shiftCount = 64 - (section->wordBitPosCounter + len);
+        currentWord &= ~(mask << shiftCount);
         currentWord |= bits << shiftCount;
         putWord(section, section->originCounter, currentWord);
         advanceBitPosition(section, len);

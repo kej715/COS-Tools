@@ -43,6 +43,7 @@ static Symbol *addSymbol(u8 *id, Block *block, u64 value, bool isParcelAddress);
 static void addSuffix(char *inPath, char *suffix, char *outPath);
 static void adjustEntryPoints(Symbol *symbol);
 static void calculateBaseAddresses(Block *block);
+static void calculateCommonBaseAddresses(Block *block);
 static void calculateModuleName(char *path, u8 *name);
 static int collectLibraryModules(Dataset *ds, char *sourcePath);
 static Block *findBlock(Module *module, int blockIndex);
@@ -73,7 +74,7 @@ static void putField(u8 *bytes, u32 rightmostBit, u16 fieldLength, u64 field);
 static void putWord(u8 *bytes, u64 word);
 static int readWord(Dataset *ds, u64 *word);
 static bool resolveExternal(u8 *id);
-static bool resolveExternals(void);
+static void resolveExternals(void);
 static bool resolveModuleExternals(Module *module);
 static int skipBytes(Dataset *ds, int count);
 static void usage(void);
@@ -218,10 +219,7 @@ int main(int argc, char *argv[]) {
 #if DEBUG
             eputs("Resolve externals");
 #endif
-            if (resolveExternals() == FALSE) {
-                eputs("Failed to resolve external references");
-                exit(1);
-            }
+            resolveExternals();
             if (loadLibraryModules(pass) == -1) exit(1);
             //
             //  Traverse the block lists and calculate the base address of
@@ -233,9 +231,9 @@ int main(int argc, char *argv[]) {
             calculateBaseAddresses(firstBlocks[BlockType_Code]);
             calculateBaseAddresses(firstBlocks[BlockType_Mixed]);
             calculateBaseAddresses(firstBlocks[BlockType_Const]);
-            calculateBaseAddresses(firstBlocks[BlockType_Common]);
-            calculateBaseAddresses(firstBlocks[BlockType_TaskCom]);
             calculateBaseAddresses(firstBlocks[BlockType_Data]);
+            calculateCommonBaseAddresses(firstBlocks[BlockType_Common]);
+            calculateCommonBaseAddresses(firstBlocks[BlockType_TaskCom]);
             calculateBaseAddresses(firstBlocks[BlockType_Dynamic]);
             imageSize *= 8;
             image = (u8 *)allocate(imageSize);
@@ -506,6 +504,51 @@ static void calculateBaseAddresses(Block *block) {
         else {
             block->baseAddress = blockLimit;
             blockLimit = blockLimit + block->length;
+        }
+        if (blockLimit > imageSize) imageSize = blockLimit;
+        block = block->nextInImage;
+    }
+}
+
+static void calculateCommonBaseAddresses(Block *block) {
+    u32 baseAddress;
+    u8 *blockId;
+    u32 commonLimit;
+    u32 limit;
+    u8 *moduleId;
+
+    blockId = block->id;
+    moduleId = block->module->id;
+    baseAddress = blockLimit;
+    commonLimit = blockLimit;
+
+    while (block != NULL) {
+        if (block->isAbsolute) {
+            block->baseAddress = 0;
+            limit = block->origin + block->length;
+            if (limit > blockLimit) blockLimit = limit;
+        }
+        else if (idcmp(moduleId, block->module->id, 8) != 0) {
+            moduleId = block->module->id;
+            if (idcmp(blockId, block->id, 8) != 0) { // new module and new common block name
+                blockId = block->id;
+                baseAddress = blockLimit;
+            }
+            block->baseAddress = baseAddress;
+            commonLimit = baseAddress + block->length;
+            if (commonLimit > blockLimit) blockLimit = commonLimit;
+        }
+        else if (idcmp(blockId, block->id, 8) != 0) { // same module, new common block name
+            blockId = block->id;
+            baseAddress = blockLimit;
+            block->baseAddress = baseAddress;
+            commonLimit = baseAddress + block->length;
+            if (commonLimit > blockLimit) blockLimit = commonLimit;
+        }
+        else {
+            block->baseAddress = commonLimit;
+            commonLimit = commonLimit + block->length;
+            if (commonLimit > blockLimit) blockLimit = commonLimit;
         }
         if (blockLimit > imageSize) imageSize = blockLimit;
         block = block->nextInImage;
@@ -1377,8 +1420,8 @@ static int processPDT(Dataset *ds, u8 *moduleId, u64 hdr, u8 *table, int tableLe
         word = getWord(table + offset);
         offset += 8;
         block->length = word & 0xffffff;
-        if (block->length < 1) continue;
         block->index = idx++;
+        if (block->length == 0) continue;
         if (isSet(word, 1)) {
             eprintf("Warning: Section %s in module %s has error flag set", block->id, currentModule->id);
             block->hasErrorFlag = hasErrorFlag = TRUE;
@@ -1628,27 +1671,29 @@ static bool resolveExternal(u8 *id) {
     return FALSE;
 }
 
-static bool resolveExternals(void) {
+static void resolveExternals(void) {
     Module *module;
 
     for (module = firstObjectModule; module != NULL; module = module->next) {
-        if (resolveModuleExternals(module) == FALSE) return FALSE;
+        if (resolveModuleExternals(module) == FALSE) {
+            eprintf("Module %.8s has unresolved external references", module->id);
+        }
     }
-    return TRUE;
 }
 
 static bool resolveModuleExternals(Module *module) {
     int i;
     u8 *id;
     int offset;
+    int unresolved;
 
-    for (i = 0, offset = 0; i < module->externalRefCount; i++, offset += 8) {
+    for (i = 0, offset = 0, unresolved = 0; i < module->externalRefCount; i++, offset += 8) {
         id = module->externalRefTable + offset;
         if (findSymbol(id) == NULL && resolveExternal(id) == FALSE) {
-            return FALSE;
+            unresolved += 1;
         }
     }
-    return TRUE;
+    return (unresolved > 0) ? FALSE : TRUE;
 }
 
 static int skipBytes(Dataset *ds, int count) {

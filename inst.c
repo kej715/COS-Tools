@@ -285,7 +285,12 @@ static ErrorCode BSS(void) {
     Value val;
 
     err = Err_None;
-    forceInstWordBoundary();
+    if (isCodeSection(currentSection)) {
+        forceInstWordBoundary();
+    }
+    else {
+        forceWordBoundary(currentSection);
+    }
     listCodeLocation(currentSection);
     if (locationFieldToken != NULL) {
         err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
@@ -303,8 +308,7 @@ static ErrorCode BSS(void) {
     firstAddress = currentSection->originCounter;
     advanceBitPosition(currentSection, val.value.intValue * 64);
     limitAddress = currentSection->originCounter;
-    if (isCodeSection(currentSection) || isDataSection(currentSection))
-        reserveStorage(currentSection, firstAddress, limitAddress - firstAddress);
+    reserveStorage(currentSection, firstAddress, limitAddress - firstAddress);
     return err;
 }
 
@@ -317,7 +321,12 @@ static ErrorCode BSSZ(void) {
 
     if (isDataSection(currentSection) == FALSE) return Err_InstructionPlacement;
     err = Err_None;
-    forceInstWordBoundary();
+    if (isCodeSection(currentSection)) {
+        forceInstWordBoundary();
+    }
+    else {
+        forceWordBoundary(currentSection);
+    }
     listCodeLocation(currentSection);
     if (locationFieldToken != NULL) {
         err = registerError(addLocationSymbol(currentSection, locationFieldToken->details.name.ptr,
@@ -1216,7 +1225,12 @@ static ErrorCode LOC(void) {
     err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
     if (isCodeSection(currentSection) == FALSE && isDataSection(currentSection) == FALSE)
         return Err_InstructionPlacement;
-    forceInstWordBoundary();
+    if (isCodeSection(currentSection)) {
+        forceInstWordBoundary();
+    }
+    else {
+        forceWordBoundary(currentSection);
+    }
     s = getNextValue(operandField, &val, &err);
     if (err != Err_None) return err;
     if (*s != '\0'
@@ -1568,7 +1582,12 @@ static ErrorCode ORG(void) {
         val.value.intValue = 0;
     }
     else {
-        forceInstWordBoundary();
+        if (isCodeSection(currentSection)) {
+            forceInstWordBoundary();
+        }
+        else {
+            forceWordBoundary(currentSection);
+        }
         s = getNextValue(operandField, &val, &err);
         if (err != Err_None) return err;
     }
@@ -1586,9 +1605,6 @@ static ErrorCode ORG(void) {
         return Err_OperandField;
     }
     else if (isRelocatable(&val) && isNominalSection && currentModule->isAbsolute) {
-        return Err_OperandField;
-    }
-    else if (originValue < currentSection->originCounter) {
         return Err_OperandField;
     }
     currentSection->originCounter = currentSection->locationCounter = originValue;
@@ -1713,11 +1729,14 @@ static ErrorCode SECTION(void) {
             || type == SectionType_Dynamic
             || type == SectionType_TaskCom;
     for (section = currentModule->firstSection; section != NULL; section = section->next) {
-        if (strncasecmp(section->id, id, len) == 0
-            && section->id[len] == '\0'
-            && ((section->type == type && section->location == location)
-                || isCommon || isCommonSection(section)))
-            break;
+        if (strncasecmp(section->id, id, len) == 0 && section->id[len] == '\0') {
+            if (section->type == type && section->location == location) {
+                break;
+            }
+            else if ((isCommon && len > 0) || type != SectionType_Common || isCommonSection(section)) {
+                return Err_DoubleDefinition;
+            }
+        }
     }
     if (section == NULL) {
         if (pass == 1) {
@@ -1727,9 +1746,6 @@ static ErrorCode SECTION(void) {
             eprintf("Section vanished in pass 2: %.*s", token.details.name.len, token.details.name.ptr);
             exit(1);
         }
-    }
-    else if ((isCommon || isCommonSection(section)) && (type != section->type || location != section->location)) {
-        return Err_DoubleDefinition;
     }
     if (type == SectionType_TaskCom) {
         if (len < 1) return Err_LocationField;
@@ -1922,9 +1938,14 @@ static ErrorCode TITLE(void) {
 }
 
 static ErrorCode VWD(void) {
+    int count;
+    unsigned char *cp;
     ErrorCode err;
+    Token *expression;
     int fieldWidth;
+    int len;
     char *s;
+    int shiftCount;
     Token token;
     Value val;
 
@@ -1970,7 +1991,59 @@ static ErrorCode VWD(void) {
             err = Err_OperandField;
         }
         if (err != Err_None) break;
-        s = getNextValue(s, &val, &err);
+        s = parseExpression(s, &expression);
+        switch (expression->type) {
+        case TokenType_None:
+            err = Err_OperandField;
+            break;
+        case TokenType_Error:
+            err = expression->details.error.code;
+            break;
+        case TokenType_String:
+            val = zeroIntVal;
+            len = expression->details.string.len;
+            count = (fieldWidth + 7) / 8;
+            switch (expression->details.string.justification) {
+            default:
+            case Justify_LeftBlankFill:
+                cp = (unsigned char *)expression->details.string.ptr;
+                while (len > 0 && count > 0) {
+                    val.value.intValue = (val.value.intValue << 8) | *cp++;
+                    len -= 1;
+                    count -= 1;
+                }
+                while (count-- > 0) {
+                    val.value.intValue = (val.value.intValue << 8) | ' ';
+                }
+                break;
+            case Justify_LeftZeroFill:
+            case Justify_LeftZeroEnd:
+                cp = (unsigned char *)expression->details.string.ptr;
+                while (len > 0 && count > 0) {
+                    val.value.intValue = (val.value.intValue << 8) | *cp++;
+                    len -= 1;
+                    count -= 1;
+                }
+                if (count > 0) val.value.intValue <<= (count * 8);
+                break;
+            case Justify_RightZeroFill:
+                cp = (unsigned char *)expression->details.string.ptr + len - 1;
+                shiftCount = 0;
+                while (len > 0 && count > 0) {
+                    val.value.intValue |= *cp-- << shiftCount;
+                    len -= 1;
+                    count -= 1;
+                    shiftCount += 8;
+                }
+                break;
+            }
+            break;
+        default:
+            err = evaluateExpression(expression, &val);
+            break;
+        }
+        freeToken(expression);
+
         if (err != Err_None) {
             if (pass == 1) {
                 val = zeroIntVal;
@@ -4819,7 +4892,7 @@ static void forceInstWordBoundary(void) {
 }
 
 /*
- *  freeinstruction - free storage allocated to a named instruction instance
+ *  freeInstruction - free storage allocated to a named instruction instance
  */
 static void freeInstruction(NamedInstruction *instruction) {
     free(instruction->id);
