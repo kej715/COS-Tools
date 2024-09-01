@@ -5,7 +5,8 @@
 #  Name: Makefile
 #
 #  Description:
-#      This is a makefile for building the FORTRAN compiler.
+#      This is a makefile for building the runtime library of the
+#      FORTRAN compiler.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -34,7 +35,7 @@ HDRS = const.h \
        fmt.h   \
        units.h
 
-OBJS = catstr.o cmpstr.o cpystr.o fio.o fmt.o fmt2.o units.o
+OBJS = catstr.o cmpstr.o cpystr.o fio.o fmt.o fmt2.o getstr.o units.o
 
 all: libio.a
 
@@ -69,6 +70,9 @@ fmt.o: fmt.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
 
 fmt2.o: fmt2.c $(HDRS)
+	$(CC) $(CFLAGS) -c $<
+
+getstr.o: getstr.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
 
 units.o: units.c $(HDRS)

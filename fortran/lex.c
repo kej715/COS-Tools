@@ -31,7 +31,6 @@
 #include "types.h"
 
 static char *getFloat(char *s, Token *token);
-static char *getIdentifier(char *s, Token *token);
 static char *getInteger(char *s, i64 *value);
 static char *getLogicalOp(char *s, Token *token);
 static char *getNumber(char *s, Token *token);
@@ -132,7 +131,7 @@ static Operator logicalOpTable[] = {
  */
 #define MAX_LOGICAL_OP_LEN 5
 
-static char *getIdentifier(char *s, Token *token) {
+char *getIdentifier(char *s, Token *token) {
     static char id[MAX_ID_LENGTH+1];
     int len;
     char *start;

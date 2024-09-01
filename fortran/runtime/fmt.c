@@ -172,7 +172,7 @@ void _inpfmt(DataValue *value) {
             charRef = (unsigned long)value;
             s = (char *)(charRef & 0xffffffff);
             len = charRef >> 32;
-            fieldWidth = nextDesc->width;
+            fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
             while (fieldWidth > 0 && len > 0) {
                 if (cursor < limit) {
                     *s++ = *cursor++;
@@ -186,7 +186,7 @@ void _inpfmt(DataValue *value) {
             charRef = (unsigned long)value;
             s = (char *)(charRef & 0xffffffff);
             len = charRef >> 32;
-            fieldWidth = nextDesc->width;
+            fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
             while (len > fieldWidth) {
                 *s++ = ' ';
                 len -= 1;
@@ -728,10 +728,6 @@ static void fmtRealG(double value, FormatDesc *fdp) {
 static char *getPrecision(char *s, char *limit, FormatDesc *fdp) {
     if (isdigit(*s)) {
         s = parseInteger(s, limit, &fdp->width);
-        if (fdp->width < 1) {
-            fprintf(stderr, "Invalid width specified for '%s' format descriptor\n", fmtClassToStr(fdp->class));
-            exit(1);
-        }
         switch (fdp->class) {
         case Fmt_D:
         case Fmt_E:
@@ -740,6 +736,10 @@ static char *getPrecision(char *s, char *limit, FormatDesc *fdp) {
         case Fmt_I:
         case Fmt_O:
         case Fmt_Z:
+            if (fdp->width < 1) {
+                fprintf(stderr, "Invalid width specified for '%s' format descriptor\n", fmtClassToStr(fdp->class));
+                exit(1);
+            }
             if (s < limit && *s == '.') {
                 s += 1;
                 if (s < limit && isdigit(*s)) {
@@ -956,7 +956,7 @@ static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor) {
                 charRef = (unsigned long)value;
                 s = (char *)(charRef & 0xffffffff);
                 len = charRef >> 32;
-                fieldWidth = nextDesc->width;
+                fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
                 if (len < fieldWidth) {
                     n = fieldWidth - len;
                     fieldWidth -= n;

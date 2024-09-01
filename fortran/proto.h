@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include "types.h"
 
+Symbol *addCommonBlock(char *name);
 Symbol *addLabel(char *label);
 Symbol *addSymbol(char *identifier, SymbolClass class);
 void *allocate(int size);
@@ -35,18 +36,25 @@ int calculateAutoOffsets(void);
 int calculateSize(Symbol *symbol);
 int calculateStaticOffsets(void);
 void compile(char *name);
+int countArrayElements(Symbol *symbol);
+void emitCommonBlocks(void);
+Symbol *findCommonBlock(char *name);
+Symbol *findIntrinsicFunction(char *name);
 Symbol *findLabel(char *label);
 Symbol *findSymbol(char *identifier);
 void freeAllSymbols(void);
 void generateLabel(char *label);
 char *getNextChar(char *s);
+char *getIdentifier(char *s, Token *token);
 char *getNextToken(char *s, Token *token, bool doMatchKeywords);
 DataType *getSymbolType(Symbol *sym);
 void printSymbols(FILE *f);
 void *reallocate(void *old, int oldSize, int newSize);
+void registerIntrinsicFunctions(void);
+void resetCommonBlocks(void);
 
 extern bool doEchoSource;
-extern bool doStaticLocals;
+extern bool doStaticLocalsDefault;
 extern int lineNo;
 extern FILE *listingFile;
 extern FILE *objectFile;

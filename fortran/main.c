@@ -65,7 +65,8 @@ int main(int argc, char *argv[]) {
         sp += 1;
     }
     *cp = '\0';
-    
+
+    registerIntrinsicFunctions();
     compile(name);
 
     if (objectFile != NULL) fclose(objectFile);
@@ -99,11 +100,10 @@ static char *parseOptions(int argc, char *argv[]) {
     sourceFile  = stdin;
     listingFile = stdout;
     objectPath  = "ZZZZCAL";
-    sourcePath  = "$IN";
 #else
     objectPath  = NULL;
-    sourcePath  = NULL;
 #endif
+    sourcePath  = NULL;
     i = 1;
     while (i < argc) {
         if (strcmp(argv[i], A_KEY) == 0) {
@@ -112,10 +112,10 @@ static char *parseOptions(int argc, char *argv[]) {
                 usage();
             }
             if (strcasecmp(argv[i], "static") == 0) {
-                doStaticLocals = TRUE;
+                doStaticLocalsDefault = TRUE;
             }
             else if (strcasecmp(argv[i], "stack") == 0 || strcasecmp(argv[i], "auto") == 0) {
-                doStaticLocals = FALSE;
+                doStaticLocalsDefault = FALSE;
             }
             else {
                 usage();
@@ -194,6 +194,7 @@ static char *parseOptions(int argc, char *argv[]) {
         i += 1;
     }
 #if defined(__cos)
+    if (sourcePath == NULL) sourcePath = "$IN";
     if (objectFile == NULL && strcmp(objectPath, "0") != 0) {
         objectFile = fopen(objectPath, "w");
         if (objectFile == NULL) {

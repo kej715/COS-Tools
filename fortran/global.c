@@ -27,10 +27,10 @@
 #include "const.h"
 #include "types.h"
 
-bool  doEchoSource   = FALSE;
-bool  doStaticLocals = TRUE;
-int   lineNo         = 0;
-FILE *listingFile    = NULL;
-FILE *objectFile     = NULL;
-FILE *sourceFile     = NULL;
+bool  doEchoSource          = FALSE;
+bool  doStaticLocalsDefault = TRUE;
+int   lineNo                = 0;
+FILE *listingFile           = NULL;
+FILE *objectFile            = NULL;
+FILE *sourceFile            = NULL;
 char stmtBuf[MAX_STMT_LENGTH+1];

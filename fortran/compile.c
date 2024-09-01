@@ -57,9 +57,11 @@ typedef enum parsingState {
     STATE_EXECUTABLE
 } ParsingState;
 
+static void adjustDataInitializers(void);
 static char *baseTypeToStr(BaseType type);
 static char *collectStmt(void);
 static Token *copyToken(Token *token);
+static void createCharConst(char *s, OperatorArgument *charConst);
 static Token *createIntegerConstant(int value);
 static void defineLocalVariable(Symbol *symbol);
 static void defineType(Symbol *symbol);
@@ -69,14 +71,21 @@ static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, Opera
 static bool evaluateExpression(Token *expression, OperatorArgument *result);
 static bool evaluateExprHelper(Token *expression);
 static bool evaluateFmtSpec(ControlInfoList *ciList);
-static bool evaluateFunction(Token *fn, Symbol *symbol);
+static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic);
 static bool evaluateIdentifier(Token *id);
-static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, bool *isScalar);
+static bool evaluateInquireReference(StorageReference *ref, int stackOffset);
+static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, OperatorArgument *object, bool *isScalar);
 static bool evaluateStringIndex(Token *expression, OperatorArgument *index);
 static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgument *offset, OperatorArgument *length);
 static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int idx, OperatorArgument *subscript);
 static bool executeOperator(OperatorId op);
+static void freeCloseInfoList(CloseInfoList *ciList);
+static void freeConstantList(ConstantListItem *list);
 static void freeControlInfoList(ControlInfoList *list);
+static void freeDataInitializerList(DataInitializerItem *list);
+static void freeInquireInfoList(InquireInfoList *iiList);
+static void freeOpenInfoList(OpenInfoList *oiList);
+static void freeStaticInitializers(void);
 static void freeStorageReference(StorageReference *reference);
 static void freeStringRange(StringRange *range);
 static void freeToken(Token *token);
@@ -85,11 +94,13 @@ static DataType *getDataType(OperatorArgument *arg);
 static char *getIntValue(char *s, int *value);
 static char *getLabel(char *s, char *label);
 static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx);
+static char *getStorageReference(char *s, char *paramName, BaseType type, StorageReference *reference);
 static void inputCheckIostat(ControlInfoList *ciList);
 static void inputFini(ControlInfoList *ciList);
 static void inputInit(ControlInfoList *ciList);
 static void list(char *format, ...);
 static void loadValue(OperatorArgument *value);
+static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic);
 static char *opIdToStr(OperatorId id);
 static void outputCheckIostat(ControlInfoList *ciList);
 static void outputFini(ControlInfoList *ciList);
@@ -98,15 +109,18 @@ static char *parseActualArguments(char *s, int *frameSize);
 static void parseArithmeticIF(char *s, Register reg);
 static void parseAssignment(char *s, Token *id);
 static char *parseCharConstraint(char *s, Token *token, DataType *dt);
+static char *parseCloseInfoList(char *s, CloseInfoList **ciList);
 static char *parseControlInfoList(char *s, ControlInfoList **ciList, int defaultUnit);
 static char *parseDataType(char *s, Token *token, DataType *type);
 static char *parseDimDecl(char *s, Symbol *symbol);
+static void parseDirective(char *s, int lineNo);
 static char *parseExpression(char *s, Token **expression);
 static char *parseExpressionList(char *s, TokenListItem **list);
 static char *parseFmtSpec(char *s, ControlInfoList *ciList);
 static char *parseFormalArguments(char *s);
 static void parseInputList(char *s, ControlInfoList *ciList);
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf);
+static char *parseOpenInfoList(char *s, OpenInfoList **oiList);
 static void parseOutputList(char *s, ControlInfoList *ciList);
 static void parseOutputStmt(char *s, int unitNum);
 static char *parseStorageReference(char *s, Token *id, StorageReference *reference);
@@ -118,13 +132,15 @@ static void presetImplicit(void);
 static void presetProgUnit(void); 
 static void pushArg(OperatorArgument *arg);
 static void pushOp(OperatorDetails *op);
-static char *readLine(int *lineLength);
+static char *readLine(void);
+static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList);
 static void verifyEOS(char *s);
 static void warn(char *format, ...);
 
 static void parseASSIGN(char *s);
 static void parseBLOCKDATA(char *s);
 static void parseCALL(char *s);
+static void parseCLOSE(char *s);
 static void parseCOMMON(char *s);
 static void parseDATA(char *s);
 static void parseDIMENSION(char *s);
@@ -142,11 +158,13 @@ static void parseGOTO(char *s);
 static void parseIF(char *s, bool isFromLogIf);
 static void parseINCLUDE(char *s);
 static void parseINTRINSIC(char *s);
+static void parseINQUIRE(char *s);
 static void parseNAMELIST(char *s);
 static void parseSAVE(char *s);
 static void parseSUBROUTINE(char *s);
 static void parseIMPLICIT(char *s);
 static void parseIMPLICITNONE(char *s);
+static void parseOPEN(char *s);
 static void parsePARAMETER(char *s);
 static void parsePRINT(char *s);
 static void parsePROGRAM(char *s);
@@ -182,6 +200,8 @@ static Symbol defaultProgSym = {
 };
 static int autoOffset = 0;
 static Symbol *currentLabel;
+static bool doList = TRUE;
+static bool doStaticLocals = TRUE;
 static int errorCount = 0;
 static DataType implicitTypes[26];
 static char lineBuf[MAX_LINE_LENGTH+1];
@@ -198,11 +218,24 @@ static int ifStackPtr = 0;
 static OperatorDetails opStack[MAX_OP_STACK_SIZE];
 static int opStkPtr;
 
+static ConstantListItem *firstCListItem = NULL;
+static DataInitializerItem *firstDListItem = NULL;
+static ConstantListItem *lastCListItem = NULL;
+static DataInitializerItem *lastDListItem = NULL;
+
+static void adjustDataInitializers(void) {
+    DataInitializerItem *dListItem;
+
+    for (dListItem = firstDListItem; dListItem != NULL; dListItem = dListItem->next) {
+        dListItem->blockOffset = dListItem->symbol->details.variable.offset;
+    }
+}
+
 static char *collectStmt() {
-    int lineLength;
     char *lp;
     char *s;
     char *stmtLimit;
+    Token token;
 
     s = stmtBuf;
     *s = '\0';
@@ -211,31 +244,48 @@ static char *collectStmt() {
     for (;;) {
         lp = lineBuf;
         if (*lp == '\0') {
-            lp = readLine(&lineLength);
+            lp = readLine();
             if (lp == NULL) {
                 *s = '\0';
                 return (s > stmtBuf) ? stmtBuf : NULL;
             }
         }
-        if (*lp == 'C' || *lp == 'c' || *lp == '*' || *lp == '!') {
-            list("%6d: %s\n", ++lineNo, lp);
-            lineBuf[0] = '\0';
+        if (*lp == 'C' || *lp == 'c') {
+            if (s == stmtBuf) {
+                lineNo += 1;
+                if (strncasecmp(lp, "CDIR$ ", 5) == 0) {
+                    parseDirective(lp, lineNo);
+                }
+                else {
+                    list("%6d: %s\n", lineNo, lineBuf);
+                }
+                lineBuf[0] = '\0';
+            }
+            *s = '\0';
+            break;
+        }
+        else if (*lp == '*' || *lp == '!') {
+            if (s == stmtBuf) {
+                list("%6d: %s\n", ++lineNo, lp);
+                lineBuf[0] = '\0';
+            }
+            *s = '\0';
+            break;
         }
         else if (stmtBuf[0] == '\0') {
             list("%6d: %s\n", ++lineNo, lp);
             while (*lp != '\0') *s++ = *lp++;
-            lineBuf[0] = '\0';
         }
         else if (lineBuf[5] != ' ' && lineBuf[5] != '0') {
             list("%6d: %s\n", ++lineNo, lp);
             lp = lineBuf + 6;
             while (*lp != '\0' && s < stmtLimit) *s++ = *lp++;
-            lineBuf[0] = '\0';
         }
         else {
             *s = '\0';
             break;
         }
+        lineBuf[0] = '\0';
     }
 
     return stmtBuf;
@@ -262,9 +312,13 @@ void compile(char *name) {
     for (;;) {
         start = s = collectStmt();
         if (s == NULL) {
+            emitCommonBlocks();
+            emitStaticInitializers(firstDListItem, firstCListItem);
+            freeStaticInitializers();
             emitEnd();
             break;
         }
+        if (*s == '\0') continue;
         if (doEchoSource && objectFile != NULL) fprintf(objectFile, "* %s\n", start);
         lp = lineLabel;
         currentLabel = NULL;
@@ -479,6 +533,7 @@ void compile(char *name) {
             state = STATE_EXECUTABLE;
             autoOffset = -calculateAutoOffsets();
             staticOffset = calculateStaticOffsets();
+            adjustDataInitializers();
 
         case STATE_EXECUTABLE:
             if (token.type == TokenType_Keyword) {
@@ -494,6 +549,7 @@ void compile(char *name) {
                 case CONTINUE:
                     break;
                 case CLOSE:
+                    parseCLOSE(s);
                     break;
                 case DECODE:
                     break;
@@ -526,7 +582,11 @@ void compile(char *name) {
                 case IF:
                     parseIF(s, FALSE);
                     break;
+                case INQUIRE:
+                    parseINQUIRE(s);
+                    break;
                 case OPEN:
+                    parseOPEN(s);
                     break;
                 case PAUSE:
                     break;
@@ -635,6 +695,14 @@ static Token *copyToken(Token *token) {
     return new;
 }
 
+static void createCharConst(char *s, OperatorArgument *charConst) {
+    charConst->class = ArgClass_Constant;
+    charConst->details.constant.dt.type = BaseType_Character;
+    charConst->details.constant.dt.rank = 0;
+    charConst->details.constant.value.character.length = strlen(s);
+    charConst->details.constant.value.character.string = s;
+}
+
 static Token *createIntegerConstant(int value) {
     Token *token;
 
@@ -650,6 +718,7 @@ static void defineLocalVariable(Symbol *symbol) {
     if (doStaticLocals) {
         symbol->class = SymClass_Static;
         symbol->details.variable.offset = staticOffset;
+        symbol->details.variable.staticBlock = progUnitSym;
         staticOffset += calculateSize(symbol);
     }
     else {
@@ -856,8 +925,8 @@ static bool evaluateFmtSpec(ControlInfoList *ciList) {
     return FALSE;
 }
 
-static bool evaluateFunction(Token *fn, Symbol *symbol) {
-    bool evalStatus;
+static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
+    DataType *dt;
     int frameSize;
     int parmIdx;
     int pass;
@@ -866,36 +935,61 @@ static bool evaluateFunction(Token *fn, Symbol *symbol) {
     u8 registerMap;
     OperatorArgument result;
     int tempIdx;
+    int varArgIncr;
 
     registerMap = getRegisterMap();
     emitSaveRegs(registerMap);
     enableEmission(FALSE);
-    frameSize = 0;
-    evalStatus = FALSE;
+    varArgIncr = 0;
+    if (intrinsic != NULL) {
+        intrinsic = matchIntrinsic(fn, intrinsic);
+        if (intrinsic == NULL) {
+            enableEmission(TRUE);
+            emitRestoreRegs(registerMap);
+            return TRUE;
+        }
+        if (intrinsic->details.intrinsic.argc < 0) varArgIncr = 1;
+    }
+    frameSize = varArgIncr;
     for (pass = 1; pass <= 2; pass++) {
         if (pass == 2) {
             enableEmission(TRUE);
             emitAdjustSP(-frameSize);
             tempIdx = parmIdx;
         }
-        parmIdx = 0;
+        parmIdx = varArgIncr;
         for (qualifier = fn->details.identifier.qualifiers; qualifier != NULL; qualifier = qualifier->next) {
             if (qualifier->item == NULL) continue;
             if (evaluateExpression(qualifier->item, &result)) {
-                evalStatus = TRUE;
+                enableEmission(TRUE);
+                emitRestoreRegs(registerMap);
+                return TRUE;
             }
-            else if (isConstant(result)) {
-                if (pass == 1) {
-                    frameSize += 2;
+            dt = getDataType(&result);
+            if (isConstant(result)) {
+                if (dt->type == BaseType_Character) {
+                    if (pass == 1) {
+                        frameSize += 1;
+                    }
+                    else {
+                        emitLoadConst(&result);
+                        emitStoreStack(result.reg, parmIdx);
+                        freeRegister(result.reg);
+                    }
                 }
                 else {
-                    emitLoadConst(&result);
-                    emitStoreStack(result.reg, tempIdx);
-                    reg = emitLoadStackAddr(tempIdx);
-                    emitStoreStack(reg, parmIdx);
-                    freeRegister(reg);
-                    freeRegister(result.reg);
-                    tempIdx += 1;
+                    if (pass == 1) {
+                        frameSize += 2;
+                    }
+                    else {
+                        emitLoadConst(&result);
+                        emitStoreStack(result.reg, tempIdx);
+                        reg = (intrinsic == NULL) ? emitLoadStackAddr(tempIdx) : emitLoadStackByteAddr(tempIdx);
+                        emitStoreStack(reg, parmIdx);
+                        freeRegister(reg);
+                        freeRegister(result.reg);
+                        tempIdx += 1;
+                    }
                 }
             }
             else if (isLoadable(result)) {
@@ -903,7 +997,19 @@ static bool evaluateFunction(Token *fn, Symbol *symbol) {
                     frameSize += 1;
                 }
                 else {
-                    emitLoadReference(&result);
+                    if (intrinsic != NULL && dt->type != BaseType_Character)
+                        emitLoadByteReference(&result, NULL);
+                    else
+                        emitLoadReference(&result, NULL);
+                    emitStoreStack(result.reg, parmIdx);
+                    freeRegister(result.reg);
+                }
+            }
+            else if (dt->type == BaseType_Character) {
+                if (pass == 1) {
+                    frameSize += 1;
+                }
+                else {
                     emitStoreStack(result.reg, parmIdx);
                     freeRegister(result.reg);
                 }
@@ -914,7 +1020,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol) {
                 }
                 else {
                     emitStoreStack(result.reg, tempIdx);
-                    reg = emitLoadStackAddr(tempIdx);
+                    reg = (intrinsic == NULL) ? emitLoadStackAddr(tempIdx) : emitLoadStackByteAddr(tempIdx);
                     emitStoreStack(reg, parmIdx);
                     freeRegister(reg);
                     freeRegister(result.reg);
@@ -924,21 +1030,29 @@ static bool evaluateFunction(Token *fn, Symbol *symbol) {
             parmIdx += 1;
         }
     }
-    emitSubprogramCall(fn->details.identifier.name);
+    if (varArgIncr != 0) emitStoreStackInt(parmIdx - 1, 0);
+    emitSubprogramCall((intrinsic == NULL) ? fn->details.identifier.name : intrinsic->details.intrinsic.externName);
     emitAdjustSP(frameSize);
     emitRestoreRegs(registerMap);
     reg = allocateRegister();
     emitCopyRegister(reg, RESULT_REG);
     result.class = ArgClass_Calculation;
-    result.details.calculation = symbol->details.variable.dt;
+    if (intrinsic == NULL) {
+        result.details.calculation = symbol->details.variable.dt;
+    }
+    else {
+        result.details.calculation.type = intrinsic->details.intrinsic.resultType;
+        result.details.calculation.rank = 0;
+    }
     result.reg = reg;
     pushArg(&result);
 
-    return evalStatus;
+    return FALSE;
 }
 
 static bool evaluateIdentifier(Token *id) {
     OperatorArgument arg;
+    Symbol *intrinsic;
     char *name;
     OperatorArgument offset;
     u8 registerMap;
@@ -956,8 +1070,9 @@ static bool evaluateIdentifier(Token *id) {
             defineLocalVariable(symbol);
         }
         else {
-            defineType(symbol);
-            return evaluateFunction(id, symbol);
+            intrinsic = findIntrinsicFunction(name);
+            if (intrinsic == NULL) defineType(symbol);
+            return evaluateFunction(id, symbol, intrinsic);
         }
     }
     else if (symbol->class == SymClass_Argument && symbol->details.variable.dt.type == BaseType_Undefined) {
@@ -971,18 +1086,22 @@ static bool evaluateIdentifier(Token *id) {
 
     arg.class = argClassForSymClass[symbol->class];
     switch (symbol->class) {
+    case SymClass_Function:
+        if (symbol->details.progUnit.dt.constraint == -1) {
+            err("Invalid reference to assumed-size %s", symbol->identifier);
+            return TRUE;
+        }
     case SymClass_Auto:
     case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
     case SymClass_Pointee:
-    case SymClass_Function:
         arg.details.reference.symbol = symbol;
         if (id->details.identifier.qualifiers == NULL) {
             arg.details.reference.offsetClass = ArgClass_Undefined;
             if (id->details.identifier.range != NULL) {
                 if (evaluateStringRange(symbol, id->details.identifier.range, &strOffset, &strLength)) return TRUE;
-                emitLoadReference(&arg);
+                emitLoadReference(&arg, NULL);
                 emitUpdateStringRef(&arg, &strOffset, &strLength);
             }
         }
@@ -1005,7 +1124,7 @@ static bool evaluateIdentifier(Token *id) {
                     if (isCalculation(offset)) freeRegister(offset.reg);
                     return TRUE;
                 }
-                emitLoadReference(&arg);
+                emitLoadReference(&arg, NULL);
                 emitUpdateStringRef(&arg, &strOffset, &strLength);
             }
         }
@@ -1026,21 +1145,45 @@ static bool evaluateIdentifier(Token *id) {
     return FALSE;
 }
 
-static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, bool *isScalar) {
+static bool evaluateInquireReference(StorageReference *ref, int stackOffset) {
+    bool isScalar;
+    OperatorArgument target;
+
+    if (ref->symbol == NULL) {
+        emitLoadNullPtr(&target);
+    }
+    else {
+        if (evaluateStorageReference(ref, &target, NULL, &isScalar)) return TRUE;
+        if (isScalar) emitLoadReference(&target, NULL);
+    }
+    emitStoreStack(target.reg, stackOffset);
+    freeRegister(target.reg);
+    return FALSE;
+}
+
+static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, OperatorArgument *object, bool *isScalar) {
     DataType *dt;
+    bool isAssumedSize;
     OperatorArgument offset;
     OperatorArgument strLength;
     OperatorArgument strOffset;
+    Symbol *symbol;
 
+    symbol = reference->symbol;
+    dt = getSymbolType(symbol);
+    isAssumedSize = dt->type == BaseType_Character && dt->constraint == -1;
+    if (isAssumedSize && (object == NULL || getDataType(object)->type != BaseType_Character)) {
+        err("Invalid reference to assumed-size variable %s", symbol->identifier);
+        return TRUE;
+    }
     *isScalar = FALSE;
     target->class = argClassForSymClass[reference->symbol->class];
-    target->details.reference.symbol = reference->symbol;
+    target->details.reference.symbol = symbol;
     if (reference->expressionList == NULL) {
         target->details.reference.offsetClass = ArgClass_Undefined;
         if (reference->strRange == NULL) {
-            dt = getSymbolType(reference->symbol);
             if (dt->type == BaseType_Character) {
-                emitLoadReference(target);
+                emitLoadReference(target, object);
             }
             else {
                 *isScalar = TRUE;
@@ -1048,13 +1191,13 @@ static bool evaluateStorageReference(StorageReference *reference, OperatorArgume
             return FALSE;
         }
         else {
-            if (evaluateStringRange(reference->symbol, reference->strRange, &strOffset, &strLength)) return TRUE;
-            emitLoadReference(target);
+            if (evaluateStringRange(symbol, reference->strRange, &strOffset, &strLength)) return TRUE;
+            emitLoadReference(target, object);
             emitUpdateStringRef(target, &strOffset, &strLength);
         }
     }
-    else if (reference->symbol->details.variable.dt.rank > 0) {
-        if (evaluateArrayRef(reference->symbol, reference->expressionList, &offset)) return TRUE;
+    else if (symbol->details.variable.dt.rank > 0) {
+        if (evaluateArrayRef(symbol, reference->expressionList, &offset)) return TRUE;
         target->details.reference.offsetClass = offset.class;
         switch (offset.class) {
         case ArgClass_Constant:
@@ -1068,19 +1211,19 @@ static bool evaluateStorageReference(StorageReference *reference, OperatorArgume
             exit(1);
         }
         if (reference->strRange == NULL) {
-            emitLoadReference(target);
+            emitLoadReference(target, object);
         }
         else {
-            if (evaluateStringRange(reference->symbol, reference->strRange, &strOffset, &strLength)) {
+            if (evaluateStringRange(symbol, reference->strRange, &strOffset, &strLength)) {
                 if (isCalculation(offset)) freeRegister(offset.reg);
                 return TRUE;
             }
-            emitLoadReference(target);
+            emitLoadReference(target, object);
             emitUpdateStringRef(target, &strOffset, &strLength);
         }
     }
     else {
-        err("%s is not an array", reference->symbol->identifier);
+        err("%s is not an array", symbol->identifier);
         return TRUE;
     }
 
@@ -1225,7 +1368,10 @@ static bool executeOperator(OperatorId op) {
         }
         if (leftType->type  != argType) leftType->type  = coerceArgument(&leftArg,  leftType->type,  argType);
         if (rightType->type != argType) rightType->type = coerceArgument(&rightArg, rightType->type, argType);
-        if (!isConstResult && isConstant(rightArg)) emitLoadConst(&rightArg);
+        if (!isConstResult) {
+            if (isConstant(leftArg)) emitLoadConst(&leftArg);
+            if (isConstant(rightArg)) emitLoadConst(&rightArg);
+        }
     }
 
     switch (op) {
@@ -1370,6 +1516,27 @@ static bool executeOperator(OperatorId op) {
     return FALSE;
 }
 
+static void freeConstantList(ConstantListItem *list) {
+    ConstantListItem *nextItem;
+
+    while (list != NULL) {
+        nextItem = list->next;
+        if (list->details.dt.type == BaseType_Character)
+            free(list->details.value.character.string);
+        free(list);
+        list = nextItem;
+    }
+}
+
+static void freeCloseInfoList(CloseInfoList *ciList) {
+    if (ciList != NULL) {
+        if (ciList->unit != NULL) freeToken(ciList->unit);
+        if (ciList->fileStatus != NULL) freeToken(ciList->fileStatus);
+        freeStorageReference(&ciList->iostat);
+        free(ciList);
+    }
+}
+
 static void freeControlInfoList(ControlInfoList *ciList) {
     if (ciList != NULL) {
         if (ciList->unit != NULL) freeToken(ciList->unit);
@@ -1378,6 +1545,60 @@ static void freeControlInfoList(ControlInfoList *ciList) {
         freeStorageReference(&ciList->iostat);
         free(ciList);
     }
+}
+
+static void freeDataInitializerList(DataInitializerItem *list) {
+    DataInitializerItem *nextItem;
+
+    while (list != NULL) {
+        nextItem = list->next;
+        free(list);
+        list = nextItem;
+    }
+}
+
+static void freeInquireInfoList(InquireInfoList *iiList) {
+   if (iiList != NULL) {
+        if (iiList->unit != NULL) freeToken(iiList->unit);
+        if (iiList->fileName != NULL) freeToken(iiList->fileName);
+        freeStorageReference(&iiList->existRef);
+        freeStorageReference(&iiList->openedRef);
+        freeStorageReference(&iiList->numberRef);
+        freeStorageReference(&iiList->namedRef);
+        freeStorageReference(&iiList->nameRef);
+        freeStorageReference(&iiList->accessRef);
+        freeStorageReference(&iiList->sequentialRef);
+        freeStorageReference(&iiList->directRef);
+        freeStorageReference(&iiList->formattedRef);
+        freeStorageReference(&iiList->unformattedRef);
+        freeStorageReference(&iiList->formRef);
+        freeStorageReference(&iiList->blankRef);
+        freeStorageReference(&iiList->reclRef);
+        freeStorageReference(&iiList->nextRecRef);
+        freeStorageReference(&iiList->iostat);
+        free(iiList);
+    }
+}
+
+static void freeOpenInfoList(OpenInfoList *oiList) {
+    if (oiList != NULL) {
+        if (oiList->unit != NULL) freeToken(oiList->unit);
+        if (oiList->fileName != NULL) freeToken(oiList->fileName);
+        if (oiList->fileStatus != NULL) freeToken(oiList->fileStatus);
+        if (oiList->formatting != NULL) freeToken(oiList->formatting);
+        if (oiList->access != NULL) freeToken(oiList->access);
+        if (oiList->blankSpecifier != NULL) freeToken(oiList->blankSpecifier);
+        if (oiList->recordLength != NULL) freeToken(oiList->recordLength);
+        freeStorageReference(&oiList->iostat);
+        free(oiList);
+    }
+}
+
+static void freeStaticInitializers(void) {
+    freeDataInitializerList(firstDListItem);
+    freeConstantList(firstCListItem);
+    firstDListItem = NULL;
+    firstCListItem = NULL;
 }
 
 static void freeStorageReference(StorageReference *reference) {
@@ -1505,6 +1726,31 @@ static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx) {
     return (idx == 0) ? qualifier : NULL;
 }
 
+static char *getStorageReference(char *s, char *paramName, BaseType type, StorageReference *reference) {
+    DataType *dt;
+    Token token;
+
+    s = getNextToken(s, &token, FALSE);
+    if (token.type == TokenType_Identifier) {
+        s = parseStorageReference(s, &token, reference);
+        if (s == NULL) return s;
+        dt = getSymbolType(reference->symbol);
+        if (dt->type != type) {
+            err("%s is not %s", reference->symbol->identifier, baseTypeToStr(type));
+            return NULL;
+        }
+        return s;
+    }
+    else if (paramName != NULL) {
+        err("%s= syntax", paramName);
+        return NULL;;
+    }
+    else {
+        err("Syntax");
+        return NULL;
+    }
+}
+
 static void inputCheckIostat(ControlInfoList *ciList) {
     bool isScalar;
     char label[8];
@@ -1516,7 +1762,7 @@ static void inputCheckIostat(ControlInfoList *ciList) {
     if (ciList->iostat.symbol != NULL) {
         reg = allocateRegister();
         emitCopyRegister(reg, RESULT_REG);
-        if (evaluateStorageReference(&ciList->iostat, &target, &isScalar)) {
+        if (evaluateStorageReference(&ciList->iostat, &target, NULL, &isScalar)) {
             freeRegister(reg);
             return;
         }
@@ -1531,8 +1777,7 @@ static void inputCheckIostat(ControlInfoList *ciList) {
     }
     generateLabel(label);
     emitBranchOnFalse(reg, label);
-    emitPopReg(RESULT_REG);
-    emitAdjustSP(1);
+    emitAdjustSP(2);
     emitBranch3Way(NO_REG,
                    ciList->endLabel != NULL ? ciList->endLabel->details.label.label : "@_fioeof",
                    NULL,
@@ -1569,7 +1814,7 @@ static void inputInit(ControlInfoList *ciList) {
 static void list(char *format, ...) {
     va_list ap;
 
-    if (listingFile != NULL) {
+    if (listingFile != NULL && doList) {
         va_start(ap, format);
         vfprintf(listingFile, format, ap);
         va_end(ap);
@@ -1583,6 +1828,67 @@ static void loadValue(OperatorArgument *value) {
     else if (value->class > ArgClass_Function) {
         emitLoadValue(value);
     }
+}
+
+static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
+    int argc;
+    DataType *dt;
+    int i;
+    bool isGeneric;
+    char *name;
+    TokenListItem *qualifier;
+    OperatorArgument r;
+    OperatorArgument *result;
+    OperatorArgument results[MAX_INTRINSIC_ARGS];
+    /*
+     *  Assumption: on entry, code emission is disabled and allocated registers
+     *  have been saved.
+     */
+    name = intrinsic->identifier;
+    argc = 0;
+    if (intrinsic->details.intrinsic.argc != -1) { // function with fixed number of arguments
+        for (qualifier = fn->details.identifier.qualifiers; qualifier != NULL; qualifier = qualifier->next) {
+            if (qualifier->item == NULL) continue;
+            if (argc >= intrinsic->details.intrinsic.argc) {
+                err("Too many arguments for intrinsic %s", name);
+                return NULL;
+            }
+            if (evaluateExpression(qualifier->item, &results[argc++])) return NULL;
+        }
+        if (argc != intrinsic->details.intrinsic.argc) return NULL;
+    }
+    else { // function with variable number of arguments
+        for (qualifier = fn->details.identifier.qualifiers; qualifier != NULL; qualifier = qualifier->next) {
+            if (qualifier->item == NULL) continue;
+            if (evaluateExpression(qualifier->item, &r)) return NULL;
+            if (argc == 0) {
+                results[argc++] = r;
+                dt = getDataType(&r);
+            }
+            else if (dt->type != getDataType(&r)->type) {
+                err("Inconsistent data types in call to intrinsic %s", name);
+                return NULL;
+            }
+        }
+    }
+    isGeneric = intrinsic->details.intrinsic.isGeneric;
+    for (;;) {
+        i = 0;
+        while (i < argc) {
+            dt = getDataType(&results[i]);
+            if (dt->type != intrinsic->details.intrinsic.argumentTypes[i]) break;
+            i += 1;
+        }
+        if (i >= argc) break;
+        if (isGeneric && intrinsic->next != NULL) {
+            intrinsic = intrinsic->next;
+        }
+        else {
+            err("Invalid argument type for intrinsic %s", name);
+            return NULL;
+        }
+    }
+    return intrinsic;
 }
 
 static void parseArithmeticIF(char *s, Register reg) {
@@ -1656,13 +1962,13 @@ static void parseAssignment(char *s, Token *id) {
             freeStorageReference(&reference);
             return;
         }
-        if (evaluateStorageReference(&reference, &target, &isScalar)) {
+        loadValue(&result);
+        if (evaluateStorageReference(&reference, &target, &result, &isScalar)) {
             if (isCalculation(result)) freeRegister(result.reg);
             freeToken(expression);
             freeStorageReference(&reference);
             return;
         }
-        loadValue(&result);
         if (isScalar) {
             emitStoreArg(reference.symbol, &result);
         }
@@ -1688,7 +1994,7 @@ static void outputCheckIostat(ControlInfoList *ciList) {
     if (ciList->iostat.symbol != NULL) {
         reg = allocateRegister();
         emitCopyRegister(reg, RESULT_REG);
-        if (evaluateStorageReference(&ciList->iostat, &target, &isScalar)) {
+        if (evaluateStorageReference(&ciList->iostat, &target, NULL, &isScalar)) {
             freeRegister(reg);
             return;
         }
@@ -1703,9 +2009,8 @@ static void outputCheckIostat(ControlInfoList *ciList) {
     }
     generateLabel(label);
     emitBranchOnFalse(reg, label);
-    emitPopReg(RESULT_REG);
-    emitAdjustSP(2);
-    emitBranch3Way(NO_REG, NULL, NULL, ciList->errLabel != NULL ? ciList->errLabel->details.label.label : "@_fioerr");
+    emitAdjustSP(3);
+    emitBranch(ciList->errLabel != NULL ? ciList->errLabel->details.label.label : "@_fioerr");
     emitLabel(label);
 }
 
@@ -1738,6 +2043,7 @@ static void outputInit(ControlInfoList *ciList) {
 }
 
 static char *parseActualArguments(char *s, int *frameSize) {
+    DataType *dt;
     Token *expression;
     int parmIdx;
     int pass;
@@ -1765,18 +2071,31 @@ static char *parseActualArguments(char *s, int *frameSize) {
                 return s;
             }
             if (evaluateExpression(expression, &result) == FALSE) {
+                dt = getDataType(&result);
                 if (isConstant(result)) {
-                    if (pass == 1) {
-                        *frameSize += 2;
+                    if (dt->type == BaseType_Character) {
+                        if (pass == 1) {
+                            *frameSize += 1;
+                        }
+                        else {
+                            emitLoadConst(&result);
+                            emitStoreStack(result.reg, parmIdx);
+                            freeRegister(result.reg);
+                        }
                     }
                     else {
-                        emitLoadConst(&result);
-                        emitStoreStack(result.reg, tempIdx);
-                        reg = emitLoadStackAddr(tempIdx);
-                        emitStoreStack(reg, parmIdx);
-                        freeRegister(reg);
-                        freeRegister(result.reg);
-                        tempIdx += 1;
+                        if (pass == 1) {
+                            *frameSize += 2;
+                        }
+                        else {
+                            emitLoadConst(&result);
+                            emitStoreStack(result.reg, tempIdx);
+                            reg = emitLoadStackAddr(tempIdx);
+                            emitStoreStack(reg, parmIdx);
+                            freeRegister(reg);
+                            freeRegister(result.reg);
+                            tempIdx += 1;
+                        }
                     }
                 }
                 else if (isLoadable(result)) {
@@ -1784,7 +2103,16 @@ static char *parseActualArguments(char *s, int *frameSize) {
                         *frameSize += 1;
                     }
                     else {
-                        emitLoadReference(&result);
+                        emitLoadReference(&result, NULL);
+                        emitStoreStack(result.reg, parmIdx);
+                        freeRegister(result.reg);
+                    }
+                }
+                else if (dt->type == BaseType_Character) {
+                    if (pass == 1) {
+                        *frameSize += 1;
+                    }
+                    else {
                         emitStoreStack(result.reg, parmIdx);
                         freeRegister(result.reg);
                     }
@@ -1885,14 +2213,149 @@ static char *parseCharConstraint(char *s, Token *token, DataType *dt) {
     return s;
 }
 
+static char *parseCloseInfoList(char *s, CloseInfoList **ciList) {
+    DataType *dt;
+    int ec;
+    Token *expression;
+    CloseInfoList *list;
+    Symbol *labelSym;
+    int len;
+    char lineLabel[16];
+    char keyword[16];
+    int n;
+    StorageReference reference;
+    char *start;
+    Token token;
+
+    list = (CloseInfoList *)allocate(sizeof(CloseInfoList));
+    *ciList = list;
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("Close info list syntax");
+        return NULL;
+    }
+    ec = errorCount;
+    expression = NULL;
+    s = eatWsp(s + 1);
+    start = s;
+    n = 0;
+    for (;;) {
+        s = getNextToken(s, &token, FALSE);
+        if (token.type == TokenType_Identifier && *s == '=') {
+            s = eatWsp(s + 1);
+            len = strlen(token.details.identifier.name);
+            if (len >= sizeof(keyword)) len = sizeof(keyword) - 1;
+            memcpy(keyword, token.details.identifier.name, len);
+            keyword[len] = '\0';
+            start = s;
+            s = parseExpression(s, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in close info list");
+                break;
+            }
+            if (strcasecmp(keyword, "UNIT") == 0) {
+                if (list->unit != NULL) {
+                    err("UNIT specified more than once");
+                    break;
+                }
+                list->unit = expression;
+            }
+            else if (strcasecmp(keyword, "STATUS") == 0) {
+                if (list->fileStatus != NULL) {
+                    err("STATUS specified more than once");
+                    break;
+                }
+                list->fileStatus = expression;
+            }
+            else if (strcasecmp(keyword, "ERR") == 0) {
+                if (list->errLabel != NULL) {
+                    err("ERR specified more than once");
+                    break;
+                }
+                else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
+                    sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
+                    labelSym = findLabel(lineLabel);
+                    if (labelSym != NULL) {
+                        if (labelSym->details.label.class != StmtClass_Executable
+                            && (labelSym->details.label.class != StmtClass_None || labelSym->details.label.forwardRef == FALSE)) {
+                            err("ERR= label does not reference executable statement");
+                            break;
+                        }
+                    }
+                    else {
+                        labelSym = addLabel(lineLabel);
+                        labelSym->details.label.class = StmtClass_None;
+                        labelSym->details.label.forwardRef = TRUE;
+                    }
+                    list->errLabel = labelSym;
+                    freeToken(expression);
+                }
+                else {
+                    err("Invalid statement label in ERR=");
+                    break;
+                }
+            }
+            else if (strcasecmp(keyword, "IOSTAT") == 0) {
+                if (list->iostat.symbol != NULL) {
+                    err("IOSTAT specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "IOSTAT", BaseType_Integer, &reference);
+                if (s == NULL) break;
+                list->iostat = reference;
+            }
+            else {
+                err("Invalid keyword: %s", token.details.identifier.name);
+                break;
+            }
+            n += 1;
+        }
+        else if (n == 0) {
+            s = parseExpression(start, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in close list");
+                break;
+            }
+            list->unit = expression;
+            n += 1;
+        }
+        else {
+            err("Close list syntax");
+            break;
+        }
+        expression = NULL;
+        s = eatWsp(s);
+        if (*s == ',') {
+            s += 1;
+        }
+        else if (*s == ')') {
+            break;
+        }
+        else {
+            err("Close list syntax");
+            break;
+        }
+    }
+    if (ec != errorCount) {
+        if (expression != NULL) freeToken(expression);
+        freeCloseInfoList(list);
+        return NULL;
+    }
+    else {
+        return s + 1;
+    }
+}
+
 static char *parseControlInfoList(char *s, ControlInfoList **ciList, int defaultUnit) {
     DataType *dt;
+    int ec;
     Token *expression;
     bool isListDirected;
     ControlInfoList *list;
     Symbol *labelSym;
     int len;
     char lineLabel[16];
+    int n;
     char keyword[16];
     StorageReference reference;
     char *start;
@@ -1906,9 +2369,12 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
         err("I/O control info list syntax");
         return NULL;
     }
+    ec = errorCount;
+    expression = NULL;
+    n = 0;
     for (;;) {
         s = eatWsp(s + 1);
-        if (*s == '*') {
+        if (*s == '*' && n < 2) {
             if (list->unit == NULL && isListDirected == FALSE) {
                 list->unit = createIntegerConstant(defaultUnit);
             }
@@ -1917,10 +2383,10 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
             }
             else {
                 err("I/O control info list syntax");
-                freeControlInfoList(list);
-                return NULL;
+                break;
             }
             s += 1;
+            n += 1;
         }
         else {
             start = s;
@@ -1937,8 +2403,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                     }
                     else {
                         err("I/O control info list syntax");
-                        freeControlInfoList(list);
-                        return NULL;
+                        break;
                     }
                     s += 1;
                 }
@@ -1951,43 +2416,35 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                     s = parseExpression(s, &expression);
                     if (expression == NULL) {
                         err("Invalid expression in I/O control list");
-                        freeControlInfoList(list);
-                        return NULL;
+                        break;
                     }
                     if (strcasecmp(keyword, "UNIT") == 0) {
                         if (list->unit != NULL) {
                             err("UNIT specified more than once");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
+                            break;
                         }
                         list->unit = expression;
                     }
                     else if (strcasecmp(keyword, "FMT") == 0) {
                         if (list->format != NULL || isListDirected) {
                             err("FMT specified more than once");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
+                            break;
                         }
                         list->format = expression;
                     }
                     else if (strcasecmp(keyword, "END") == 0) {
                         if (list->endLabel != NULL) {
                             err("END specified more than once");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
+                            break;
                         }
                         else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
                             sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
-                            freeToken(expression);
                             labelSym = findLabel(lineLabel);
                             if (labelSym != NULL) {
-                                if (labelSym->details.label.class != StmtClass_Executable) {
+                                if (labelSym->details.label.class != StmtClass_Executable
+                                    && (labelSym->details.label.class != StmtClass_None || labelSym->details.label.forwardRef == FALSE)) {
                                     err("END= label does not reference executable statement");
-                                    freeControlInfoList(list);
-                                    return NULL;
+                                    break;
                                 }
                             }
                             else {
@@ -1996,30 +2453,26 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                                 labelSym->details.label.forwardRef = TRUE;
                             }
                             list->endLabel = labelSym;
+                            freeToken(expression);
                         }
                         else {
                             err("Invalid statement label in END=");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
+                            break;
                         }
                     }
                     else if (strcasecmp(keyword, "ERR") == 0) {
                         if (list->errLabel != NULL) {
                             err("ERR specified more than once");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
+                            break;
                         }
                         else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
                             sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
-                            freeToken(expression);
                             labelSym = findLabel(lineLabel);
                             if (labelSym != NULL) {
-                                if (labelSym->details.label.class != StmtClass_Executable) {
+                                if (labelSym->details.label.class != StmtClass_Executable
+                                    && (labelSym->details.label.class != StmtClass_None || labelSym->details.label.forwardRef == FALSE)) {
                                     err("ERR= label does not reference executable statement");
-                                    freeControlInfoList(list);
-                                    return NULL;
+                                    break;
                                 }
                             }
                             else {
@@ -2028,65 +2481,41 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                                 labelSym->details.label.forwardRef = TRUE;
                             }
                             list->errLabel = labelSym;
+                            freeToken(expression);
                         }
                         else {
                             err("Invalid statement label in ERR=");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
+                            break;
                         }
+                    }
+                    else if (strcasecmp(keyword, "IOSTAT") == 0) {
+                        if (list->iostat.symbol != NULL) {
+                            err("IOSTAT specified more than once");
+                            break;
+                        }
+                        s = getStorageReference(start, "IOSTAT", BaseType_Integer, &reference);
+                        if (s == NULL) break;
+                        list->iostat = reference;
                     }
                     else if (strcasecmp(keyword, "REC") == 0) {
                         if (list->recordNumber != NULL) {
                             err("REC specified more than once");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
+                            break;
                         }
                         list->recordNumber = expression;
                     }
-                    else if (strcasecmp(keyword, "IOSTAT") == 0) {
-                        freeToken(expression);
-                        if (list->iostat.symbol != NULL) {
-                            err("IOSTAT specified more than once");
-                            freeControlInfoList(list);
-                            return NULL;
-                        }
-                        s = getNextToken(start, &token, FALSE);
-                        if (token.type == TokenType_Identifier) {
-                            s = parseStorageReference(s, &token, &reference);
-                            if (s == NULL) {
-                                freeControlInfoList(list);
-                                return NULL;
-                            }
-                            dt = getSymbolType(reference.symbol);
-                            if (dt->type != BaseType_Integer) {
-                                err("%s is not integer", reference.symbol->identifier);
-                                freeControlInfoList(list);
-                                return NULL;
-                            }
-                            list->iostat = reference;
-                        }
-                        else {
-                            err("IOSTAT= syntax");
-                            freeToken(expression);
-                            freeControlInfoList(list);
-                            return NULL;
-                        }
-                    }
                     else {
                         err("Invalid keyword: %s", token.details.identifier.name);
-                        freeControlInfoList(list);
-                        return NULL;
+                        break;
                     }
                 }
+                n += 1;
             }
-            else {
+            else if (n < 2) {
                 s = parseExpression(start, &expression);
                 if (expression == NULL) {
                     err("Invalid expression in I/O control list");
-                    freeControlInfoList(list);
-                    return NULL;
+                    break;
                 }
                 if (list->unit == NULL) {
                     list->unit = expression;
@@ -2096,26 +2525,33 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                 }
                 else {
                     err("I/O control info list syntax");
-                    freeToken(expression);
-                    freeControlInfoList(list);
-                    return NULL;
+                    break;
                 }
+                n += 1;
+            }
+            else {
+                err("I/O control info list syntax");
+                break;
             }
         }
+        expression = NULL;
         s = eatWsp(s);
-        if (*s == ',') {
-            s += 1;
-        }
-        else if (*s == ')') {
+        if (*s == ')') {
             break;
         }
-        else {
+        else if (*s != ',') {
             err("I/O control info list syntax");
-            freeControlInfoList(list);
-            return NULL;
+            break;
         }
     }
-    return s + 1;
+    if (ec != errorCount) {
+        if (expression != NULL) freeToken(expression);
+        freeControlInfoList(list);
+        return NULL;
+    }
+    else {
+        return s + 1;
+    }
 }
 
 static char *parseDataType(char *s, Token *token, DataType *dt) {
@@ -2177,6 +2613,26 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
     dt->rank = 0;
 
     for (;;) {
+        if (*s == '*') {
+            s = eatWsp(s + 1);
+            if (*s != ')') {
+                err("Invalid expression in dimension declaration");
+                break;
+            }
+            if (symbol->class != SymClass_Argument) {
+                err("Invalid assumed-size array declaration");
+                break;
+            }
+            if (dt->rank >= 7) {
+                err("Too many dimensions");
+                break;
+            }
+            dt->bounds[dt->rank].lower = 0;
+            dt->bounds[dt->rank].upper = 0;
+            dt->rank += 1;
+            s += 1;
+            break;
+        }
         s = parseExpression(s, &expression);
         if (expression == NULL) {
             err("Invalid expression in dimension declaration");
@@ -2242,6 +2698,41 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
     }
 
     return s;
+}
+
+static void parseDirective(char *s, int lineNo) {
+    char *start;
+    Token token;
+
+    start = s;
+    s = getNextToken(s + 6, &token, FALSE);
+    if (token.type == TokenType_Identifier) {
+        if (strcasecmp(token.details.identifier.name, "EJECT") == 0) {
+            list("1\n");
+            return;
+        }
+        else if (strcasecmp(token.details.identifier.name, "LIST") == 0) {
+            doList = TRUE;
+            return;
+        }
+        else if (strcasecmp(token.details.identifier.name, "NOLIST") == 0) {
+            doList = FALSE;
+            return;
+        }
+        else if (strcasecmp(token.details.identifier.name, "ALLOC") == 0 && *s == '=') {
+            s = getNextToken(s + 1, &token, FALSE);
+            if (token.type == TokenType_Identifier) {
+                if (strcasecmp(token.details.identifier.name, "STATIC") == 0) {
+                    doStaticLocals = TRUE;
+                }
+                else if (strcasecmp(token.details.identifier.name, "STACK") == 0
+                         || strcasecmp(token.details.identifier.name, "AUTO") == 0) {
+                    doStaticLocals = FALSE;
+                }
+            }
+        }
+    }
+    list("%6d: %s\n", lineNo, start);
 }
 
 static char *parseExpression(char *s, Token **expression) {
@@ -2573,12 +3064,12 @@ static void parseInputList(char *s, ControlInfoList *ciList) {
         }
         s = parseStorageReference(s, &token, &reference);
         if (s == NULL) return;
-        if (evaluateStorageReference(&reference, &target, &isScalar)) {
+        if (evaluateStorageReference(&reference, &target, NULL, &isScalar)) {
             freeStorageReference(&reference);
             return;
         }
         freeStorageReference(&reference);
-        emitLoadReference(&target);
+        emitLoadReference(&target, NULL);
         dt = getDataType(&target);
         if (dt->type != BaseType_Character) emitConvertToByteAddress(target.reg);
         emitStoreStack(target.reg, 1);
@@ -2625,6 +3116,273 @@ static void parseInputList(char *s, ControlInfoList *ciList) {
     }
 }
 
+static char *parseInquireInfoList(char *s, InquireInfoList **iiList) {
+    DataType *dt;
+    int ec;
+    Token *expression;
+    InquireInfoList *list;
+    Symbol *labelSym;
+    int len;
+    char lineLabel[16];
+    char keyword[16];
+    int n;
+    StorageReference reference;
+    char *start;
+    Token token;
+
+    list = (InquireInfoList *)allocate(sizeof(InquireInfoList));
+    *iiList = list;
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("Inquiry info list syntax");
+        return NULL;
+    }
+    ec = errorCount;
+    expression = NULL;
+    s = eatWsp(s + 1);
+    start = s;
+    n = 0;
+    for (;;) {
+        s = getNextToken(s, &token, FALSE);
+        if (token.type == TokenType_Identifier && *s == '=') {
+            s = eatWsp(s + 1);
+            len = strlen(token.details.identifier.name);
+            if (len >= sizeof(keyword)) len = sizeof(keyword) - 1;
+            memcpy(keyword, token.details.identifier.name, len);
+            keyword[len] = '\0';
+            start = s;
+            s = parseExpression(s, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in inquire info list");
+                break;
+            }
+            if (strcasecmp(keyword, "UNIT") == 0) {
+                if (list->unit != NULL) {
+                    err("UNIT specified more than once");
+                    break;
+                }
+                if (list->fileName != NULL) {
+                    err("Both UNIT and FILE specified");
+                    break;
+                }
+                list->unit = expression;
+            }
+            else if (strcasecmp(keyword, "FILE") == 0) {
+                if (list->fileName != NULL) {
+                    err("FILE specified more than once");
+                    break;
+                }
+                if (list->unit != NULL) {
+                    err("Both UNIT and FILE specified");
+                    break;
+                }
+                list->fileName = expression;
+            }
+            else if (strcasecmp(keyword, "ERR") == 0) {
+                if (list->errLabel != NULL) {
+                    err("ERR specified more than once");
+                    break;
+                }
+                else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
+                    sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
+                    labelSym = findLabel(lineLabel);
+                    if (labelSym != NULL) {
+                        if (labelSym->details.label.class != StmtClass_Executable
+                            && (labelSym->details.label.class != StmtClass_None || labelSym->details.label.forwardRef == FALSE)) {
+                            err("ERR= label does not reference executable statement");
+                            break;
+                        }
+                    }
+                    else {
+                        labelSym = addLabel(lineLabel);
+                        labelSym->details.label.class = StmtClass_None;
+                        labelSym->details.label.forwardRef = TRUE;
+                    }
+                    list->errLabel = labelSym;
+                    freeToken(expression);
+                }
+                else {
+                    err("Invalid statement label in ERR=");
+                    break;
+                }
+            }
+            else if (strcasecmp(keyword, "IOSTAT") == 0) {
+                if (list->iostat.symbol != NULL) {
+                    err("IOSTAT specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "IOSTAT", BaseType_Integer, &reference);
+                if (s == NULL) break;
+                list->iostat = reference;
+            }
+            else if (strcasecmp(keyword, "EXIST") == 0) {
+                if (list->existRef.symbol != NULL) {
+                    err("EXIST specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "EXIST", BaseType_Logical, &reference);
+                if (s == NULL) break;
+                list->existRef = reference;
+            }
+            else if (strcasecmp(keyword, "OPENED") == 0) {
+                if (list->openedRef.symbol != NULL) {
+                    err("OPENED specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "OPENED", BaseType_Logical, &reference);
+                if (s == NULL) break;
+                list->openedRef = reference;
+            }
+            else if (strcasecmp(keyword, "NAMED") == 0) {
+                if (list->namedRef.symbol != NULL) {
+                    err("NAMED specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "NAMED", BaseType_Logical, &reference);
+                if (s == NULL) break;
+                list->namedRef = reference;
+            }
+            else if (strcasecmp(keyword, "NUMBER") == 0) {
+                if (list->numberRef.symbol != NULL) {
+                    err("NUMBER specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "NUMBER", BaseType_Integer, &reference);
+                if (s == NULL) break;
+                list->numberRef = reference;
+            }
+            else if (strcasecmp(keyword, "RECL") == 0) {
+                if (list->reclRef.symbol != NULL) {
+                    err("RECL specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "RECL", BaseType_Integer, &reference);
+                if (s == NULL) break;
+                list->reclRef = reference;
+            }
+            else if (strcasecmp(keyword, "NEXTREC") == 0) {
+                if (list->nextRecRef.symbol != NULL) {
+                    err("NEXTREC specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "NEXTREC", BaseType_Integer, &reference);
+                if (s == NULL) break;
+                list->nextRecRef = reference;
+            }
+            else if (strcasecmp(keyword, "NAME") == 0) {
+                if (list->nameRef.symbol != NULL) {
+                    err("NAME specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "NAME", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->nameRef = reference;
+            }
+            else if (strcasecmp(keyword, "ACCESS") == 0) {
+                if (list->accessRef.symbol != NULL) {
+                    err("ACCESS specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "ACCESS", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->accessRef = reference;
+            }
+            else if (strcasecmp(keyword, "SEQUENTIAL") == 0) {
+                if (list->sequentialRef.symbol != NULL) {
+                    err("SEQUENTIAL specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "SEQUENTIAL", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->sequentialRef = reference;
+            }
+            else if (strcasecmp(keyword, "DIRECT") == 0) {
+                if (list->directRef.symbol != NULL) {
+                    err("DIRECT specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "DIRECT", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->directRef = reference;
+            }
+            else if (strcasecmp(keyword, "FORM") == 0) {
+                if (list->formRef.symbol != NULL) {
+                    err("FORM specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "FORM", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->formRef = reference;
+            }
+            else if (strcasecmp(keyword, "FORMATTED") == 0) {
+                if (list->formattedRef.symbol != NULL) {
+                    err("FORMATTED specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "FORMATTED", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->formattedRef = reference;
+            }
+            else if (strcasecmp(keyword, "UNFORMATTED") == 0) {
+                if (list->unformattedRef.symbol != NULL) {
+                    err("UNFORMATTED specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "UNFORMATTED", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->unformattedRef = reference;
+            }
+            else if (strcasecmp(keyword, "BLANK") == 0) {
+                if (list->blankRef.symbol != NULL) {
+                    err("BLANK specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "BLANK", BaseType_Character, &reference);
+                if (s == NULL) break;
+                list->blankRef = reference;
+            }
+            else {
+                err("Invalid keyword: %s", token.details.identifier.name);
+                break;
+            }
+            n += 1;
+        }
+        else if (n == 0) {
+            s = parseExpression(start, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in inquire list");
+                break;
+            }
+            list->unit = expression;
+            n += 1;
+        }
+        else {
+            err("Inquiry list syntax");
+            break;
+        }
+        expression = NULL;
+        s = eatWsp(s);
+        if (*s == ',') {
+            s += 1;
+        }
+        else if (*s == ')') {
+            break;
+        }
+        else {
+            err("Inquiry list syntax");
+            break;
+        }
+    }
+    if (ec != errorCount) {
+        if (expression != NULL) freeToken(expression);
+        freeInquireInfoList(list);
+        return NULL;
+    }
+    else {
+        return s + 1;
+    }
+}
+
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
     IfStackEntry *entry;
     char label[8];
@@ -2662,6 +3420,7 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
                 parseCALL(s);
                 break;
             case CLOSE:
+                parseCLOSE(s);
                 break;
             case CONTINUE:
                 break;
@@ -2677,7 +3436,11 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
             case IF:
                 parseIF(s, TRUE);
                 break;
+            case INQUIRE:
+                parseINQUIRE(s);
+                break;
             case OPEN:
+                parseOPEN(s);
                 break;
             case PAUSE:
                 break;
@@ -2713,6 +3476,174 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
     }
 }
 
+static char *parseOpenInfoList(char *s, OpenInfoList **oiList) {
+    DataType *dt;
+    int ec;
+    Token *expression;
+    OpenInfoList *list;
+    Symbol *labelSym;
+    int len;
+    char lineLabel[16];
+    char keyword[16];
+    int n;
+    StorageReference reference;
+    char *start;
+    Token token;
+
+    list = (OpenInfoList *)allocate(sizeof(OpenInfoList));
+    *oiList = list;
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("Open info list syntax");
+        return NULL;
+    }
+    ec = errorCount;
+    expression = NULL;
+    s = eatWsp(s + 1);
+    start = s;
+    n = 0;
+    for (;;) {
+        s = getNextToken(s, &token, FALSE);
+        if (token.type == TokenType_Identifier && *s == '=') {
+            s = eatWsp(s + 1);
+            len = strlen(token.details.identifier.name);
+            if (len >= sizeof(keyword)) len = sizeof(keyword) - 1;
+            memcpy(keyword, token.details.identifier.name, len);
+            keyword[len] = '\0';
+            start = s;
+            s = parseExpression(s, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in open info list");
+                break;
+            }
+            if (strcasecmp(keyword, "UNIT") == 0) {
+                if (list->unit != NULL) {
+                    err("UNIT specified more than once");
+                    break;
+                }
+                list->unit = expression;
+            }
+            else if (strcasecmp(keyword, "FILE") == 0) {
+                if (list->fileName != NULL) {
+                    err("FILE specified more than once");
+                    break;
+                }
+                list->fileName = expression;
+            }
+            else if (strcasecmp(keyword, "STATUS") == 0) {
+                if (list->fileStatus != NULL) {
+                    err("STATUS specified more than once");
+                    break;
+                }
+                list->fileStatus = expression;
+            }
+            else if (strcasecmp(keyword, "ERR") == 0) {
+                if (list->errLabel != NULL) {
+                    err("ERR specified more than once");
+                    break;
+                }
+                else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
+                    sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
+                    labelSym = findLabel(lineLabel);
+                    if (labelSym != NULL) {
+                        if (labelSym->details.label.class != StmtClass_Executable
+                            && (labelSym->details.label.class != StmtClass_None || labelSym->details.label.forwardRef == FALSE)) {
+                            err("ERR= label does not reference executable statement");
+                            break;
+                        }
+                    }
+                    else {
+                        labelSym = addLabel(lineLabel);
+                        labelSym->details.label.class = StmtClass_None;
+                        labelSym->details.label.forwardRef = TRUE;
+                    }
+                    list->errLabel = labelSym;
+                    freeToken(expression);
+                }
+                else {
+                    err("Invalid statement label in ERR=");
+                    break;
+                }
+            }
+            else if (strcasecmp(keyword, "IOSTAT") == 0) {
+                if (list->iostat.symbol != NULL) {
+                    err("IOSTAT specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "IOSTAT", BaseType_Integer, &reference);
+                if (s == NULL) break;
+                list->iostat = reference;
+            }
+            else if (strcasecmp(keyword, "FORM") == 0) {
+                if (list->formatting != NULL) {
+                    err("FORM specified more than once");
+                    break;
+                }
+                list->formatting = expression;
+            }
+            else if (strcasecmp(keyword, "ACCESS") == 0) {
+                if (list->access != NULL) {
+                    err("ACCESS specified more than once");
+                    break;
+                }
+                list->access = expression;
+            }
+            else if (strcasecmp(keyword, "BLANK") == 0) {
+                if (list->blankSpecifier != NULL) {
+                    err("BLANK specified more than once");
+                    break;
+                }
+                list->blankSpecifier = expression;
+            }
+            else if (strcasecmp(keyword, "RECL") == 0) {
+                if (list->recordLength != NULL) {
+                    err("RECL specified more than once");
+                    break;
+                }
+                list->recordLength = expression;
+            }
+            else {
+                err("Invalid keyword: %s", token.details.identifier.name);
+                break;
+            }
+            n += 1;
+        }
+        else if (n == 0) {
+            s = parseExpression(start, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in open list");
+                break;
+            }
+            list->unit = expression;
+            n += 1;
+        }
+        else {
+            err("Open list syntax");
+            break;
+        }
+        expression = NULL;
+        s = eatWsp(s);
+        if (*s == ',') {
+            s += 1;
+        }
+        else if (*s == ')') {
+            break;
+        }
+        else {
+            err("Open list syntax");
+            break;
+        }
+    }
+    if (ec != errorCount) {
+        if (expression != NULL) freeToken(expression);
+        freeOpenInfoList(list);
+        return NULL;
+    }
+    else {
+        return s + 1;
+    }
+}
+
 static void parseOutputList(char *s, ControlInfoList *ciList) {
     DataType *dt;
     Token *expression;
@@ -2742,7 +3673,7 @@ static void parseOutputList(char *s, ControlInfoList *ciList) {
                 }
             }
             else if (isLoadable(result)) {
-                emitLoadReference(&result);
+                emitLoadReference(&result, NULL);
                 if (!isChar) emitConvertToByteAddress(result.reg);
                 emitStoreStack(result.reg, 1);
             }
@@ -2821,10 +3752,6 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
     }
     switch (symbol->class) {
     case SymClass_Undefined:
-        if (*s == '(') {
-            err("Undefined array %s", name);
-            return NULL;
-        }
         defineLocalVariable(symbol);
         /* fall through */
     case SymClass_Auto:
@@ -2875,6 +3802,10 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
             s = parseStringRange(s, &strRange);
             if (s == NULL) return NULL;
         }
+        else {
+            err("Undefined array %s", name);
+            return NULL;
+        }
     }
     reference->symbol = symbol;
     reference->expressionList = expressionList;
@@ -2885,18 +3816,29 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
 
 static char *parseStringRange(char *s, StringRange **range) {
     Token *expression;
+    Token *one;
     StringRange *sr;
 
     *range = NULL;
     sr = (StringRange *)allocate(sizeof(StringRange));
     s = eatWsp(s + 1);
-    if (*s != ':' && *s != ')') {
+    if (*s == ':') {
+        one = (Token *)allocate(sizeof(Token));
+        one->type = TokenType_Constant;
+        one->details.constant.dt.type = BaseType_Integer;
+        one->details.constant.value.integer = 1;
+        sr->first = one;
+    }
+    else if (*s != ')') {
         s = parseExpression(s, &expression);
         if (s == NULL) {
             freeStringRange(sr);
             return NULL;
         }
         sr->first = copyToken(expression);
+        if (*s == ')') {
+            sr->last = copyToken(expression);
+        }
     }
     if (*s == ':') {
         s = eatWsp(s + 1);
@@ -2930,6 +3872,10 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             id = token.details.identifier.name;
             symbol = findSymbol(id);
             if (symbol == NULL) {
+                if (dt->type == BaseType_Character && dt->constraint == -1) {
+                    err("Invalid assumed-length CHARACTER declaration");
+                    break;
+                }
                 symbol = addSymbol(id, SymClass_Undefined);
                 symbol->details.variable.dt = *dt;
             }
@@ -2947,6 +3893,11 @@ static char *parseTypeDecl(char *s, DataType *dt) {
                 s = eatWsp(s);
                 if (*s == '*') {
                     s = parseCharConstraint(s, &token, &symbol->details.variable.dt);
+                    if (symbol->details.variable.dt.constraint == -1 && symbol->class != SymClass_Argument
+                        && symbol->class != SymClass_Function) {
+                        err("Invalid assumed-length CHARACTER declaration");
+                        break;
+                    }
                 }
             }
             symbol->details.variable.dt.rank = 0;
@@ -2959,7 +3910,7 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             }
             else if (*s == '(') {
                 s = parseDimDecl(s + 1, symbol);
-                symbol->class = doStaticLocals ? SymClass_Static : SymClass_Auto;
+                defineLocalVariable(symbol);
                 s = eatWsp(s);
                 if (*s == ',')
                     s = eatWsp(s + 1);
@@ -3088,10 +4039,369 @@ static void parseCALL(char *s) {
     emitAdjustSP(frameSize);
 }
 
+static void parseCLOSE(char *s) {
+    OperatorArgument arg;
+    DataType *dt;
+    int ec;
+    bool isScalar;
+    char label[8];
+    CloseInfoList *ciList;
+    Register reg;
+    OperatorArgument target;
+
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("Syntax");
+        return;
+    }
+    s = parseCloseInfoList(s, &ciList);
+    if (s == NULL) return;
+    emitAdjustSP(-2);
+    ec = errorCount;
+    for (;;) {
+        if (ciList->unit == NULL) {
+            err("UNIT missing");
+            break;
+        }
+        if (evaluateExpression(ciList->unit, &arg)) break;
+        loadValue(&arg);
+        dt = getDataType(&arg);
+        if (dt->type != BaseType_Integer) {
+            err("UNIT not integer");
+            freeRegister(arg.reg);
+            break;
+        }
+        emitStoreStack(arg.reg, 0);
+        freeRegister(arg.reg);
+
+        if (ciList->fileStatus == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(ciList->fileStatus, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Character) {
+                err("STATUS not character");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 1);
+        freeRegister(arg.reg);
+
+        break;
+    }
+    emitPrimCall("@_closeu");
+    emitPrimCall("@_iostat");
+    emitAdjustSP(2);
+    reg = RESULT_REG;
+    if (ciList->iostat.symbol != NULL) {
+        reg = allocateRegister();
+        emitCopyRegister(reg, RESULT_REG);
+        if (evaluateStorageReference(&ciList->iostat, &target, NULL, &isScalar)) {
+            freeRegister(reg);
+            return;
+        }
+        if (isScalar) {
+            emitStoreReg(ciList->iostat.symbol, reg);
+        }
+        else {
+            emitStoreRegByReference(&target, reg);
+            freeRegister(target.reg);
+        }
+        freeRegister(reg);
+    }
+    generateLabel(label);
+    emitBranchOnFalse(reg, label);
+    emitBranch(ciList->errLabel != NULL ? ciList->errLabel->details.label.label : "@_fioerr");
+    emitLabel(label);
+    freeCloseInfoList(ciList);
+    verifyEOS(s);
+}
+
 static void parseCOMMON(char *s) {
+    Symbol *commonBlock;
+    char *name;
+    int size;
+    Symbol *symbol;
+    Token token;
+
+    s = getNextChar(s);
+    if (*s == '/') {
+        s = getIdentifier(s + 1, &token);
+        if (token.type != TokenType_Identifier) {
+            err("Invalid common block name");
+            return;
+        }
+        else if (*s != '/') {
+            err("Missing '/' after common block name");
+            return;
+        }
+        s += 1;
+        name = token.details.identifier.name;
+    }
+    else {
+        name = "";
+    }
+    commonBlock = findCommonBlock(name);
+    if (commonBlock == NULL) {
+        commonBlock = addCommonBlock(name);
+        generateLabel(commonBlock->details.common.label);
+    }
+    for (;;) {
+        s = getNextToken(s, &token, FALSE);
+        if (token.type == TokenType_Identifier) {
+            name = token.details.identifier.name;
+            symbol = findSymbol(name);
+            if (symbol == NULL) {
+                symbol = addSymbol(name, SymClass_Undefined);
+            }
+            else if (symbol->class != SymClass_Undefined) {
+                err("Duplicate declaration of %s", name);
+                return;
+            }
+            symbol->class = SymClass_Global;
+            symbol->details.variable.staticBlock = commonBlock;
+            defineType(symbol);
+            symbol->details.variable.offset = commonBlock->details.common.offset;
+            symbol->details.variable.dt.rank = 0;
+            s = eatWsp(s);
+            if (*s == '(') {
+                s = parseDimDecl(s + 1, symbol);
+                s = eatWsp(s);
+            }
+            size = calculateSize(symbol);
+            commonBlock->details.common.offset += size;
+            if (commonBlock->details.common.offset > commonBlock->details.common.limit) commonBlock->details.common.limit = commonBlock->details.common.offset;
+            if (*s == '\0') {
+                break;
+            }
+            else if (*s == ',') {
+                s = eatWsp(s + 1);
+            }
+            else {
+                err("Invalid COMMON variable declaration");
+                return;
+            }
+        }
+        else {
+            err("Invalid COMMON variable declaration");
+            return;
+        }
+    }
 }
 
 static void parseDATA(char *s) {
+    ConstantListItem *cListItem;
+    ConstantListItem *currentCList;
+    DataInitializerItem *currentDList;
+    DataInitializerItem *dListItem;
+    DataType *dt;
+    int ec;
+    int rank;
+    StorageReference ref;
+    int repeatCount;
+    OperatorArgument result;
+    char *start;
+    Symbol *symbol;
+    Token token;
+    int totalConstantCount;
+    int totalElementCount;
+
+    ec = errorCount;
+    for (;;) {
+        /*
+         *  Parse the next list of variable references
+         */
+        currentDList = NULL;
+        currentCList = NULL;
+        totalElementCount = 0;
+        for (;;) {
+            s = getNextToken(s, &token, FALSE);
+            if (token.type != TokenType_Identifier) {
+                err("Syntax");
+                break;
+            }
+            s = parseStorageReference(s, &token, &ref);
+            if (s == NULL) {
+                freeStaticInitializers();
+                return;
+            }
+            dListItem = (DataInitializerItem *)allocate(sizeof(DataInitializerItem));
+            if (firstDListItem == NULL) {
+                firstDListItem = dListItem;
+            }
+            else {
+                lastDListItem->next = dListItem;
+            }
+            lastDListItem = dListItem;
+            if (currentDList == NULL) currentDList = dListItem;
+            symbol = ref.symbol;
+            if (symbol->class == SymClass_Static) {
+                dListItem->blockName = "DATA";
+                dListItem->blockType = "DATA";
+                memcpy(dListItem->blockLabel, symbol->details.variable.staticBlock->details.progUnit.staticDataLabel, 8);
+            }
+            else if (symbol->class == SymClass_Global) {
+                dListItem->blockName = symbol->details.variable.staticBlock->identifier;
+                dListItem->blockType = "COMMON";
+                memcpy(dListItem->blockLabel, symbol->details.variable.staticBlock->details.common.label, 8);
+            }
+            else {
+                err("%s is not static or common", symbol->identifier);
+                freeStorageReference(&ref);
+                break;
+            }
+            dt = getSymbolType(symbol);
+            dListItem->symbol = symbol;
+            dListItem->type = dt->type;
+            dListItem->blockOffset = symbol->details.variable.offset;
+            rank = symbol->details.variable.dt.rank;
+            if (rank > 0) {
+                if (ref.expressionList != NULL) { // array element reference
+                    if (evaluateArrayRef(symbol, ref.expressionList, &result)) {
+                        freeStorageReference(&ref);
+                        break;
+                    }
+                    if (!isConstant(result)) {
+                        err("Non-constant array subscript");
+                        break;
+                    }
+                    else if (result.details.constant.dt.type != BaseType_Integer) {
+                        err("Non-integer array subscript");
+                        break;
+                    }
+                    dListItem->elementOffset = result.details.constant.value.integer;
+                    dListItem->elementCount = 1;
+                }
+                else { // whole array reference
+                    dListItem->elementOffset = 0;
+                    dListItem->elementCount = countArrayElements(symbol);
+                }
+            }
+            else {
+                dListItem->elementOffset = 0;
+                dListItem->elementCount = 1;
+            }
+            if (dt->type == BaseType_Character) {
+                dListItem->constraint = dt->constraint;
+                if (ref.strRange != NULL) {
+                    if (evaluateExpression(ref.strRange->first, &result)) {
+                        freeStorageReference(&ref);
+                        break;
+                    }
+                    if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
+                        dListItem->charOffset = result.details.constant.value.integer - 1;
+                    }
+                    else {
+                        err("Invalid character index");
+                        freeStorageReference(&ref);
+                        break;
+                    }
+                    if (ref.strRange->last != NULL) {
+                        if (evaluateExpression(ref.strRange->last, &result)) {
+                            freeStorageReference(&ref);
+                            break;
+                        }
+                        if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
+                            dListItem->charLength = result.details.constant.value.integer - dListItem->charOffset;
+                        }
+                        else {
+                            err("Invalid character index");
+                            freeStorageReference(&ref);
+                            break;
+                        }
+                    }
+                    else {
+                        dListItem->charLength = dt->constraint - dListItem->charOffset;
+                    }
+                }
+                else {
+                    dListItem->charOffset = 0;
+                    dListItem->charLength = dt->constraint;
+                }
+            }
+            freeStorageReference(&ref);
+            totalElementCount += dListItem->elementCount;
+            s = eatWsp(s);
+            if (*s != ',') break;
+            s += 1;
+        }
+        if (*s != '/') {
+            err("Syntax");
+        }
+        if (errorCount > ec) break;
+        /*
+         *  Parse the next list of constants
+         */
+        totalConstantCount = 0;
+        for (;;) {
+            start = s + 1;
+            s = getNextToken(start, &token, FALSE);
+            repeatCount = 1;
+            if (*s == '*') { // repeat count specified
+                start = s + 1;
+                if (evaluateExpression(&token, &result)) break;
+                if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
+                    repeatCount = result.details.constant.value.integer;
+                }
+                else {
+                    err("Invalid repeat count");
+                    break;
+                }
+            }
+            s = getNextToken(start, &token, FALSE);
+            if (evaluateExpression(&token, &result)) break;
+            if (!isConstant(result)) {
+                err("DATA value is not a constant");
+                break;
+            }
+            cListItem = (ConstantListItem *)allocate(sizeof(ConstantListItem));
+            cListItem->repeatCount = repeatCount;
+            totalConstantCount += repeatCount;
+            cListItem->details = result.details.constant;
+            if (firstCListItem == NULL) {
+                firstCListItem = cListItem;
+            }
+            else {
+                lastCListItem->next = cListItem;
+            }
+            lastCListItem = cListItem;
+            if (currentCList == NULL) currentCList = cListItem;
+            s = eatWsp(s);
+            if (*s == '/') {
+                s += 1;
+                break;
+            }
+            else if (*s != ',') {
+                err("Syntax");
+                break;
+            }
+        }
+        if (totalElementCount > totalConstantCount) {
+            err("Too few data values");
+        }
+        else if (totalElementCount < totalConstantCount) {
+            err("Too many data values");
+        }
+        else if (validateDataInitializers(currentDList, currentCList) == FALSE) {
+            break;
+        }
+        if (errorCount > ec) break;
+        s = eatWsp(s);
+        if (*s == '\0') {
+            break;
+        }
+        else if (*s == ',') {
+            s += 1;
+        }
+        else {
+            err("Syntax");
+            break;
+        }
+    }
+    if (errorCount > ec) freeStaticInitializers();
 }
 
 static void parseDIMENSION(char *s) {
@@ -3101,66 +4411,70 @@ static void parseDIMENSION(char *s) {
 
     for (;;) {
         s = getNextToken(s, &token, FALSE);
-        if (token.type == TokenType_Identifier) {
-            id = token.details.identifier.name;
-            if (*s != '(') {
-                err("No dimensions specified for %s", id);
-                return;
-            }
-            symbol = findSymbol(id);
-            if (symbol == NULL) {
-                symbol = addSymbol(id, SymClass_Undefined);
-            }
-            switch (symbol->class) {
-            case SymClass_Undefined:
-                symbol->class = doStaticLocals ? SymClass_Static : SymClass_Auto;
-                defineType(symbol);
-                /* fall through */
-            case SymClass_Auto:
-            case SymClass_Static:
-            case SymClass_Global:
-            case SymClass_Pointee:
-                if (symbol->details.variable.dt.rank != 0) {
-                    err("Duplicate declaration of %s", id);
-                    return;
-                }
-                break;
-            case SymClass_Argument:
-                if (symbol->details.variable.dt.type == BaseType_Undefined) {
-                    defineType(symbol);
-                }
-                else if (symbol->details.variable.dt.rank != 0) {
-                    err("Duplicate declaration of %s", id);
-                    return;
-                }
-                break;
-            case SymClass_Function:
-                if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
-                    defineType(symbol);
-                }
-                else if (symbol->details.progUnit.dt.rank != 0) {
-                    err("Duplicate declaration of %s", id);
-                    return;
-                }
-                break;
-            default:
-                err("Invalid array declaration");
-                return;
-            }
-            s = parseDimDecl(s + 1, symbol);
-            s = eatWsp(s);
-            if (*s == ',')
-                s = eatWsp(s + 1);
-            else if (*s == '\0')
-                break;
-            else {
-                err("Invalid array declaration");
-                break;
-            }
-        }
-        else {
+        if (token.type != TokenType_Identifier) {
             err("Invalid array declaration");
+            return;
+        }
+        id = token.details.identifier.name;
+        if (*s != '(') {
+            err("No dimensions specified for %s", id);
+            return;
+        }
+        symbol = findSymbol(id);
+        if (symbol == NULL) {
+            symbol = addSymbol(id, SymClass_Undefined);
+        }
+        switch (symbol->class) {
+        case SymClass_Undefined:
+            if (doStaticLocals) {
+                symbol->class = SymClass_Static;
+                symbol->details.variable.staticBlock = progUnitSym;
+            }
+            else {
+                symbol->class = SymClass_Auto;
+            }
+            defineType(symbol);
+            /* fall through */
+        case SymClass_Auto:
+        case SymClass_Static:
+        case SymClass_Global:
+        case SymClass_Pointee:
+            if (symbol->details.variable.dt.rank != 0) {
+                err("Duplicate declaration of %s", id);
+                return;
+            }
             break;
+        case SymClass_Argument:
+            if (symbol->details.variable.dt.type == BaseType_Undefined) {
+                defineType(symbol);
+            }
+            else if (symbol->details.variable.dt.rank != 0) {
+                err("Duplicate declaration of %s", id);
+                return;
+            }
+            break;
+        case SymClass_Function:
+            if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
+                defineType(symbol);
+            }
+            else if (symbol->details.progUnit.dt.rank != 0) {
+                err("Duplicate declaration of %s", id);
+                return;
+            }
+            break;
+        default:
+            err("Invalid array declaration");
+            return;
+        }
+        s = parseDimDecl(s + 1, symbol);
+        s = eatWsp(s);
+        if (*s == ',')
+            s = eatWsp(s + 1);
+        else if (*s == '\0')
+            break;
+        else {
+            err("Syntax");
+            return;
         }
     }
 }
@@ -3783,6 +5097,106 @@ static void parseIMPLICITNONE(char *s) {
 static void parseINCLUDE(char *s) {
 }
 
+static void parseINQUIRE(char *s) {
+    OperatorArgument arg;
+    DataType *dt;
+    int ec;
+    bool isScalar;
+    char label[8];
+    InquireInfoList *iiList;
+    Register reg;
+    OperatorArgument target;
+
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("Syntax");
+        return;
+    }
+    s = parseInquireInfoList(s, &iiList);
+    if (s == NULL) return;
+    if (iiList->unit == NULL && iiList->fileName == NULL) {
+        err("Neither UNIT nor FILE specified");
+        return;
+    }
+    emitAdjustSP(-16);
+    ec = errorCount;
+    for (;;) {
+        if (iiList->unit == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(iiList->unit, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Integer) {
+                err("UNIT not integer");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 0);
+        freeRegister(arg.reg);
+
+        if (iiList->fileName == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(iiList->fileName, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Character) {
+                err("FILE not character");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 1);
+        freeRegister(arg.reg);
+
+        if (evaluateInquireReference(&iiList->existRef, 2)) break;
+        if (evaluateInquireReference(&iiList->openedRef, 3)) break;
+        if (evaluateInquireReference(&iiList->numberRef, 4)) break;
+        if (evaluateInquireReference(&iiList->namedRef, 5)) break;
+        if (evaluateInquireReference(&iiList->nameRef, 6)) break;
+        if (evaluateInquireReference(&iiList->accessRef, 7)) break;
+        if (evaluateInquireReference(&iiList->sequentialRef, 8)) break;
+        if (evaluateInquireReference(&iiList->directRef, 9)) break;
+        if (evaluateInquireReference(&iiList->formattedRef, 10)) break;
+        if (evaluateInquireReference(&iiList->unformattedRef, 11)) break;
+        if (evaluateInquireReference(&iiList->formRef, 12)) break;
+        if (evaluateInquireReference(&iiList->blankRef, 13)) break;
+        if (evaluateInquireReference(&iiList->reclRef, 14)) break;
+        if (evaluateInquireReference(&iiList->nextRecRef, 15)) break;
+
+        break;
+    }
+    emitPrimCall("@_queryu"); // returns IOSTAT value
+    emitAdjustSP(16);
+    reg = RESULT_REG;
+    if (iiList->iostat.symbol != NULL) {
+        reg = allocateRegister();
+        emitCopyRegister(reg, RESULT_REG);
+        if (evaluateStorageReference(&iiList->iostat, &target, NULL, &isScalar)) {
+            freeRegister(reg);
+            return;
+        }
+        if (isScalar) {
+            emitStoreReg(iiList->iostat.symbol, reg);
+        }
+        else {
+            emitStoreRegByReference(&target, reg);
+            freeRegister(target.reg);
+        }
+        freeRegister(reg);
+    }
+    generateLabel(label);
+    emitBranchOnFalse(reg, label);
+    emitBranch(iiList->errLabel != NULL ? iiList->errLabel->details.label.label : "@_fioerr");
+    emitLabel(label);
+    freeInquireInfoList(iiList);
+    verifyEOS(s);
+}
+
 static void parseINTRINSIC(char *s) {
 }
 
@@ -3881,6 +5295,167 @@ static void parsePARAMETER(char *s) {
             return;
         }
     }
+    verifyEOS(s);
+}
+
+static void parseOPEN(char *s) {
+    OperatorArgument arg;
+    DataType *dt;
+    int ec;
+    bool isScalar;
+    char label[8];
+    OpenInfoList *oiList;
+    Register reg;
+    OperatorArgument target;
+
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("Syntax");
+        return;
+    }
+    s = parseOpenInfoList(s, &oiList);
+    if (s == NULL) return;
+    emitAdjustSP(-7);
+    ec = errorCount;
+    for (;;) {
+        if (oiList->fileName == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(oiList->fileName, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Character) {
+                err("FILE not character");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 0);
+        freeRegister(arg.reg);
+
+        if (oiList->unit == NULL) {
+            err("UNIT missing");
+            break;
+        }
+        if (evaluateExpression(oiList->unit, &arg)) break;
+        loadValue(&arg);
+        dt = getDataType(&arg);
+        if (dt->type != BaseType_Integer) {
+            err("UNIT not integer");
+            freeRegister(arg.reg);
+            break;
+        }
+        emitStoreStack(arg.reg, 1);
+        freeRegister(arg.reg);
+
+        if (oiList->fileStatus == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(oiList->fileStatus, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Character) {
+                err("STATUS not character");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 2);
+        freeRegister(arg.reg);
+
+        if (oiList->access == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(oiList->access, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Character) {
+                err("ACCESS not character");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 3);
+        freeRegister(arg.reg);
+
+        if (oiList->formatting == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(oiList->formatting, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Character) {
+                err("FORM not character");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 4);
+        freeRegister(arg.reg);
+
+        if (oiList->blankSpecifier == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(oiList->blankSpecifier, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Character) {
+                err("BLANK not character");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 5);
+        freeRegister(arg.reg);
+
+        if (oiList->recordLength == NULL) {
+            emitLoadNullPtr(&arg);
+        }
+        else {
+            if (evaluateExpression(oiList->recordLength, &arg)) break;
+            loadValue(&arg);
+            dt = getDataType(&arg);
+            if (dt->type != BaseType_Integer) {
+                err("RECL not integer");
+                freeRegister(arg.reg);
+                break;
+            }
+        }
+        emitStoreStack(arg.reg, 6);
+        freeRegister(arg.reg);
+
+        break;
+    }
+    emitPrimCall("@_openu");
+    emitPrimCall("@_iostat");
+    emitAdjustSP(7);
+    reg = RESULT_REG;
+    if (oiList->iostat.symbol != NULL) {
+        reg = allocateRegister();
+        emitCopyRegister(reg, RESULT_REG);
+        if (evaluateStorageReference(&oiList->iostat, &target, NULL, &isScalar)) {
+            freeRegister(reg);
+            return;
+        }
+        if (isScalar) {
+            emitStoreReg(oiList->iostat.symbol, reg);
+        }
+        else {
+            emitStoreRegByReference(&target, reg);
+            freeRegister(target.reg);
+        }
+        freeRegister(reg);
+    }
+    generateLabel(label);
+    emitBranchOnFalse(reg, label);
+    emitBranch(oiList->errLabel != NULL ? oiList->errLabel->details.label.label : "@_fioerr");
+    emitLabel(label);
+    freeOpenInfoList(oiList);
     verifyEOS(s);
 }
 
@@ -4041,15 +5616,17 @@ static void presetImplicit(void) {
 }
 
 static void presetProgUnit(void) {
+    doStaticLocals = doStaticLocalsDefault;
     list("1\n");
-    progUnitSym  = NULL;
-    state        = STATE_PROG_UNIT;
-    doStackPtr   = 0;
-    ifStackPtr   = 0;
-    errorCount   = 0;
-    warningCount = 0;
-    autoOffset   = 0;
-    staticOffset = 0;
+    progUnitSym    = NULL;
+    state          = STATE_PROG_UNIT;
+    doStackPtr     = 0;
+    ifStackPtr     = 0;
+    errorCount     = 0;
+    warningCount   = 0;
+    autoOffset     = 0;
+    staticOffset   = 0;
+    resetCommonBlocks();
 }
 
 static void pushArg(OperatorArgument *arg) {
@@ -4072,7 +5649,7 @@ static void pushOp(OperatorDetails *op) {
     }
 }
 
-static char *readLine(int *lineLength) {
+static char *readLine(void) {
     int c;
     int len;
     char *lp;
@@ -4097,8 +5674,97 @@ static char *readLine(int *lineLength) {
     while (len > 0 && lineBuf[len - 1] == ' ') len -= 1; // trim trailing blanks
     if (len < 7) len = 7;
     lineBuf[len] = '\0';
-    *lineLength = len;
     return lineBuf;
+}
+
+static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList) {
+    ConstantListItem *cListItem;
+    DataInitializerItem *dListItem;
+    int elementCount;
+    int repeatCount;
+
+    dListItem = dList;
+    cListItem = cList;
+    repeatCount = cListItem->repeatCount;
+    while (dListItem != NULL) {
+        for (elementCount = dListItem->elementCount; elementCount > 0; elementCount--) {
+            if (cListItem->details.dt.type != dListItem->type) {
+                switch (dListItem->type) {
+                case BaseType_Character:
+                    err("Data value for %s is not CHARACTER", dListItem->symbol->identifier);
+                    return FALSE;
+                case BaseType_Logical:
+                    switch (cListItem->details.dt.type) {
+                    case BaseType_Logical:
+                        break;
+                    case BaseType_Integer:
+                        cListItem->details.dt.type = BaseType_Logical;
+                        cListItem->details.value.logical = (cListItem->details.value.integer == 0) ? 0 : ~(u64)0;
+                        break;
+                    case BaseType_Real:
+                    case BaseType_Double:
+                    case BaseType_Character:
+                    case BaseType_Complex:
+                    default:
+                        err("Data value for %s cannot be coerced to LOGICAL", dListItem->symbol->identifier);
+                        return FALSE;
+                    }
+                    break;
+                case BaseType_Integer:
+                    switch (cListItem->details.dt.type) {
+                    case BaseType_Logical:
+                        cListItem->details.dt.type = BaseType_Integer;
+                        break;
+                    case BaseType_Integer:
+                        break;
+                    case BaseType_Real:
+                    case BaseType_Double:
+                        cListItem->details.dt.type = BaseType_Integer;
+                        cListItem->details.value.integer = (long)cListItem->details.value.real;
+                        break;
+                    case BaseType_Character:
+                    case BaseType_Complex:
+                    default:
+                        err("Data value for %s cannot be coerced to INTEGER", dListItem->symbol->identifier);
+                        return FALSE;
+                    }
+                    break;
+                case BaseType_Real:
+                case BaseType_Double:
+                    switch (cListItem->details.dt.type) {
+                    case BaseType_Logical:
+                        cListItem->details.dt.type = dListItem->type;
+                        cListItem->details.value.real = (double)cListItem->details.value.logical;
+                        break;
+                    case BaseType_Integer:
+                        cListItem->details.dt.type = dListItem->type;
+                        cListItem->details.value.real = (double)cListItem->details.value.integer;
+                        break;
+                    case BaseType_Real:
+                    case BaseType_Double:
+                        cListItem->details.dt.type = dListItem->type;
+                        break;
+                    case BaseType_Character:
+                    case BaseType_Complex:
+                    default:
+                        err("Data value for %s cannot be coerced to %s", dListItem->symbol->identifier, baseTypeToStr(dListItem->type));
+                        return FALSE;
+                    }
+                    break;
+                case BaseType_Complex:
+                default:
+                    break;
+                }
+            }
+            repeatCount -= 1;
+            if (repeatCount < 1) {
+                cListItem = cListItem->next;
+                if (cListItem != NULL) repeatCount = cListItem->repeatCount;
+            }
+        }
+        dListItem = dListItem->next;
+    }
+    return TRUE;
 }
 
 static void verifyEOS(char *s) {
@@ -4125,14 +5791,14 @@ static void warn(char *format, ...) {
 static char *baseTypeToStr(BaseType type) {
     switch (type) {
     case BaseType_Undefined: return "Undefined";
-    case BaseType_Character: return "Character";
-    case BaseType_Logical:   return "Logical";
-    case BaseType_Integer:   return "Integer";
-    case BaseType_Real:      return "Real";
-    case BaseType_Double:    return "Double";
-    case BaseType_Complex:   return "Complex";
+    case BaseType_Character: return "CHARACTER";
+    case BaseType_Logical:   return "LOGICAL";
+    case BaseType_Integer:   return "INTEGER";
+    case BaseType_Real:      return "REAL";
+    case BaseType_Double:    return "DOUBLE";
+    case BaseType_Complex:   return "COMPLEX";
     case BaseType_Label:     return "Label";
-    case BaseType_Pointer:   return "Pointer";
+    case BaseType_Pointer:   return "POINTER";
     default:                 return "unknown";
     }
 }

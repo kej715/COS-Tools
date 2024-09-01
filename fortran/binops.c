@@ -24,6 +24,7 @@
 **--------------------------------------------------------------------------
 */
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,9 +53,24 @@ void cstDivReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstExpInt(OperatorArgument *left, OperatorArgument *right) {
+    i64 leftInt;
+    i64 rightInt;
+    i64 res;
+
+    leftInt = left->details.constant.value.integer;
+    rightInt = right->details.constant.value.integer;
+    if (rightInt > 1 && rightInt < 5) {
+        res = leftInt;
+        while (rightInt-- > 1) res *= leftInt;
+    }
+    else {
+        res = (i64)pow((double)leftInt, (double)rightInt);
+    }
+    right->details.constant.value.integer = res;
 }
 
 void cstExpReal(OperatorArgument *left, OperatorArgument *right) {
+    right->details.constant.value.real = pow(left->details.constant.value.real, right->details.constant.value.real);
 }
 
 void cstMulInt(OperatorArgument *left, OperatorArgument *right) {
@@ -252,7 +268,7 @@ void (*genBinOps[(OP_CAT-OP_ADD)+1][BaseType_Pointer+1])(OperatorArgument *left,
 /*             Undefined   Character    Logical      Integer      Real         Double      Complex     Pointer  */
 /* OP_ADD  */ {NULL,       NULL,        NULL,        emitAddInt,  emitAddReal, emitAddReal,NULL,       NULL      },
 /* OP_DIV  */ {NULL,       NULL,        NULL,        emitDivInt,  emitDivReal, emitDivReal,NULL,       NULL      },
-/* OP_EXP  */ {NULL,       NULL,        NULL,        NULL,        NULL,        NULL,       NULL,       NULL      },
+/* OP_EXP  */ {NULL,       NULL,        NULL,        emitExpInt,  emitExpReal, emitExpReal,NULL,       NULL      },
 /* OP_MUL  */ {NULL,       NULL,        NULL,        emitMulInt,  emitMulReal, emitMulReal,NULL,       NULL      },
 /* OP_SUB  */ {NULL,       NULL,        NULL,        emitSubInt,  emitSubReal, emitSubReal,NULL,       NULL      },
 /* OP_AND  */ {NULL,       NULL,        emitAndInt,  emitAndInt,  NULL,        NULL,       NULL,       NULL      },

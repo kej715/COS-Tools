@@ -142,12 +142,6 @@ typedef enum statementClass {
     StmtClass_Do_Term
 } StatementClass;
 
-typedef struct keyword {
-    char *name;
-    TokenId id;
-    StatementClass class;
-} Keyword;
-
 typedef enum argumentClass {
     ArgClass_Undefined = 0,
     ArgClass_Constant,
@@ -197,6 +191,12 @@ typedef enum tokenType {
     TokenType_Invalid
 } TokenType;
 
+typedef struct keyword {
+    char *name;
+    TokenId id;
+    StatementClass class;
+} Keyword;
+
 typedef struct bounds {
     int lower;
     int upper;
@@ -237,6 +237,12 @@ typedef struct constantDetails {
     DataType dt;
     DataValue value;
 } ConstantDetails;
+
+typedef struct constantListItem {
+    struct constantListItem *next;
+    int repeatCount;
+    ConstantDetails details;
+} ConstantListItem;
 
 typedef struct identifierDetails {
     char *name;
@@ -279,6 +285,22 @@ typedef struct stringRange {
     Token *last;
 } StringRange;
 
+typedef struct commonBlockDetails {
+    char label[8];
+    int offset;
+    int limit;
+} CommonBlockDetails;
+
+#define MAX_INTRINSIC_ARGS 2
+
+typedef struct intrinsicDetails {
+    bool isGeneric;
+    char *externName;
+    BaseType resultType;
+    int argc;
+    BaseType argumentTypes[MAX_INTRINSIC_ARGS];
+} IntrinsicDetails;
+
 typedef struct labelDetails {
     StatementClass class;
     bool forwardRef;
@@ -300,9 +322,12 @@ typedef struct progUnitDetails {
 typedef struct variableDetails {
     DataType dt;
     int offset;
+    struct symbol *staticBlock;
 } VariableDetails;
 
 typedef union symbolDetails {
+    CommonBlockDetails common;
+    IntrinsicDetails intrinsic;
     LabelDetails label;
     ConstantDetails param;
     PointeeDetails pointee;
@@ -351,6 +376,20 @@ typedef struct operatorArgument {
     Register reg;
 } OperatorArgument;
 
+typedef enum fileStatus {
+    FileStatus_Unknown = 0,
+    FileStatus_Old,
+    FileStatus_New,
+    FileStatus_Scratch
+} FileStatus;
+
+typedef struct closeInfoList {
+    Token *unit;
+    Token *fileStatus;
+    StorageReference iostat;
+    Symbol *errLabel;
+} CloseInfoList;
+
 typedef struct controlInfoList {
     Token *unit;
     BaseType unitType;
@@ -360,6 +399,54 @@ typedef struct controlInfoList {
     Token *recordNumber;
     StorageReference iostat;
 } ControlInfoList;
+
+typedef struct inquireInfoList {
+    Token *unit;
+    Token *fileName;
+    StorageReference existRef;
+    StorageReference openedRef;
+    StorageReference numberRef;
+    StorageReference namedRef;
+    StorageReference nameRef;
+    StorageReference accessRef;
+    StorageReference sequentialRef;
+    StorageReference directRef;
+    StorageReference formattedRef;
+    StorageReference unformattedRef;
+    StorageReference formRef;
+    StorageReference blankRef;
+    StorageReference reclRef;
+    StorageReference nextRecRef;
+    StorageReference iostat;
+    Symbol *errLabel;
+} InquireInfoList;
+
+typedef struct openInfoList {
+    Token *unit;
+    Token *fileName;
+    Token *fileStatus;
+    Token *formatting;
+    Token *access;
+    Token *blankSpecifier;
+    Token *recordLength;
+    StorageReference iostat;
+    Symbol *errLabel;
+} OpenInfoList;
+
+typedef struct dataInitializerItem {
+    struct dataInitializerItem *next;
+    Symbol *symbol;
+    BaseType type;
+    int constraint;
+    char *blockName;
+    char *blockType;
+    char blockLabel[8];
+    int blockOffset;
+    int elementOffset;
+    int elementCount;
+    int charOffset;
+    int charLength;
+} DataInitializerItem;
 
 #define isCalculation(arg) ((arg).class == ArgClass_Calculation)
 #define isConstant(arg) ((arg).class == ArgClass_Constant)
