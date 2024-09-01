@@ -45,9 +45,13 @@ OBJS = binops.o   \
        symbols.o
 
 all: kftc
+	$(MAKE) -C runtime cos ; \
+	$(MAKE) -C intrinsic cos
 
 cos:
-	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE)
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) ; \
+	$(MAKE) -C runtime cos ; \
+	$(MAKE) -C intrinsic cos
 
 kftc: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
@@ -56,7 +60,9 @@ kftc.abs:
 	CC=ack $(MAKE) kftc
 
 clean:
-	rm -f *.o *.abs kftc
+	rm -f *.o *.abs kftc ; \
+	$(MAKE) -C runtime clean ; \
+	$(MAKE) -C intrinsic clean
 
 install: kftc
 	install -b -o root -m 755 kftc $(PREFIX)/bin
