@@ -27,7 +27,7 @@ CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
 AR      ?= ar
 ARFLAGS ?= -r
 PREFIX = /usr/local
-BINDIR = /usr/local/bin
+BINDIR = ../..
 COSDIR = ../../cos-interface
 COSOBJS = $(PREFIX)/share/ack/cos/boot.o $(PREFIX)/share/ack/cos/c-ansi.o
 
@@ -37,18 +37,21 @@ HDRS = const.h \
 
 OBJS = catstr.o cmpstr.o cpystr.o fio.o fmt.o fmt2.o getstr.o units.o
 
-all: libio.a
+all: libio.lib librt.lib
 
 cos:
 	CC=ack AR=lib ARFLAGS="-o" $(MAKE)
 
-libio.a: $(OBJS)
+libio.lib: $(OBJS)
 	$(AR) $(ARFLAGS) $@ $+
 
-clean:
-	rm -f *.o *.lib libio.a
+librt.lib:
+	$(AR) $(ARFLAGS) $@ $(COSOBJS)
 
-test: test.o libio.a
+clean:
+	rm -f *.o *.lib *.a *.lst test
+
+test: test.o libio.lib
 	$(CC) $(LDFLAGS) -o $@ $+
 
 test.o: test.c $(HDRS)

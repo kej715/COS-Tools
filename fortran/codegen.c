@@ -350,34 +350,36 @@ void emitExpReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 
 
 void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
-    if (sym->class == SymClass_Program) {
-        emitPrimCall("@_endfio");
-        emit("         S7        0\n");
-    }
-    else if (sym->class == SymClass_Function) {
-        if (sym->details.progUnit.dt.type != BaseType_Character || sym->details.progUnit.dt.constraint == -1) {
-            emit("         S7        %d,A6\n", sym->details.progUnit.offset);
+    if (sym->class != SymClass_BlockData) {
+        if (sym->class == SymClass_Program) {
+            emitPrimCall("@_endfio");
+            emit("         S7        0\n");
         }
-        else {
-            emit("         A1        %d\n", sym->details.progUnit.offset);
-            emit("         A1        A1+A6\n");
-            emit("         S7        A1\n");
-            emit("         S7        S7<3\n");
-            emit("         S1        %d\n", sym->details.progUnit.dt.constraint);
-            emit("         S1        S1<32\n");
-            emit("         S7        S7!S1\n");
+        else if (sym->class == SymClass_Function) {
+            if (sym->details.progUnit.dt.type != BaseType_Character || sym->details.progUnit.dt.constraint == -1) {
+                emit("         S7        %d,A6\n", sym->details.progUnit.offset);
+            }
+            else {
+                emit("         A1        %d\n", sym->details.progUnit.offset);
+                emit("         A1        A1+A6\n");
+                emit("         S7        A1\n");
+                emit("         S7        S7<3\n");
+                emit("         S1        %d\n", sym->details.progUnit.dt.constraint);
+                emit("         S1        S1<32\n");
+                emit("         S7        S7!S1\n");
+            }
         }
+        emit("         A7        A6\n");
+        emit("         A0        ,A7\n");
+        emit("         A7        A7+1\n");
+        emit("         B00       A0\n");
+        emit("         A6        ,A7\n");
+        emit("         A7        A7+1\n");
+        emit("         J         B00\n");
+        emitActivateSection("DATA", "DATA");
+        emit("%-8s CON       %d\n", sym->details.progUnit.frameSizeLabel, frameSize);
+        emitDeactivateSection("DATA");
     }
-    emit("         A7        A6\n");
-    emit("         A0        ,A7\n");
-    emit("         A7        A7+1\n");
-    emit("         B00       A0\n");
-    emit("         A6        ,A7\n");
-    emit("         A7        A7+1\n");
-    emit("         J         B00\n");
-    emitActivateSection("DATA", "DATA");
-    emit("%-8s CON       %d\n", sym->details.progUnit.frameSizeLabel, frameSize);
-    emitDeactivateSection("DATA");
     if (staticDataSize > 0) {
         emitActivateSection("DATA", "DATA");
         emitWordBlock(sym->details.progUnit.staticDataLabel, staticDataSize);
@@ -1222,7 +1224,11 @@ void emitPrimCall(char *label) {
 void emitProlog(Symbol *sym) {
     char buf[32];
 
-    if (sym->class == SymClass_Program) {
+    generateLabel(sym->details.progUnit.staticDataLabel);
+    if (sym->class == SymClass_BlockData) {
+        return;
+    }
+    else if (sym->class == SymClass_Program) {
         emit("         ENTRY     @main\n");
         emit("@main    BSS       0\n");
     }
@@ -1232,7 +1238,6 @@ void emitProlog(Symbol *sym) {
         emit("%-8s BSS       0\n", buf);
     }
     generateLabel(sym->details.progUnit.frameSizeLabel);
-    generateLabel(sym->details.progUnit.staticDataLabel);
     emit("         A7        A7-1\n");  /* push base pointer    */
     emit("         ,A7       A6\n");
     emit("         A6        B00\n");   /* push return address  */

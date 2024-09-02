@@ -159,8 +159,8 @@ static void parseIF(char *s, bool isFromLogIf);
 static void parseINCLUDE(char *s);
 static void parseINTRINSIC(char *s);
 static void parseINQUIRE(char *s);
-static void parseNAMELIST(char *s);
 static void parseSAVE(char *s);
+static void parseSTOP(char *s);
 static void parseSUBROUTINE(char *s);
 static void parseIMPLICIT(char *s);
 static void parseIMPLICITNONE(char *s);
@@ -397,8 +397,10 @@ void compile(char *name) {
                 case SUBROUTINE:
                     parseSUBROUTINE(s);
                     continue;
-                case CHARACTER:
                 case COMPLEX:
+                    err("Not yet supported: COMPLEX");
+                    continue;
+                case CHARACTER:
                 case INTEGER:
                 case LOGICAL:
                 case DOUBLEPRECISION:
@@ -463,8 +465,10 @@ void compile(char *name) {
         case STATE_SPECIFICATION:
             if (token.type == TokenType_Keyword) {
                 switch (token.details.keyword.id) {
-                case CHARACTER:
                 case COMPLEX:
+                    err("Not yet supported: COMPLEX");
+                    continue;
+                case CHARACTER:
                 case DOUBLEPRECISION:
                 case INTEGER:
                 case LOGICAL:
@@ -506,9 +510,6 @@ void compile(char *name) {
                 case INTRINSIC:
                     parseINTRINSIC(s);
                     continue;
-                case NAMELIST:
-                    parseNAMELIST(s);
-                    continue;
                 case PARAMETER:
                     parsePARAMETER(s);
                     continue;
@@ -518,6 +519,10 @@ void compile(char *name) {
                 default:
                     break;
                 }
+            }
+            if (progUnitSym->class == SymClass_BlockData) {
+                err("Misplaced statement");
+                continue;
             }
             /*
              *  Token is not a specification statement, so fall through to process
@@ -551,8 +556,6 @@ void compile(char *name) {
                 case CLOSE:
                     parseCLOSE(s);
                     break;
-                case DECODE:
-                    break;
                 case DO:
                     parseDO(s);
                     break;
@@ -561,8 +564,6 @@ void compile(char *name) {
                     break;
                 case ELSEIF:
                     parseELSEIF(s);
-                    break;
-                case ENCODE:
                     break;
                 case END:
                     parseEND(s);
@@ -602,6 +603,9 @@ void compile(char *name) {
                 case RETURN:
                     break;
                 case REWIND:
+                    break;
+                case STOP:
+                    parseSTOP(s);
                     break;
                 case WRITE:
                     parseWRITE(s);
@@ -2575,6 +2579,8 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
             break;
         case COMPLEX:
             dt->type = BaseType_Complex;
+            err("Not yet supported: COMPLEX");
+            s = start;
             break;
         case DOUBLEPRECISION:
             dt->type = BaseType_Double;
@@ -2727,6 +2733,11 @@ static void parseDirective(char *s, int lineNo) {
                 }
                 else if (strcasecmp(token.details.identifier.name, "STACK") == 0
                          || strcasecmp(token.details.identifier.name, "AUTO") == 0) {
+                    if (progUnitSym->class == SymClass_BlockData) {
+                        list("%6d: %s\n", lineNo, start);
+                        err("ALLOC=%s invalid for BLOCK DATA", token.details.identifier.name);
+                        return;
+                    }
                     doStaticLocals = FALSE;
                 }
             }
@@ -3424,10 +3435,6 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
                 break;
             case CONTINUE:
                 break;
-            case DECODE:
-                break;
-            case ENCODE:
-                break;
             case ENDFILE:
                 break;
             case GOTO:
@@ -3458,6 +3465,9 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
             case REWIND:
                 break;
             case SAVE:
+                break;
+            case STOP:
+                parseSTOP(s);
                 break;
             case WRITE:
                 parseWRITE(s);
@@ -4003,6 +4013,32 @@ static void parseASSIGN(char *s) {
 }
 
 static void parseBLOCKDATA(char *s) {
+    char *name;
+    Symbol *symbol;
+    Token token;
+
+    s = getNextToken(s, &token, FALSE);
+    if (token.type == TokenType_Identifier) {
+        name = token.details.identifier.name;
+    }
+    else if (token.type == TokenType_None) {
+        name = "BLKDAT";
+    }
+    else {
+        err("Incorrect Block Data name");
+        return;
+    }
+    symbol = addSymbol(name, SymClass_BlockData);
+    if (symbol == NULL) {
+        err("Block Data name not unique");
+    }
+    s = eatWsp(s);
+    if (*s != '\0') {
+        err("Incorrect BLOCK DATA statement");
+        return;
+    }
+    progUnitSym = symbol;
+    emitProlog(progUnitSym);
 }
 
 static void parseCALL(char *s) {
@@ -4738,11 +4774,11 @@ static void parseEND(char *s) {
 
     if (errorCount > 0) {
         list(" ***** %d error%s\n", errorCount, (errorCount > 1) ? "s" : "");
-        fprintf(stderr, "%d error%s\n", errorCount, (errorCount > 1) ? "s" : "");
+        fprintf(stderr, "%d error%s in %s\n", errorCount, (errorCount > 1) ? "s" : "", progUnitSym->identifier);
     }
     if (warningCount > 0) {
         list(" ***** %d warning%s\n", warningCount, (warningCount > 1) ? "s" : "");
-        fprintf(stderr, "%d warning%s\n", warningCount, (warningCount > 1) ? "s" : "");
+        fprintf(stderr, "%d warning%s in %s\n", warningCount, (warningCount > 1) ? "s" : "", progUnitSym->identifier);
     }
     printSymbols(listingFile);
     freeAllSymbols();
@@ -5200,9 +5236,6 @@ static void parseINQUIRE(char *s) {
 static void parseINTRINSIC(char *s) {
 }
 
-static void parseNAMELIST(char *s) {
-}
-
 static void parseOutputStmt(char *s, int unitNum) {
     ControlInfoList *ciList;
     OperatorArgument unit;
@@ -5535,6 +5568,9 @@ static void parseREAD(char *s) {
 }
 
 static void parseSAVE(char *s) {
+}
+
+static void parseSTOP(char *s) {
 }
 
 static void parseSUBROUTINE(char *s) {
@@ -5915,13 +5951,11 @@ static char *tokenIdToStr(TokenId id) {
     case COMPLEX:         return "COMPLEX";
     case CONTINUE:        return "CONTINUE";
     case DATA:            return "DATA";
-    case DECODE:          return "DECODE";
     case DIMENSION:       return "DIMENSION";
     case DO:              return "DO";
     case DOUBLEPRECISION: return "DOUBLEPRECISION";
     case ELSE:            return "ELSE";
     case ELSEIF:          return "ELSEIF";
-    case ENCODE:          return "ENCODE";
     case END:             return "END";
     case ENDFILE:         return "ENDFILE";
     case ENDIF:           return "ENDIF";
@@ -5939,7 +5973,6 @@ static char *tokenIdToStr(TokenId id) {
     case INTEGER:         return "INTEGER";
     case INTRINSIC:       return "INTRINSIC";
     case LOGICAL:         return "LOGICAL";
-    case NAMELIST:        return "NAMELIST";
     case OPEN:            return "OPEN";
     case PARAMETER:       return "PARAMETER";
     case PAUSE:           return "PAUSE";

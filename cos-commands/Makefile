@@ -21,7 +21,7 @@
 #
 #--------------------------------------------------------------------------
 
-BINDIR = /usr/local/bin
+BINDIR = ..
 COSDIR = ../cos-interface
 
 all:	copyd.abs copyf.abs copyr.abs note.abs skipd.abs skipf.abs skipr.abs

@@ -89,9 +89,18 @@ LIBOBJS = lib.o          \
           services.o
 
 all: cal dasm ldr lib
+	$(MAKE) -C cos-interface ; \
+	$(MAKE) -C cos-commands ; \
+	$(MAKE) -C fortran
 
 cos:
-	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE)
+	rm -f *.o ; \
+	$(MAKE) cal ldr lib ; \
+	rm -f *.o ; \
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) ; \
+	$(MAKE) -C cos-interface ; \
+	$(MAKE) -C cos-commands ; \
+	$(MAKE) -C fortran cos
 
 cal: $(CALOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
@@ -118,7 +127,10 @@ lib.abs: $(LDROBJS)
 	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) lib
 
 clean:
-	rm -f *.o *.abs cal ldr lib
+	rm -f *.o *.abs cal ldr lib ; \
+	$(MAKE) -C cos-interface clean ; \
+	$(MAKE) -C cos-commands clean ; \
+	$(MAKE) -C fortran clean
 
 install: cal dasm ldr lib
 	install -b -o root -m 755 cal dasm ldr lib $(PREFIX)/bin
