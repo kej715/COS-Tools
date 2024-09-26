@@ -121,9 +121,6 @@ static Value zeroIntVal = {NumberType_Integer, 0, NULL, NULL, 0, 0};
 **--------------------------------------------------------------------------
 */
 
-/*
- *  ABS
- */
 static ErrorCode ABS(void) {
     currentModule->isAbsolute = TRUE;
     return (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
@@ -356,9 +353,6 @@ static ErrorCode BSSZ(void) {
     return Err_None;
 }
 
-/*
- *  COMMENT 'character string'
- */
 static ErrorCode COMMENT(void) {
     ErrorCode err;
     char *s;
@@ -553,6 +547,38 @@ static ErrorCode DUP(void) {
 
 static ErrorCode ECHO(void) {
     return Err_ResultField;
+}
+
+static ErrorCode EDIT(void) {
+    ErrorCode err;
+    char *s;
+    Token token;
+
+    err = (locationFieldToken == NULL) ? Err_None : registerError(Warn_IgnoredLocationSymbol);
+    if (strcmp(operandField, "*") == 0) {
+        if (editControlStackPtr > 0) {
+            currentEditControl = editControlStack[--editControlStackPtr];
+        }
+        return Err_None;
+    }
+    s = getNextToken(operandField, &token);
+    if (*s != '\0') return Err_OperandField;
+    if (editControlStackPtr >= EDIT_CONTROL_STACK_SIZE) return Err_TooManyEntries;
+    editControlStack[editControlStackPtr++] = currentEditControl;
+    if (token.type == TokenType_None) {
+        currentEditControl = defaultEditControl;
+    }
+    else if (isUnqualifiedName(&token) && token.details.name.len == 2 && strncasecmp(token.details.name.ptr, "ON", 2) == 0) {
+        currentEditControl = EditControl_On;
+    }
+    else if (isUnqualifiedName(&token) && token.details.name.len == 3 && strncasecmp(token.details.name.ptr, "OFF", 3) == 0) {
+        currentEditControl = EditControl_Off;
+    }
+    else {
+        editControlStackPtr -= 1;
+        err = Err_OperandField;
+    }
+    return err;
 }
 
 static ErrorCode EJECT(void) {
@@ -776,10 +802,12 @@ static ErrorCode IDENT(void) {
         resetModule(module);
         currentModule = module;
     }
+    currentEditControl = defaultEditControl;
     currentQualifier = findQualifier("");
     currentSection = currentModule->firstSection;
-    sectionStackPtr = 0;
+    editControlStackPtr = 0;
     macroStackPtr = 0;
+    sectionStackPtr = 0;
     qualifierStackPtr = 0;
     resetBase();
     listEject();
@@ -5363,6 +5391,7 @@ void instInit(void) {
     addInstruction("MICSIZE", 0, MICSIZE);
     addInstruction("ENTRY",   0, ENTRY);
     addInstruction("BSS",     0, BSS);
+    addInstruction("EDIT",    0, EDIT);
     //
     // Named machine instructions
     //
