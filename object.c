@@ -583,6 +583,9 @@ u64 toCrayFloat(u64 ieee) {
     u64 fraction;
     u64 sign;
 
+#if defined(__cos)
+    return ieee;
+#else
     if (ieee == 0) return 0;
     sign = ieee & 0x8000000000000000;
     exponent = ((ieee >> 52) & 0x7ff) - 1023; // unbias the 11-bit exponent
@@ -593,6 +596,7 @@ u64 toCrayFloat(u64 ieee) {
     //
     cray_f = sign | ((((exponent + 1) + 040000) & 0x7fff) << 48) | ((fraction >> 5) | 0x800000000000);
     return cray_f;
+#endif
 }
 
 static int writeEntryEntries(Module *module, Dataset *ds) {
