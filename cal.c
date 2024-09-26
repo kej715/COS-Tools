@@ -489,6 +489,8 @@ static int runPass(int passNo, bool isExtText) {
     Module *module;
 
     pass = passNo;
+    editControlStackPtr = 0;
+    currentEditControl = defaultEditControl;
     listControlStackPtr = 0;
     currentListControl = defaultListControl;
     clearErrorIndications();
