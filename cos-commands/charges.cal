@@ -1,0 +1,16 @@
+         TITLE     'CHARGES'
+         SUBTITLE  'End of Job Accounting'
+         IDENT     CHARGES
+         COMMENT   'CHARGES - End of Job Accounting'
+         ENTRY     CHARGES
+         START     CHARGES
+
+CHARGES  SECTION   MIXED
+
+CHARGES  =         *
+         MESSAGE   ='The best things in life are free.'Z,US
+         ENDP
+
+         SECTION   *
+
+         END
