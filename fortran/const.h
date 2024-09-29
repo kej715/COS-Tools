@@ -25,8 +25,10 @@
 #ifndef CONST_H
 #define CONST_H
 
+#define LINES_PER_PAGE      55
 #define MAX_ARG_STACK_SIZE 100
 #define MAX_DO_STACK_SIZE   20
+#define MAX_EXT_NAME_LENGTH  8
 #define MAX_ID_LENGTH       31
 #define MAX_IF_STACK_SIZE   20
 #define MAX_LINE_LENGTH     96

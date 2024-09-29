@@ -23,43 +23,94 @@
 **--------------------------------------------------------------------------
 */
 
+#define DEBUG 0
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "codegen.h"
 #include "const.h"
+#include "fnv.h"
 #include "proto.h"
 #include "types.h"
 
 static void emit(char *format, ...);
 static void emitBranchTarget(char *label);
+static void emitPopAddrReg(Register reg);
+static void emitPushAddrReg(Register reg);
+static void normalizeLabel(char *label, char *result);
 
-static int emissionDepth = 0;
+static u8 addrRegMap = 0xE3;
+static int emissionInhibitDepth = 0;
 static Register lastReg = 0;
 static u8 registerMap = 0x81;
+
+Register allocateAddrReg(void) {
+    u8 mask;
+    Register reg;
+
+    if (addrRegMap == 0xff) {
+        fputs("All -A- registers allocated\n", stderr);
+#if DEBUG
+        emit("* All -A- registers allocated\n");
+#endif
+        printStackTrace(stderr);
+        exit(1);
+    }
+    reg = 2;
+    for (;;) {
+        mask = 1 << reg;
+        if ((addrRegMap & mask) == 0) {
+            addrRegMap |= mask;
+#if DEBUG
+            emit("*  allocateAddrReg: A%o -> %02X%02X\n", reg, addrRegMap, registerMap);
+#endif
+            return reg;
+        }
+        reg = (reg + 1) & 0x07;
+    }
+}
 
 Register allocateRegister(void) {
     u8 mask;
 
     if (registerMap == 0xff) {
-        fputs("All registers allocated\n", stderr);
+        fputs("All -S- registers allocated\n", stderr);
+#if DEBUG
+        emit("* All -S- registers allocated\n");
+#endif
+        printStackTrace(stderr);
         exit(1);
     }
     for (;;) {
         mask = 1 << lastReg;
         if ((registerMap & mask) == 0) {
             registerMap |= mask;
+#if DEBUG
+            emit("* allocateRegister: S%o -> %02X%02X\n", lastReg, addrRegMap, registerMap);
+#endif
             return lastReg;
         }
         lastReg = (lastReg + 1) & 0x07;
     }
 }
 
+void checkRegisterMap(void) {
+    if (registerMap != 0x81) {
+        emit("* -S- registers remain allocated, map is %02X\n", registerMap);
+        fprintf(stderr, "WARNING: -S- registers remain allocated, map is %02X\n", registerMap);
+    }
+    if (addrRegMap != 0xE3) {
+        emit("* -A- registers remain allocated, map is %02X\n", addrRegMap);
+        fprintf(stderr, "WARNING: -A- registers remain allocated, map is %02X\n", addrRegMap);
+    }
+}
+
 static void emit(char *format, ...) {
     va_list ap;
 
-    if (objectFile != NULL && emissionDepth < 1) {
+    if (objectFile != NULL && emissionInhibitDepth < 1) {
         va_start(ap, format);
         vfprintf(objectFile, format, ap);
         va_end(ap);
@@ -74,6 +125,27 @@ void emitAddInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o+S%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
+void emitAddOffsets(Register reg1, Register reg2) {
+    emit("         A%o        A%o+A%o\n", reg2, reg2, reg1);
+}
+
+void emitAddOffset(Register reg, int offset) {
+    if (offset == 1) {
+        emit("         A%o        A%o+1\n", reg, reg);
+    }
+    else if (offset == -1) {
+        emit("         A%o        A%o-1\n", reg, reg);
+    }
+    else if (offset > 0) {
+        emit("         A1        %d\n", offset);
+        emit("         A%o        A%o+A1\n", reg, reg);
+    }
+    else if (offset < 0) {
+        emit("         A1        %d\n", -offset);
+        emit("         A%o        A%o-A1\n", reg, reg);
+    }
+}
+
 void emitAddReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o+FS%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
@@ -83,8 +155,8 @@ void emitAddReg(Register reg1, Register reg2, BaseType type) {
     case BaseType_Integer:
         emit("         S%o        S%o+S%o\n", reg1, reg1, reg2);
         break;
-    case BaseType_Real:
     case BaseType_Double:
+    case BaseType_Real:
         emit("         S%o        S%o+FS%o\n", reg1, reg1, reg2);
         break;
     default:
@@ -202,8 +274,8 @@ void emitCalcTrip(Register init, Register lim, Register incr, BaseType type) {
         emit("         S%o        S%o+S%o\n", lim, lim, incr);
         emitDivIntReg(lim, incr);
         break;
-    case BaseType_Real:
     case BaseType_Double:
+    case BaseType_Real:
         emit("         S%o        S%o-FS%o\n", lim, lim, init);
         emit("         S%o        S%o+FS%o\n", lim, lim, incr);
         emitDivRealReg(lim, incr);
@@ -231,8 +303,8 @@ void emitCalcTrip1(Register init, Register lim, BaseType type) {
         emit("         S%o        1\n", init);
         emit("         S%o        S%o+S%o\n", lim, lim, init);
         break;
-    case BaseType_Real:
     case BaseType_Double:
+    case BaseType_Real:
         emit("         S%o        S%o-FS%o\n", lim, lim, init);
         emit("         S%o        =1.0,\n", init);
         emit("         S%o        S%o+FS%o\n", lim, lim, init);
@@ -245,9 +317,9 @@ void emitCalcTrip1(Register init, Register lim, BaseType type) {
 }
 
 void emitCatChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(rightArg->reg);
     emitPushReg(leftArg->reg);
@@ -263,7 +335,10 @@ void emitConvertToByteAddress(Register reg) {
 
 void emitCopyRegister(Register r1, Register r2) {
     emit("         S%o        S%o\n", r1, r2);
-    
+}
+
+void emitCopyToOffset(Register r1, Register r2) {
+    emit("         A%o        S%o\n", r1, r2);
 }
 
 void emitDeactivateSection(char *name) {
@@ -281,9 +356,9 @@ void emitDivInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitDivIntReg(Register leftArg, Register rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg) | (1 << leftArg));
+    mask = getRegisterMap() & ~((1 << rightArg) | (1 << leftArg));
     emitSaveRegs(mask);
     emitPushReg(leftArg);
     emitPushReg(rightArg);
@@ -297,9 +372,9 @@ void emitDivReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitDivRealReg(Register leftArg, Register rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg) | (1 << leftArg));
+    mask = getRegisterMap() & ~((1 << rightArg) | (1 << leftArg));
     emitSaveRegs(mask);
     emitPushReg(leftArg);
     emitPushReg(rightArg);
@@ -310,47 +385,13 @@ void emitDivRealReg(Register leftArg, Register rightArg) {
 
 void emitEnd(void) {
     emitDeactivateSection("TEXT");
+    emit("         EDIT      *\n");
     emit("         END\n");
 }
 
-void emitExpInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
-
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
-    emitSaveRegs(mask);
-    emitPushReg(leftArg->reg);
-    emitPushReg(rightArg->reg);
-    emit("         R         %%cif\n");
-    emit("         S1        ,A7\n");
-    emit("         ,A7       S7\n");
-    emit("         A7        A7-1\n");
-    emit("         ,A7       S1\n");
-    emit("         R         %%cif\n");
-    emitPushReg(RESULT_REG);
-    emitPrimCall("@pow");
-    emitAdjustSP(2);
-    emitPushReg(RESULT_REG);
-    emit("         R         %%cfi\n");
-    if (rightArg->reg != RESULT_REG) emit("         S%o        S7\n", rightArg->reg);
-    emitRestoreRegs(mask);
-}
-
-void emitExpReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
-
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
-    emitSaveRegs(mask);
-    emitPushReg(rightArg->reg);
-    emitPushReg(leftArg->reg);
-    emitPrimCall("@pow");
-    emitAdjustSP(2);
-    if (rightArg->reg != RESULT_REG) emit("         S%o        S7\n", rightArg->reg);
-    emitRestoreRegs(mask);
-}
-
-
 void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
     if (sym->class != SymClass_BlockData) {
+        emitLabel(sym->details.progUnit.exitLabel);
         if (sym->class == SymClass_Program) {
             emitPrimCall("@_endfio");
             emit("         S7        0\n");
@@ -388,9 +429,9 @@ void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
 }
 
 void emitEqChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(rightArg->reg);
     emitPushReg(leftArg->reg);
@@ -429,10 +470,51 @@ void emitEqvInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        #S%o\n", rightArg->reg, rightArg->reg);
 }
 
-void emitGeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+void emitExit(int status) {
+    emit("         S%o        %d\n", RESULT_REG, status);
+    emitPushReg(RESULT_REG);
+    emitPrimCall("@exit");
+}
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+void emitExpInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
+    u16 mask;
+
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(leftArg->reg);
+    emitPushReg(rightArg->reg);
+    emit("         R         %%cif\n");
+    emit("         S1        ,A7\n");
+    emit("         ,A7       S7\n");
+    emit("         A7        A7-1\n");
+    emit("         ,A7       S1\n");
+    emit("         R         %%cif\n");
+    emitPushReg(RESULT_REG);
+    emitPrimCall("@pow");
+    emitAdjustSP(2);
+    emitPushReg(RESULT_REG);
+    emit("         R         %%cfi\n");
+    if (rightArg->reg != RESULT_REG) emit("         S%o        S7\n", rightArg->reg);
+    emitRestoreRegs(mask);
+}
+
+void emitExpReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
+    u16 mask;
+
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    emitSaveRegs(mask);
+    emitPushReg(rightArg->reg);
+    emitPushReg(leftArg->reg);
+    emitPrimCall("@pow");
+    emitAdjustSP(2);
+    if (rightArg->reg != RESULT_REG) emit("         S%o        S7\n", rightArg->reg);
+    emitRestoreRegs(mask);
+}
+
+void emitGeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
+    u16 mask;
+
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(rightArg->reg);
     emitPushReg(leftArg->reg);
@@ -467,9 +549,9 @@ void emitGeReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitGtChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(leftArg->reg);
     emitPushReg(rightArg->reg);
@@ -504,9 +586,9 @@ void emitGtReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitIntToReal(OperatorArgument *arg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~(1 << arg->reg);
+    mask = getRegisterMap() & ~(1 << arg->reg);
     emitSaveRegs(mask);
     emitPushReg(arg->reg);
     emit("         R         %%cif\n");
@@ -523,11 +605,28 @@ void emitLabelDatum(char *label) {
 }
 
 void emitLabeledString(CharacterValue *cvp, char *label, bool hasZByte) {
+    CharacterValue cv;
+    int len;
+
     emitActivateSection("DATA", "DATA");
     if (label != NULL) emitWordLabel(label);
-    emit("         DATA      ");
-    emitString(cvp, hasZByte);
-    emit("\n");
+    cv.string = cvp->string;
+    len = cvp->length;
+    while (len > 0) {
+        emit("         DATA      ");
+        if (len > 16) {
+            cv.length = 16;
+            emitString(&cv, FALSE);
+            cv.string += 16;
+            len -= 16;
+        }
+        else {
+            cv.length = len;
+            emitString(&cv, hasZByte);
+            len = 0;
+        }
+        emit("\n");
+    }
     emitDeactivateSection("DATA");
 }
 
@@ -540,9 +639,9 @@ Register emitLabelReference(Symbol *sym) {
 }
 
 void emitLeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(leftArg->reg);
     emitPushReg(rightArg->reg);
@@ -597,9 +696,16 @@ void emitLoadConst(OperatorArgument *arg) {
     dt = arg->details.constant.dt;
     switch (arg->details.constant.dt.type) {
     case BaseType_Character:
-        emit("         S%o        =", arg->reg);
-        emitString(&arg->details.constant.value.character, FALSE);
-        emit("\n");
+        if (arg->details.constant.value.character.length <= 40) {
+            emit("         S%o        =", arg->reg);
+            emitString(&arg->details.constant.value.character, FALSE);
+            emit("\n");
+        }
+        else {
+            generateLabel(buf);
+            emitLabeledString(&arg->details.constant.value.character, buf, FALSE);
+            emit("         S%o        %s\n", arg->reg, buf);
+        }
         emit("         S%o        S%o<3\n", arg->reg, arg->reg);
         emit("         S7        %d\n", arg->details.constant.value.character.length);
         emit("         S7        S7<32\n");
@@ -627,6 +733,7 @@ void emitLoadConst(OperatorArgument *arg) {
         else
             emit("         S%o        =%ld,\n", arg->reg, i);
         break;
+    case BaseType_Double:
     case BaseType_Real:
         sprintf(buf, "%f", arg->details.constant.value.real);
         emit("         S%o        =", arg->reg);
@@ -652,7 +759,7 @@ void emitLoadNullPtr(OperatorArgument *arg) {
 
 void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
     DataType *dt;
-    u8 mask;
+    u16 mask;
     Symbol *sym;
 
     subject->reg = allocateRegister();
@@ -674,8 +781,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -694,8 +802,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -713,8 +822,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -728,7 +838,7 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                     exit(1);
                 }
                 freeRegister(subject->reg);
-                mask = registerMap;
+                mask = getRegisterMap();
                 emitSaveRegs(mask);
                 emit("         S%o        S%o>32\n", object->reg, object->reg);
                 emitPushReg(object->reg);
@@ -754,8 +864,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -774,8 +885,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -808,11 +920,23 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        A6\n", subject->reg);
-                emit("         S7        %d\n", sym->details.variable.offset);
-                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         A%o        A%o+A6\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                if (sym->details.variable.offset == 1) {
+                    emit("         A%o        A%o+1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else if (sym->details.variable.offset == -1) {
+                    emit("         A%o        A%o-1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else if (sym->details.variable.offset > 0) {
+                    emit("         A1        %d\n", sym->details.variable.offset);
+                    emit("         A%o        A%o+A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else if (sym->details.variable.offset < 0) {
+                    emit("         A1        %d\n", -sym->details.variable.offset);
+                    emit("         A%o        A%o-A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                emit("         S%o        A%o\n", subject->reg, subject->details.reference.offset.reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -828,9 +952,10 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        %s+%d\n", subject->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset + subject->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        %s+%d\n", subject->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         A1        %s+%d\n", progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
+                emit("         A%o        A%o+A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                emit("         S%o        A%o\n", subject->reg, subject->details.reference.offset.reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -848,8 +973,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -869,11 +995,24 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        A6\n", subject->reg);
-                emit("         S7        %d\n", sym->details.progUnit.offset);
-                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         A%o        A%o+A6\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                if (sym->details.progUnit.offset == 1) {
+                    emit("         A%o        A%o+1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else if (sym->details.progUnit.offset == -1) {
+                    emit("         A%o        A%o-1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else if (sym->details.progUnit.offset > 0) {
+                    emit("         A1        %d\n", sym->details.progUnit.offset);
+                    emit("         A%o        A%o+A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else if (sym->details.progUnit.offset < 0) {
+                    emit("         A1        %d\n", -sym->details.progUnit.offset);
+                    emit("         A%o        A%o-A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                emit("         S%o        A%o\n", subject->reg, subject->details.reference.offset.reg);
+                freeAddrReg(subject->details.reference.offset.reg);
+
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -889,9 +1028,10 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        %s+%d\n", subject->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset + subject->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        %s+%d\n", subject->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset);
-                emit("         S%o        S%o+S%o\n", subject->reg, subject->reg, subject->details.reference.offset.reg);
-                freeRegister(subject->details.reference.offset.reg);
+                emit("         A1        %s+%d\n", sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset);
+                emit("         A%o        A%o+A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                emit("         S%o        A%o\n", subject->reg, subject->details.reference.offset.reg);
+                freeAddrReg(subject->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
@@ -913,30 +1053,23 @@ Register emitLoadStack(int offset) {
 
     reg = allocateRegister();
     emit("         S%o        %d,A7\n", reg, offset);
-
     return reg;
 }
 
 Register emitLoadStackAddr(int offset) {
-    Register reg1;
-    Register reg2;
+    Register reg;
 
-    reg1 = allocateRegister();
-    emit("         S%o        A7\n", reg1);
+    reg = allocateRegister();
+    emit("         S%o        A7\n", reg);
     if (offset > 0) {
-        reg2 = allocateRegister();
-        emit("         S%o        %d\n", reg2, offset);
-        emit("         S%o        S%o+S%o\n", reg1, reg1, reg2);
-        freeRegister(reg2);
+        emit("         S7        %d\n", offset);
+        emit("         S%o        S%o+S7\n", reg, reg);
     }
     else if (offset < 0) {
-        reg2 = allocateRegister();
-        emit("         S%o        %d\n", reg2, -offset);
-        emit("         S%o        S%o-S%o\n", reg1, reg1, reg2);
-        freeRegister(reg2);
+        emit("         S7        %d\n", -offset);
+        emit("         S%o        S%o-S7\n", reg, reg);
     }
-
-    return reg1;
+    return reg;
 }
 
 Register emitLoadStackByteAddr(int offset) {
@@ -944,7 +1077,6 @@ Register emitLoadStackByteAddr(int offset) {
 
     reg = emitLoadStackAddr(offset);
     emit("         S%o        S%o<3\n", reg, reg);
-
     return reg;
 }
 
@@ -969,10 +1101,8 @@ void emitLoadValue(OperatorArgument *arg) {
                 emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset + arg->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         A1        S%o\n", arg->details.reference.offset.reg);
-                emit("         A1        A1+A6\n");
-                emit("         S%o        %d,A1\n", arg->reg, sym->details.variable.offset);
-                freeRegister(arg->details.reference.offset.reg);
+                emit("         S%o        %d,A%o\n", arg->reg, sym->details.variable.offset, arg->details.reference.offset.reg);
+                freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
@@ -988,9 +1118,8 @@ void emitLoadValue(OperatorArgument *arg) {
                 emit("         S%o        %s+%d,\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset + arg->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         A1        S%o\n", arg->details.reference.offset.reg);
-                emit("         S%o        %s+%d,A1\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
-                freeRegister(arg->details.reference.offset.reg);
+                emit("         S%o        %s+%d,A%o\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset, arg->details.reference.offset.reg);
+                freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
@@ -1007,10 +1136,9 @@ void emitLoadValue(OperatorArgument *arg) {
                 emit("         S%o        %d,A1\n", arg->reg, arg->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         A2        S%o\n", arg->details.reference.offset.reg);
-                emit("         A1        A1+A2\n");
+                emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
                 emit("         S%o        ,A1\n", arg->reg);
-                freeRegister(arg->details.reference.offset.reg);
+                freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
@@ -1026,10 +1154,9 @@ void emitLoadValue(OperatorArgument *arg) {
                 emit("         S%o        %d,A6\n", arg->reg, sym->details.progUnit.offset + arg->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         A1        S%o\n", arg->details.reference.offset.reg);
-                emit("         A1        A1+A6\n");
+                emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
                 emit("         S%o        %d,A1\n", arg->reg, sym->details.progUnit.offset);
-                freeRegister(arg->details.reference.offset.reg);
+                freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
@@ -1045,9 +1172,8 @@ void emitLoadValue(OperatorArgument *arg) {
                 emit("         S%o        %s+%d,\n", arg->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset + arg->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         A1        S%o\n", arg->details.reference.offset.reg);
-                emit("         S%o        %s+%d,A1\n", arg->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset);
-                freeRegister(arg->details.reference.offset.reg);
+                emit("         S%o        %s+%d,A%o\n", arg->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset, arg->details.reference.offset.reg);
+                freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
@@ -1060,7 +1186,7 @@ void emitLoadValue(OperatorArgument *arg) {
             exit(1);
         }
         arg->class = ArgClass_Calculation;
-        arg->details.calculation = sym->details.variable.dt;
+        arg->details.calculation = *dt;
     }
 }
 
@@ -1070,22 +1196,19 @@ Register emitLoadZStrAddr(char *label) {
     reg = allocateRegister();
     emit("         S%o        %s\n", reg, label);
     emitPushReg(reg);
-    freeRegister(reg);
     emitPrimCall("@strlen");
     emitAdjustSP(1);
-    reg = allocateRegister();
     emit("         S%o        %s\n", reg, label);
     emit("         S%o        S%o<3\n", reg, reg);
     emit("         S7        S7<32\n");
     emit("         S%o        S%o!S7\n", reg, reg);
-
     return reg;
 }
 
 void emitLtChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(rightArg->reg);
     emitPushReg(leftArg->reg);
@@ -1120,9 +1243,9 @@ void emitLtReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitMulInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(leftArg->reg);
     emitPushReg(rightArg->reg);
@@ -1131,14 +1254,19 @@ void emitMulInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emitRestoreRegs(mask);
 }
 
+void emitMulOffset(Register reg, int factor) {
+    emit("         A1        %d\n", factor);
+    emit("         A%o        A%o*A1\n", reg, reg);
+}
+
 void emitMulReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o*FS%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
 void emitNeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~((1 << rightArg->reg) | (1 << leftArg->reg));
+    mask = getRegisterMap() & ~((1 << rightArg->reg) | (1 << leftArg->reg));
     emitSaveRegs(mask);
     emitPushReg(rightArg->reg);
     emitPushReg(leftArg->reg);
@@ -1156,8 +1284,8 @@ void emitNegReg(Register reg, BaseType type) {
     case BaseType_Integer:
         emit("         S%o        -S%o\n", reg, reg);
         break;
-    case BaseType_Real:
     case BaseType_Double:
+    case BaseType_Real:
         emit("         S%o        -FS%o\n", reg, reg);
         break;
     case BaseType_Logical:
@@ -1210,6 +1338,11 @@ void emitOrInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o!S%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
+static void emitPopAddrReg(Register reg) {
+    emit("         A%o        ,A7\n", reg);
+    emit("         A7        A7+1\n");
+}
+
 void emitPopReg(Register reg) {
     emit("         S%o        ,A7\n", reg);
     emit("         A7        A7+1\n");
@@ -1233,10 +1366,11 @@ void emitProlog(Symbol *sym) {
         emit("@main    BSS       0\n");
     }
     else {
-        sprintf(buf, "@%s", sym->identifier);
+        normalizeLabel(sym->identifier, buf);
         emit("         ENTRY     %s\n", buf);
         emit("%-8s BSS       0\n", buf);
     }
+    generateLabel(sym->details.progUnit.exitLabel);
     generateLabel(sym->details.progUnit.frameSizeLabel);
     emit("         A7        A7-1\n");  /* push base pointer    */
     emit("         ,A7       A6\n");
@@ -1251,6 +1385,11 @@ void emitProlog(Symbol *sym) {
     }
 }
 
+static void emitPushAddrReg(Register reg) {
+    emit("         A7        A7-1\n");
+    emit("         ,A7       A%o\n", reg);
+}
+
 void emitPushReg(Register reg) {
     emit("         A7        A7-1\n");
     emit("         ,A7       S%o\n", reg);
@@ -1261,9 +1400,9 @@ void emitRealToInt(OperatorArgument *arg) {
 }
 
 void emitRealToIntReg(Register arg) {
-    u8 mask;
+    u16 mask;
 
-    mask = registerMap & ~(1 << arg);
+    mask = getRegisterMap() & ~(1 << arg);
     emitSaveRegs(mask);
     emitPushReg(arg);
     emit("         R         %%cfi\n");
@@ -1271,10 +1410,22 @@ void emitRealToIntReg(Register arg) {
     emitRestoreRegs(mask);
 }
 
-void emitRestoreRegs(u8 mask) {
+void emitRestoreRegs(u16 mask) {
+    u16 mask2;
     u8 reg;
     u8 selector;
 
+#if DEBUG
+    emit("* restoreRegisters: mask %04X map %02X%02X\n", mask, addrRegMap, registerMap);
+#endif
+    mask2 = mask >> 8;
+    for (reg = 4; reg > 1; reg--) {
+        selector = 1 << reg;
+        if ((mask2 & selector) != 0) {
+            emitPopAddrReg(reg);
+            addrRegMap |= selector;
+        }
+    }
     for (reg = 6; reg > 0; reg--) {
         selector = 1 << reg;
         if ((mask & selector) != 0) {
@@ -1282,12 +1433,19 @@ void emitRestoreRegs(u8 mask) {
             registerMap |= selector;
         }
     }
+#if DEBUG
+    emit("* restoreRegisters:            -> %02X%02X\n", addrRegMap, registerMap);
+#endif
 }
 
-void emitSaveRegs(u8 mask) {
+void emitSaveRegs(u16 mask) {
+    u16 mask2;
     u8 reg;
     u8 selector;
 
+#if DEBUG
+    emit("*    saveRegisters: mask %04X map %02X%02X\n", mask, addrRegMap, registerMap);
+#endif
     for (reg = 1; reg < 7; reg++) {
         selector = 1 << reg;
         if ((mask & selector) != 0) {
@@ -1295,10 +1453,22 @@ void emitSaveRegs(u8 mask) {
             registerMap &= ~selector;
         }
     }
+    mask2 = mask >> 8;
+    for (reg = 2; reg < 5; reg++) {
+        selector = 1 << reg;
+        if ((mask2 & selector) != 0) {
+            emitPushAddrReg(reg);
+            addrRegMap &= ~selector;
+        }
+    }
+#if DEBUG
+    emit("*    saveRegisters:            -> %02X%02X\n", addrRegMap, registerMap);
+#endif
 }
 
 void emitStart(char *name) {
     emit("         IDENT     %s\n", name);
+    emit("         EDIT      OFF\n");
     emitActivateSection("TEXT", "CODE");
 }
 
@@ -1364,8 +1534,8 @@ void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList)
             case BaseType_Integer:
                 emit("         CON       %d\n", cListItem->details.value.integer);
                 break;
-            case BaseType_Real:
             case BaseType_Double:
+            case BaseType_Real:
                 emit("         CON       %f\n", cListItem->details.value.real);
                 break;
             case BaseType_Complex:
@@ -1487,7 +1657,7 @@ void emitSubInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 void emitSubprogramCall(char *id) {
     char buf[32];
 
-    sprintf(buf, "@%s", id);
+    normalizeLabel(id, buf);
     emitPrimCall(buf);
 }
 
@@ -1530,30 +1700,84 @@ void emitWordLabel(char *label) {
     emit("%-8s BSS       0\n", label);
 }
 
-void freeAllRegisters(void) {
-    registerMap = 0x01;
-    lastReg = 0;
-}
-
 void enableEmission(bool isEnabled) {
     if (isEnabled)
-        emissionDepth += 1;
+        emissionInhibitDepth -= 1;
     else
-        emissionDepth -= 1;
+        emissionInhibitDepth += 1;
+}
+
+void freeAddrReg(Register reg) {
+    u8 mask;
+
+    if (reg > 1 && reg < 5) {
+        mask = 1 << reg;
+        if ((addrRegMap & mask) != 0) {
+            addrRegMap &= ~mask;
+        }
+#if DEBUG
+        else {
+            emit("*      freeAddrReg: A%o already free\n", reg);
+        }
+#endif
+    }
+#if DEBUG
+    emit("*      freeAddrReg: A%o -> %02X%02X\n", reg, addrRegMap, registerMap);
+#endif
+}
+
+void freeAllRegisters(void) {
+    registerMap = 0x81;
+    addrRegMap = 0xE3;
+    lastReg = 0;
+#if DEBUG
+    emit("* freeAllRegisters: %02X%02X\n", addrRegMap, registerMap);
+#endif
 }
 
 void freeRegister(Register reg) {
     u8 mask;
 
-    if (reg > 0 && reg <= 6) {
+    if (reg > 0 && reg < 7) {
         mask = 1 << reg;
         if ((registerMap & mask) != 0) {
             lastReg = reg;
             registerMap &= ~mask;
         }
+#if DEBUG
+        else {
+            emit("*     freeRegister: S%o already free\n", reg);
+        }
+#endif
     }
+#if DEBUG
+    emit("*     freeRegister: S%o -> %02X%02X\n", reg, addrRegMap, registerMap);
+#endif
 }
 
-u8 getRegisterMap(void) {
-    return registerMap;
+u16 getRegisterMap(void) {
+    return ((u16)addrRegMap << 8) | (u16)registerMap;
+}
+
+static void normalizeLabel(char *label, char *result) {
+    Fnv32_t hash;
+    int len;
+    char *lp;
+    char *rp;
+
+    lp = label;
+    rp = result;
+    *rp++ = '@';
+    len = 1;
+    while (*lp != '\0') {
+        *rp = (*lp == '_') ? '%' : *lp;
+        lp += 1;
+        rp += 1;
+        len += 1;
+    }
+    *rp = '\0';
+    if (len > MAX_EXT_NAME_LENGTH) {
+        hash = fnv32a(result, len, FNV1_32A_INIT);
+        sprintf(result + 4, "%04x", hash & 0xffff);
+    }
 }

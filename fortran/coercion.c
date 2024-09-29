@@ -128,7 +128,11 @@ BaseType calculateCoercedType(OperatorId op, BaseType leftType, BaseType rightTy
 }
 
 BaseType coerceArgument(OperatorArgument *arg, BaseType fromType, BaseType toType) {
-    return (*coercionFns[fromType][toType])(arg, fromType, toType);
+    if (fromType != toType) {
+        if (arg->class > ArgClass_Function) emitLoadValue(arg);
+        return (*coercionFns[fromType][toType])(arg, fromType, toType);
+    }
+    return toType;
 }
 
 static BaseType coerceDoubleToComplex(OperatorArgument *arg, BaseType fromType, BaseType toType) {

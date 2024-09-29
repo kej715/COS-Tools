@@ -35,14 +35,18 @@ HDRS = const.h \
        fmt.h   \
        units.h
 
-OBJS = catstr.o cmpstr.o cpystr.o fio.o fmt.o fmt2.o getstr.o units.o
+COBJS = catstr.o cmpstr.o cpystr.o fmt.o fmt2.o getstr.o units.o
+CALOBJS = fio.o
 
 all: libio.lib librt.lib
 
 cos:
 	CC=ack AR=lib ARFLAGS="-o" $(MAKE)
 
-libio.lib: $(OBJS)
+libio.a: $(COBJS)
+	$(AR) $(ARFLAGS) $@ $+
+
+libio.lib: $(COBJS) $(CALOBJS)
 	$(AR) $(ARFLAGS) $@ $+
 
 librt.lib:
@@ -51,7 +55,7 @@ librt.lib:
 clean:
 	rm -f *.o *.lib *.a *.lst test
 
-test: test.o libio.lib
+test: test.o libio.a
 	$(CC) $(LDFLAGS) -o $@ $+
 
 test.o: test.c $(HDRS)

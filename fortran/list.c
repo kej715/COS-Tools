@@ -22,12 +22,17 @@
 **--------------------------------------------------------------------------
 */
 
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "proto.h"
 #include "types.h"
 
+static char *dataTypeToStr(DataType *dt);
 static void listTree(Symbol *symbol);
 static void resetHeaderLine(void);
+static char *symClassToStr(SymbolClass class);
 
 #define LINES_PER_PAGE      55
 #define LISTING_LINE_LENGTH 132
@@ -46,6 +51,33 @@ static char *ftcVersion = "1.0";
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = LINES_PER_PAGE;
 static int  pageNumber = 0;
+
+static char *dataTypeToStr(DataType *dt) {
+    static char buf[32];
+
+    switch (dt->type) {
+    case BaseType_Undefined: return "Undefined";
+    case BaseType_Logical:   return "Logical";
+    case BaseType_Integer:   return "Integer";
+    case BaseType_Real:      return "Real";
+    case BaseType_Double:    return "Double";
+    case BaseType_Complex:   return "Complex";
+    case BaseType_Label:     return "Label";
+    case BaseType_Pointer:   return "Pointer";
+    default:                 return "Unknown";
+    case BaseType_Character:
+        if (dt->constraint > 0) {
+            sprintf(buf, "Character*%d", dt->constraint);
+            return buf;
+        }
+        else if (dt->constraint == 0) {
+            return "Character";
+        }
+        else {
+            return "Character*(*)";
+        }
+    }
+}
 
 void list(char *format, ...) {
     va_list ap;
@@ -100,6 +132,10 @@ void listEject(void) {
         fputs(headerLine, listingFile);
         fputs("\n\n\n", listingFile);
     }
+}
+
+void listSetPageEnd(void) {
+    lineNumber = LINES_PER_PAGE;
 }
 
 void listSymbols(void) {
@@ -167,7 +203,7 @@ static void listTree(Symbol *symbol) {
             break;
         }
         fputc('\n', listingFile);
-        listTree(listingFile, symbol->right);
+        listTree(symbol->right);
     }
 }
 
@@ -175,4 +211,22 @@ static void resetHeaderLine(void) {
     memset(headerLine, ' ', LISTING_LINE_LENGTH);
     headerLine[LISTING_LINE_LENGTH]   = '\n';
     headerLine[LISTING_LINE_LENGTH+1] = '\0';
+}
+
+static char *symClassToStr(SymbolClass class) {
+    switch (class) {
+    case SymClass_Undefined:   return "Undefined";
+    case SymClass_Program:     return "Program";
+    case SymClass_BlockData:   return "Block Data";
+    case SymClass_Subroutine:  return "Subroutine";
+    case SymClass_Function:    return "Function";
+    case SymClass_Intrinsic:   return "Intrinsic";
+    case SymClass_NamedCommon: return "Common";
+    case SymClass_Auto:        return "Auto";
+    case SymClass_Static:      return "Static";
+    case SymClass_Global:      return "Common";
+    case SymClass_Argument:    return "Argument";
+    case SymClass_Parameter:   return "Parameter";
+    default:                   return "Unknown";
+    }
 }

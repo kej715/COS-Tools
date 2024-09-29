@@ -26,6 +26,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__APPLE__)
+#include <execinfo.h>
+#endif
+
 void *allocate(int size) {
     void *new;
 
@@ -49,3 +53,20 @@ void *reallocate(void *old, int oldSize, int newSize) {
     memset((unsigned char *)new + oldSize, 0, newSize - oldSize);
     return new;
 }
+
+void printStackTrace(FILE *fp) {
+#if defined(__APPLE__)
+    void *callstack[128];
+    int  i;
+    int  frames;
+    char **strs;
+
+    frames = backtrace(callstack, 128);
+    strs   = backtrace_symbols(callstack, frames);
+    for (i = 1; i < frames; ++i) {
+        fprintf(fp, "%s\n", strs[i]);
+    }
+    free(strs);
+#endif
+}
+

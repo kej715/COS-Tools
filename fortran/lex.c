@@ -77,15 +77,15 @@ static Keyword keywordTable[] = {
     {"POINTER", POINTER, StmtClass_Nonexecutable},
     {"PRINT", PRINT, StmtClass_Executable},
     {"PROGRAM", PROGRAM, StmtClass_Nonexecutable},
-    {"PUNCH", PUNCH},
-    {"READ", READ},
-    {"REAL", REAL},
-    {"RETURN", RETURN},
-    {"REWIND", REWIND},
-    {"SAVE", SAVE},
-    {"STOP", STOP},
-    {"SUBROUTINE", SUBROUTINE},
-    {"WRITE", WRITE}
+    {"PUNCH", PUNCH, StmtClass_Executable},
+    {"READ", READ, StmtClass_Executable},
+    {"REAL", REAL, StmtClass_Nonexecutable},
+    {"RETURN", RETURN, StmtClass_Executable},
+    {"REWIND", REWIND, StmtClass_Executable},
+    {"SAVE", SAVE, StmtClass_Nonexecutable},
+    {"STOP", STOP, StmtClass_Executable},
+    {"SUBROUTINE", SUBROUTINE, StmtClass_Nonexecutable},
+    {"WRITE", WRITE, StmtClass_Executable}
 };
 
 #define KEYWORD_TBL_LEN 47
@@ -106,7 +106,7 @@ typedef struct operator {
 static Operator logicalOpTable[] = {
     {"A", OP_AND, PREC_AND},
     {"AND", OP_AND, PREC_AND},
-    {"EQ", OP_EQV, PREC_EQ},
+    {"EQ", OP_EQ, PREC_EQ},
     {"EQV", OP_EQV, PREC_EQV},
     {"GE", OP_GE, PREC_GE},
     {"GT", OP_GT, PREC_GT},
@@ -244,7 +244,7 @@ static char *getFloat(char *s, Token *token) {
     /*
      *  Process power of 10 indication
      */
-    if (*s == 'E' || *s == 'e') {
+    if (*s == 'E' || *s == 'e' || *s == 'D' || *s == 'd') {
         ep = s;
         s = getNextChar(s + 1);
         if (isdigit(*s)) {
@@ -443,7 +443,18 @@ static char *getNumber(char *s, Token *token) {
 
     start = s;
     s = getInteger(start, &value);
-    if (*s == '.' || *s == 'E' || *s == 'e') {
+    if (*s == '.') {
+        cp = getNextChar(s + 1);
+        if (isalpha(*cp)) { // could be .AND., .OR., etc.
+            token->type = TokenType_Constant;
+            token->details.constant.dt.type = BaseType_Integer;
+            token->details.constant.value.integer = value;
+        }
+        else {
+            s = getFloat(start, token);
+        }
+    }
+    else if (*s == 'E' || *s == 'e' || *s == 'D' || *s == 'd') {
         s = getFloat(start, token);
     }
     else if (*s == 'H' || *s == 'h') {
@@ -479,7 +490,7 @@ static char *getString(char *s, Token *token) {
 
     while (*s != '\0') {
         if (*s == quote) {
-            if (quote == '\'' && *(s + 1) == '\'') {
+            if (*(s + 1) == quote) {
                 s += 2;
             }
             else {
@@ -496,13 +507,12 @@ static char *getString(char *s, Token *token) {
     len = s - start;
     token->type = TokenType_Constant;
     token->details.constant.dt.type = BaseType_Character;
-    token->details.constant.value.character.length = len;
     token->details.constant.value.character.string = cp = (char *)allocate(len + 1);
     s = start;
     for (;;) {
         if (*s == quote) {
-            if (quote == '\'' && *(s + 1) == '\'') {
-                *cp++ = '\'';
+            if (*(s + 1) == quote) {
+                *cp++ = quote;
                 s += 2;
             }
             else {
@@ -514,6 +524,7 @@ static char *getString(char *s, Token *token) {
         }
     }
     *cp = '\0';
+    token->details.constant.value.character.length = cp - token->details.constant.value.character.string;
 
     return s + 1;
 }

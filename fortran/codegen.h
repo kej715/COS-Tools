@@ -32,9 +32,13 @@
 #define NO_REG       ((Register)0)
 #define RESULT_REG   ((Register)7)
 
+Register allocateAddrReg(void);
 Register allocateRegister(void);
+void checkRegisterMap(void);
 void emitActivateSection(char *name, char *type);
 void emitAddInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
+void emitAddOffset(Register reg, int offset);
+void emitAddOffsets(Register reg1, Register reg2);
 void emitAddReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitAddReg(Register reg1, Register reg2, BaseType type);
 void emitAndInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
@@ -50,6 +54,7 @@ void emitCalcTrip1(Register init, Register lim, BaseType type);
 void emitCatChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitConvertToByteAddress(Register reg);
 void emitCopyRegister(Register r1, Register r2);
+void emitCopyToOffset(Register r1, Register r2);
 void emitDeactivateSection(char *name);
 void emitDecrTrip(void);
 void emitDivInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
@@ -57,14 +62,15 @@ void emitDivIntReg(Register leftArg, Register rightArg);
 void emitDivReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitDivRealReg(Register leftArg, Register rightArg);
 void emitEnd(void);
-void emitExpInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
-void emitExpReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEpilog(Symbol *sym, int frameSize, int staticDataSize);
 void emitEqChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqvInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
+void emitExit(int status);
+void emitExpInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
+void emitExpReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitGeChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitGeInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitGeLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
@@ -96,6 +102,7 @@ void emitLtInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLtLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLtReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitMulInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
+void emitMulOffset(Register reg, int factor);
 void emitMulReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitNeChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitNegReg(Register reg, BaseType type);
@@ -111,8 +118,8 @@ void emitProlog(Symbol *sym);
 void emitPushReg(Register reg);
 void emitRealToInt(OperatorArgument *arg);
 void emitRealToIntReg(Register arg);
-void emitRestoreRegs(u8 mask);
-void emitSaveRegs(u8 mask);
+void emitRestoreRegs(u16 mask);
+void emitSaveRegs(u16 mask);
 void emitStart(char *name);
 void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList);
 void emitStoreArg(Symbol *sym, OperatorArgument *arg);
@@ -129,8 +136,9 @@ void emitUpdateStringRef(OperatorArgument *strRef, OperatorArgument *strOffset, 
 void emitWordBlock(char *label, int size);
 void emitWordLabel(char *label);
 void enableEmission(bool isEnabled);
+void freeAddrReg(Register register);
 void freeAllRegisters(void);
 void freeRegister(Register register);
-u8 getRegisterMap(void);
+u16 getRegisterMap(void);
 
 #endif

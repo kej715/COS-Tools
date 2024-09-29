@@ -48,12 +48,20 @@ char *getNextChar(char *s);
 char *getIdentifier(char *s, Token *token);
 char *getNextToken(char *s, Token *token, bool doMatchKeywords);
 DataType *getSymbolType(Symbol *sym);
-void printSymbols(FILE *f);
+void list(char *format, ...);
+void listEject(void);
+void listSetPageEnd(void);
+void listSymbols(void);
+void printStackTrace(FILE *fp);
 void *reallocate(void *old, int oldSize, int newSize);
 void registerIntrinsicFunctions(void);
 void resetCommonBlocks(void);
 
+extern char currentDate[];
+extern char currentTime[];
 extern bool doEchoSource;
+extern bool doList;
+extern bool doStaticLocals;
 extern bool doStaticLocalsDefault;
 extern int lineNo;
 extern FILE *listingFile;
@@ -61,5 +69,6 @@ extern FILE *objectFile;
 extern Symbol *progUnitSym;
 extern FILE *sourceFile;
 extern char stmtBuf[];
+extern Symbol *symbols;
 
 #endif

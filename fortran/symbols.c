@@ -32,24 +32,23 @@
 
 static Symbol *addNode(char *identifier, SymbolClass class, Symbol **tree);
 static Symbol *allocNode(char *identifier, SymbolClass class);
-static char *dataTypeToStr(DataType *dt);
 static void emitCommonTree(Symbol *symbol);
 static Symbol *findNode(char *label, Symbol *tree);
 static void freeNode(Symbol *symbol);
 static void freeTree(Symbol *symbol);
-static void printTree(FILE *f, Symbol *symbol);
 static void resetCommonTree(Symbol *symbol);
-static char *symClassToStr(SymbolClass class);
 
 static Symbol *commonBlocks = NULL;
 static Symbol *intrinsicFunctions = NULL;
 static Symbol *labels = NULL;
 static int labelCounter = 0;
+static int labelPrefixIdx = 0;
+static char labelPrefixes[] = {'H','I','G','J','F','K','E','L','D','M','C','N','B','O','A','P'};
 static Symbol *lastSymbol = NULL;
-static Symbol *symbols = NULL;
 static DataType undefinedType = { BaseType_Undefined };
 
 Symbol *progUnitSym;
+Symbol *symbols = NULL;
 
 typedef struct intrinsicFnDefn {
     char *identifier;
@@ -403,33 +402,6 @@ int countArrayElements(Symbol *symbol) {
     return count;
 }
 
-static char *dataTypeToStr(DataType *dt) {
-    static char buf[32];
-
-    switch (dt->type) {
-    case BaseType_Undefined: return "Undefined";
-    case BaseType_Logical:   return "Logical";
-    case BaseType_Integer:   return "Integer";
-    case BaseType_Real:      return "Real";
-    case BaseType_Double:    return "Double";
-    case BaseType_Complex:   return "Complex";
-    case BaseType_Label:     return "Label";
-    case BaseType_Pointer:   return "Pointer";
-    default:                 return "Unknown";
-    case BaseType_Character:
-        if (dt->constraint > 0) {
-            sprintf(buf, "Character*%d", dt->constraint);
-            return buf;
-        }
-        else if (dt->constraint == 0) {
-            return "Character";
-        }
-        else {
-            return "Character*(*)";
-        }
-    }
-}
-
 void emitCommonBlocks(void) {
     emitCommonTree(commonBlocks);
 }
@@ -500,7 +472,8 @@ static void freeTree(Symbol *symbol) {
 }
 
 void generateLabel(char *label) {
-    sprintf(label, "L%d", ++labelCounter);
+    sprintf(label, "L%c%d", labelPrefixes[labelPrefixIdx], ++labelCounter);
+    labelPrefixIdx = (labelPrefixIdx + 1) & 0x0f;
 }
 
 DataType *getSymbolType(Symbol *symbol) {
@@ -519,66 +492,6 @@ DataType *getSymbolType(Symbol *symbol) {
         return &symbol->details.pointee.dt;
     default:
         return &undefinedType;
-    }
-}
-
-void printSymbols(FILE *f) {
-
-    if (f == NULL) return;
-
-    fputs(" \n", f);
-    fputs(" \n", f);
-    fputs("  Symbols\n", f);
-    fputs("  Name                            Class      Type           Size    Location Common\n", f);
-    fputs("  ------------------------------- ---------- -------------- ------- -------- --------\n", f);
-    printTree(f, symbols);
-}
-
-static void printTree(FILE *f, Symbol *symbol) {
-    int size;
-
-    if (symbol != NULL) {
-        printTree(f, symbol->left);
-        fprintf(f, "  %-31s", symbol->identifier);
-        fprintf(f, " %-10s", symClassToStr(symbol->class));
-        switch (symbol->class) {
-        case SymClass_Undefined:
-        case SymClass_Function:
-        case SymClass_Auto:
-        case SymClass_Static:
-        case SymClass_Global:
-        case SymClass_Argument:
-        case SymClass_Parameter:
-            fprintf(f, " %-14s", dataTypeToStr(&symbol->details.variable.dt));
-            size = calculateSize(symbol);
-            if (size > 0)
-                fprintf(f, " %-7d", size);
-            else
-                fputs("        ", f);
-            switch (symbol->class) {
-            case SymClass_Auto:
-            case SymClass_Static:
-            case SymClass_Global:
-            case SymClass_Argument:
-                fprintf(f, " %8d", symbol->details.variable.offset);
-                break;
-            case SymClass_Function:
-                if (symbol->details.progUnit.offset != 0)
-                    fprintf(f, " %8d", symbol->details.progUnit.offset);
-                break;
-            default:
-                fputs("         ", f);
-                break;
-            }
-            if (symbol->class == SymClass_Global) {
-                fprintf(f, " /%s/", symbol->details.variable.staticBlock->identifier);
-            }
-            break;
-        default:
-            break;
-        }
-        fputs("\n", f);
-        printTree(f, symbol->right);
     }
 }
 
@@ -623,22 +536,5 @@ static void resetCommonTree(Symbol *symbol) {
         resetCommonTree(symbol->left);
         resetCommonTree(symbol->right);
         symbol->details.common.offset = 0;
-    }
-}
-
-static char *symClassToStr(SymbolClass class) {
-    switch (class) {
-    case SymClass_Undefined:   return "Undefined";
-    case SymClass_Program:     return "Program";
-    case SymClass_BlockData:   return "Block Data";
-    case SymClass_Subroutine:  return "Subroutine";
-    case SymClass_Function:    return "Function";
-    case SymClass_NamedCommon: return "Common";
-    case SymClass_Auto:        return "Auto";
-    case SymClass_Static:      return "Static";
-    case SymClass_Global:      return "Common";
-    case SymClass_Argument:    return "Argument";
-    case SymClass_Parameter:   return "Parameter";
-    default:                   return "Unknown";
     }
 }

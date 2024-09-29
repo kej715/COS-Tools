@@ -80,15 +80,9 @@ typedef enum tokenId {
 
 typedef enum operatorId {
  /*
-  *  Unary operators
-  */
-    OP_NEG,
-    OP_NOT,
-    OP_PLUS,
- /*
   *  Binary operators
   */
-    OP_ADD,
+    OP_ADD = 0,
     OP_DIV,
     OP_EXP,
     OP_MUL,
@@ -105,6 +99,12 @@ typedef enum operatorId {
     OP_NE,
     OP_CAT,
  /*
+  *  Unary operators
+  */
+    OP_NEG,
+    OP_NOT,
+    OP_PLUS,
+ /*
   *  Special subexpression "operator"
   */
     OP_SEXPR
@@ -112,24 +112,24 @@ typedef enum operatorId {
 
 #define PREC_SEXPR 0
 #define PREC_EXP   1
-#define PREC_NEG   2
-#define PREC_PLUS  2
-#define PREC_MUL   3
-#define PREC_DIV   3
-#define PREC_ADD   4
-#define PREC_SUB   4
+#define PREC_MUL   2
+#define PREC_DIV   2
+#define PREC_NEG   3
+#define PREC_PLUS  3
+#define PREC_ADD   3
+#define PREC_SUB   3
 #define PREC_CAT   4
-#define PREC_NOT   5
-#define PREC_AND   6
-#define PREC_OR    7
-#define PREC_EQV   8
-#define PREC_NEQV  8
-#define PREC_EQ    9
-#define PREC_GT    9
-#define PREC_GE    9
-#define PREC_LT    9
-#define PREC_LE    9
-#define PREC_NE    9
+#define PREC_EQ    5
+#define PREC_GT    5
+#define PREC_GE    5
+#define PREC_LT    5
+#define PREC_LE    5
+#define PREC_NE    5
+#define PREC_NOT   6
+#define PREC_AND   7
+#define PREC_OR    8
+#define PREC_EQV   9
+#define PREC_NEQV  9
 
 typedef enum statementClass {
     StmtClass_None = 0,
@@ -168,6 +168,7 @@ typedef enum symbolClass {
     SymClass_Program,
     SymClass_Subroutine,
     SymClass_Function,
+    SymClass_Intrinsic,
     SymClass_BlockData,
     SymClass_NamedCommon,
     SymClass_Auto,
@@ -312,6 +313,7 @@ typedef struct pointeeDetails {
 typedef struct progUnitDetails {
     DataType dt;
     int offset;
+    char exitLabel[8];
     char frameSizeLabel[8];
     char staticDataLabel[8];
 } ProgUnitDetails;
@@ -457,6 +459,6 @@ typedef struct dataInitializerItem {
 #define isBinaryOp(op)  (((op) >= OP_ADD) && ((op) <= OP_CAT))
 #define isCompareOp(op) (((op) >= OP_EQ ) && ((op) <= OP_NE))
 #define isLogicalOp(op) (((op) >= OP_AND) && ((op) <= OP_NEQV))
-#define isUnaryOp(op)   ((op) < OP_ADD)
+#define isUnaryOp(op)   (((op) >= OP_NEG) && ((op) <= OP_PLUS))
 
 #endif

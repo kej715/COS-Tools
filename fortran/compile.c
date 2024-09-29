@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "binops.h"
 #include "codegen.h"
 #include "coercion.h"
@@ -61,12 +62,12 @@ static void adjustDataInitializers(void);
 static char *baseTypeToStr(BaseType type);
 static char *collectStmt(void);
 static Token *copyToken(Token *token);
-static void createCharConst(char *s, OperatorArgument *charConst);
 static Token *createIntegerConstant(int value);
 static void defineLocalVariable(Symbol *symbol);
 static void defineType(Symbol *symbol);
 static char *eatWsp(char *s);
 static void err(char *format, ...);
+static void errArgType(OperatorId op, BaseType type);
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset);
 static bool evaluateExpression(Token *expression, OperatorArgument *result);
 static bool evaluateExprHelper(Token *expression);
@@ -98,9 +99,9 @@ static char *getStorageReference(char *s, char *paramName, BaseType type, Storag
 static void inputCheckIostat(ControlInfoList *ciList);
 static void inputFini(ControlInfoList *ciList);
 static void inputInit(ControlInfoList *ciList);
-static void list(char *format, ...);
 static void loadValue(OperatorArgument *value);
 static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic);
+static void notSupported(char *s);
 static char *opIdToStr(OperatorId id);
 static void outputCheckIostat(ControlInfoList *ciList);
 static void outputFini(ControlInfoList *ciList);
@@ -133,6 +134,8 @@ static void presetProgUnit(void);
 static void pushArg(OperatorArgument *arg);
 static void pushOp(OperatorDetails *op);
 static char *readLine(void);
+static void setCharArg(OperatorArgument *arg, char *s);
+static void setIntegerArg(OperatorArgument *arg, int value);
 static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList);
 static void verifyEOS(char *s);
 static void warn(char *format, ...);
@@ -159,6 +162,7 @@ static void parseIF(char *s, bool isFromLogIf);
 static void parseINCLUDE(char *s);
 static void parseINTRINSIC(char *s);
 static void parseINQUIRE(char *s);
+static void parsePAUSE(char *s);
 static void parseSAVE(char *s);
 static void parseSTOP(char *s);
 static void parseSUBROUTINE(char *s);
@@ -170,6 +174,7 @@ static void parsePRINT(char *s);
 static void parsePROGRAM(char *s);
 static void parsePUNCH(char *s);
 static void parseREAD(char *s);
+static void parseRETURN(char *s);
 static void parseWRITE(char *s);
 
 #if DEBUG
@@ -185,6 +190,7 @@ static ArgumentClass argClassForSymClass[] = {
     ArgClass_Undefined,  /* SymClass_Program     */
     ArgClass_Undefined,  /* SymClass_Subroutine  */
     ArgClass_Function,   /* SymClass_Function    */
+    ArgClass_Undefined,  /* SymClass_Intrinsic   */
     ArgClass_Undefined,  /* SymClass_BlockData   */
     ArgClass_Undefined,  /* SymClass_NamedCommon */
     ArgClass_Auto,       /* SymClass_Auto        */
@@ -200,23 +206,23 @@ static Symbol defaultProgSym = {
 };
 static int autoOffset = 0;
 static Symbol *currentLabel;
-static bool doList = TRUE;
-static bool doStaticLocals = TRUE;
 static int errorCount = 0;
 static DataType implicitTypes[26];
 static char lineBuf[MAX_LINE_LENGTH+1];
 static int staticOffset = 0;
 static ParsingState state;
+static int totalErrors = 0;
 static int warningCount = 0;
 
 static OperatorArgument argStack[MAX_ARG_STACK_SIZE];
-static int argStkPtr;
+static int argStkPtr = 0;
 static DoStackEntry doStack[MAX_DO_STACK_SIZE];
 static int doStackPtr = 0;
 static IfStackEntry ifStack[MAX_IF_STACK_SIZE];
 static int ifStackPtr = 0;
 static OperatorDetails opStack[MAX_OP_STACK_SIZE];
-static int opStkPtr;
+static int opStkBtm;
+static int opStkPtr = 0;
 
 static ConstantListItem *firstCListItem = NULL;
 static DataInitializerItem *firstDListItem = NULL;
@@ -235,7 +241,6 @@ static char *collectStmt() {
     char *lp;
     char *s;
     char *stmtLimit;
-    Token token;
 
     s = stmtBuf;
     *s = '\0';
@@ -257,7 +262,7 @@ static char *collectStmt() {
                     parseDirective(lp, lineNo);
                 }
                 else {
-                    list("%6d: %s\n", lineNo, lineBuf);
+                    list("%6d: %s", lineNo, lineBuf);
                 }
                 lineBuf[0] = '\0';
             }
@@ -266,18 +271,18 @@ static char *collectStmt() {
         }
         else if (*lp == '*' || *lp == '!') {
             if (s == stmtBuf) {
-                list("%6d: %s\n", ++lineNo, lp);
+                list("%6d: %s", ++lineNo, lp);
                 lineBuf[0] = '\0';
             }
             *s = '\0';
             break;
         }
         else if (stmtBuf[0] == '\0') {
-            list("%6d: %s\n", ++lineNo, lp);
+            list("%6d: %s", ++lineNo, lp);
             while (*lp != '\0') *s++ = *lp++;
         }
         else if (lineBuf[5] != ' ' && lineBuf[5] != '0') {
-            list("%6d: %s\n", ++lineNo, lp);
+            list("%6d: %s", ++lineNo, lp);
             lp = lineBuf + 6;
             while (*lp != '\0' && s < stmtLimit) *s++ = *lp++;
         }
@@ -292,6 +297,7 @@ static char *collectStmt() {
 }
 
 void compile(char *name) {
+    time_t clock;
     DataType dt;
     DoStackEntry *entry;
     int i;
@@ -302,14 +308,27 @@ void compile(char *name) {
     char *start;
     StatementClass stmtClass;
     Symbol *sym;
+    struct tm *tmp;
     Token token;
+    int year;
+
+    clock = time(NULL);
+    tmp = localtime(&clock);
+    year = tmp->tm_year >= 100 ? tmp->tm_year - 100 : tmp->tm_year;
+    sprintf(currentDate, "%02d/%02d/%02d", tmp->tm_mon + 1, tmp->tm_mday, year);
+    sprintf(currentTime, "%02d:%02d:%02d", tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
     lineBuf[0] = '\0';
     lineNo = 0;
     emitStart(name);
     presetProgUnit();
+    listSetPageEnd();
 
     for (;;) {
+#if DEBUG
+        checkRegisterMap();
+        freeAllRegisters();
+#endif
         start = s = collectStmt();
         if (s == NULL) {
             emitCommonBlocks();
@@ -398,7 +417,7 @@ void compile(char *name) {
                     parseSUBROUTINE(s);
                     continue;
                 case COMPLEX:
-                    err("Not yet supported: COMPLEX");
+                    notSupported("COMPLEX");
                     continue;
                 case CHARACTER:
                 case INTEGER:
@@ -466,7 +485,7 @@ void compile(char *name) {
             if (token.type == TokenType_Keyword) {
                 switch (token.details.keyword.id) {
                 case COMPLEX:
-                    err("Not yet supported: COMPLEX");
+                    notSupported("COMPLEX");
                     continue;
                 case CHARACTER:
                 case DOUBLEPRECISION:
@@ -590,6 +609,7 @@ void compile(char *name) {
                     parseOPEN(s);
                     break;
                 case PAUSE:
+                    parsePAUSE(s);
                     break;
                 case PRINT:
                     parsePRINT(s);
@@ -601,6 +621,7 @@ void compile(char *name) {
                     parseREAD(s);
                     break;
                 case RETURN:
+                    parseRETURN(s);
                     break;
                 case REWIND:
                     break;
@@ -646,6 +667,7 @@ void compile(char *name) {
             }
         }
     }
+    if (totalErrors > 0) exit(1);
 }
 
 static Token *copyToken(Token *token) {
@@ -699,14 +721,6 @@ static Token *copyToken(Token *token) {
     return new;
 }
 
-static void createCharConst(char *s, OperatorArgument *charConst) {
-    charConst->class = ArgClass_Constant;
-    charConst->details.constant.dt.type = BaseType_Character;
-    charConst->details.constant.dt.rank = 0;
-    charConst->details.constant.value.character.length = strlen(s);
-    charConst->details.constant.value.character.string = s;
-}
-
 static Token *createIntegerConstant(int value) {
     Token *token;
 
@@ -749,15 +763,18 @@ static void err(char *format, ...) {
     va_start(ap, format);
     vsprintf(buf, format, ap);
     va_end(ap);
-    list(" *ERROR*   %s\n", buf);
+    list(" *ERROR*   %s", buf);
     fprintf(stderr, "ERROR line %d : %s\n", lineNo, buf);
     errorCount += 1;
 }
 
+static void errArgType(OperatorId op, BaseType type) {
+    err("Invalid argument type %s to '%s'", baseTypeToStr(type), op);
+}
+
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset) {
-    void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
     int d;
-    OperatorArgument dim;
+    int dim;
     int rank;
     OperatorArgument subscript;
     OperatorArgument sum;
@@ -769,34 +786,34 @@ static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, Opera
     if (evaluateSubscript(symbol, subscriptList, rank - 1, &sum)) return TRUE;
 
     if (rank > 1) { // 2 or more dimensional array
-        memset(&dim, 0, sizeof(OperatorArgument));
-        dim.details.constant.dt.type = BaseType_Integer;
         for (d = rank - 2; d >= 0; d--) {
-            dim.class = ArgClass_Constant;
-            dim.details.constant.value.integer = (symbol->details.variable.dt.bounds[d].upper - symbol->details.variable.dt.bounds[d].lower) + 1;
+            dim = (symbol->details.variable.dt.bounds[d].upper - symbol->details.variable.dt.bounds[d].lower) + 1;
             if (isConstant(sum)) {
-                sum.details.constant.value.integer *= dim.details.constant.value.integer;
+                sum.details.constant.value.integer *= dim;
             }
             else {
-                emitLoadConst(&dim);
-                binop = genBinOps[OP_MUL - OP_ADD][BaseType_Integer];
-                if (isLoadable(sum)) emitLoadValue(&sum);
-                (*binop)(&dim, &sum);
-                freeRegister(dim.reg);
+                emitMulOffset(sum.reg, dim);
             }
             if (evaluateSubscript(symbol, subscriptList, d, &subscript)) {
-                if (isCalculation(sum)) freeRegister(sum.reg);
+                if (isCalculation(sum)) freeAddrReg(sum.reg);
                 return TRUE;
             }
-            if (isConstant(subscript) && isConstant(sum)) {
-                sum.details.constant.value.integer += subscript.details.constant.value.integer;
+            if (isConstant(sum)) {
+                if (isConstant(subscript)) {
+                    sum.details.constant.value.integer += subscript.details.constant.value.integer;
+                }
+                else {
+                    emitAddOffset(subscript.reg, sum.details.constant.value.integer);
+                    sum.reg = subscript.reg;
+                    sum.class = ArgClass_Calculation;
+                }
+            }
+            else if (isConstant(subscript)) {
+                emitAddOffset(sum.reg, subscript.details.constant.value.integer);
             }
             else {
-                loadValue(&subscript);
-                loadValue(&sum);
-                binop = genBinOps[OP_ADD - OP_ADD][BaseType_Integer];
-                (*binop)(&subscript, &sum);
-                freeRegister(subscript.reg);
+                emitAddOffsets(subscript.reg, sum.reg);
+                freeAddrReg(subscript.reg);
             }
         }
     }
@@ -805,13 +822,7 @@ static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, Opera
             sum.details.constant.value.integer *= symbol->details.variable.dt.constraint;
         }
         else {
-            dim.class = ArgClass_Constant;
-            dim.details.constant.value.integer = symbol->details.variable.dt.constraint;
-            emitLoadConst(&dim);
-            binop = genBinOps[OP_MUL - OP_ADD][BaseType_Integer];
-            if (isLoadable(sum)) emitLoadValue(&sum);
-            (*binop)(&dim, &sum);
-            freeRegister(dim.reg);
+            emitMulOffset(sum.reg, symbol->details.variable.dt.constraint);
         }
     }
     *offset = sum;
@@ -820,29 +831,35 @@ static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, Opera
 }
 
 static bool evaluateExpression(Token *expression, OperatorArgument *result) {
+    int curOpStkBtm;
+    int argStkBtm;
     bool err;
     Token token;
 
-    argStkPtr = 0;
-    opStkPtr = 0;
+    curOpStkBtm = opStkBtm;
+    argStkBtm = argStkPtr;
+    opStkBtm  = opStkPtr;
     err = evaluateExprHelper(expression);
-    if (err == FALSE && argStkPtr == 1 && opStkPtr == 0) {
+    if (err == FALSE && argStkPtr == (argStkBtm + 1) && opStkPtr == opStkBtm) {
         popArg(result);
     }
+    else {
+        argStkPtr = argStkBtm;
+        opStkPtr  = opStkBtm;
+    }
+    opStkBtm = curOpStkBtm;
 
     return err;
 }
 
 static bool evaluateExprHelper(Token *expression) {
     OperatorArgument arg;
-    bool err;
     OperatorDetails op;
     Token *rightArg;
 
-    err = FALSE;
     switch (expression->type) {
     case TokenType_Identifier:
-        err = evaluateIdentifier(expression);
+        if (evaluateIdentifier(expression)) return TRUE;
         break;
     case TokenType_Constant:
         arg.class = ArgClass_Constant;
@@ -852,36 +869,32 @@ static bool evaluateExprHelper(Token *expression) {
     case TokenType_Operator:
         if (expression->details.operator.id == OP_SEXPR) {
             pushOp(&expression->details.operator);
-            err = evaluateExprHelper(expression->details.operator.rightArg);
+            if (evaluateExprHelper(expression->details.operator.rightArg)) return TRUE;
             opStkPtr -= 1;
-            return err;
+            return FALSE;
         }
         if (expression->details.operator.leftArg != NULL) {
-            err = evaluateExprHelper(expression->details.operator.leftArg);
-            if (err) return err;
-            while (opStkPtr > 0
+            if (evaluateExprHelper(expression->details.operator.leftArg)) return TRUE;
+            while (opStkPtr > opStkBtm
                    && opStack[opStkPtr - 1].id != OP_SEXPR
                    && expression->details.operator.precedence >= opStack[opStkPtr - 1].precedence) {
                 popOp(&op);
-                err = executeOperator(op.id);
-                if (err) return err;
+                if (executeOperator(op.id)) return TRUE;
             }
         }
         pushOp(&expression->details.operator);
-        err = evaluateExprHelper(expression->details.operator.rightArg);
-        if (err) return err;
-        while (opStkPtr > 0 && opStack[opStkPtr - 1].id != OP_SEXPR) {
+        if (evaluateExprHelper(expression->details.operator.rightArg)) return TRUE;
+        while (opStkPtr > opStkBtm && opStack[opStkPtr - 1].id != OP_SEXPR) {
             popOp(&op);
-            err = executeOperator(op.id);
-            if (err) break;
+            if (executeOperator(op.id)) return TRUE;
         }
         break;
     default:
-        err = TRUE;
-        break;
+        err("Expression syntax");
+        return TRUE;
     }
 
-    return err;
+    return FALSE;
 }
 
 static bool evaluateFmtSpec(ControlInfoList *ciList) {
@@ -936,7 +949,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
     int pass;
     TokenListItem *qualifier;
     Register reg;
-    u8 registerMap;
+    u16 registerMap;
     OperatorArgument result;
     int tempIdx;
     int varArgIncr;
@@ -965,7 +978,12 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
         for (qualifier = fn->details.identifier.qualifiers; qualifier != NULL; qualifier = qualifier->next) {
             if (qualifier->item == NULL) continue;
             if (evaluateExpression(qualifier->item, &result)) {
-                enableEmission(TRUE);
+                if (pass == 1) {
+                    enableEmission(TRUE);
+                }
+                else {
+                    emitAdjustSP(frameSize);
+                }
                 emitRestoreRegs(registerMap);
                 return TRUE;
             }
@@ -988,10 +1006,10 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
                     else {
                         emitLoadConst(&result);
                         emitStoreStack(result.reg, tempIdx);
+                        freeRegister(result.reg);
                         reg = (intrinsic == NULL) ? emitLoadStackAddr(tempIdx) : emitLoadStackByteAddr(tempIdx);
                         emitStoreStack(reg, parmIdx);
                         freeRegister(reg);
-                        freeRegister(result.reg);
                         tempIdx += 1;
                     }
                 }
@@ -999,6 +1017,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
             else if (isLoadable(result)) {
                 if (pass == 1) {
                     frameSize += 1;
+                    freeAllRegisters();
                 }
                 else {
                     if (intrinsic != NULL && dt->type != BaseType_Character)
@@ -1012,6 +1031,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
             else if (dt->type == BaseType_Character) {
                 if (pass == 1) {
                     frameSize += 1;
+                    freeAllRegisters();
                 }
                 else {
                     emitStoreStack(result.reg, parmIdx);
@@ -1021,13 +1041,14 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
             else {
                 if (pass == 1) {
                     frameSize += 2;
+                    freeAllRegisters();
                 }
                 else {
                     emitStoreStack(result.reg, tempIdx);
+                    freeRegister(result.reg);
                     reg = (intrinsic == NULL) ? emitLoadStackAddr(tempIdx) : emitLoadStackByteAddr(tempIdx);
                     emitStoreStack(reg, parmIdx);
                     freeRegister(reg);
-                    freeRegister(result.reg);
                     tempIdx += 1;
                 }
             }
@@ -1075,7 +1096,12 @@ static bool evaluateIdentifier(Token *id) {
         }
         else {
             intrinsic = findIntrinsicFunction(name);
-            if (intrinsic == NULL) defineType(symbol);
+            if (intrinsic != NULL) {
+                symbol->class = SymClass_Intrinsic;
+            }
+            else {
+                defineType(symbol);
+            }
             return evaluateFunction(id, symbol, intrinsic);
         }
     }
@@ -1086,6 +1112,9 @@ static bool evaluateIdentifier(Token *id) {
         symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
         autoOffset -= calculateSize(symbol);
         symbol->details.progUnit.offset = autoOffset;
+    }
+    else if (symbol->class == SymClass_Intrinsic) {
+        return evaluateFunction(id, symbol, findIntrinsicFunction(name));
     }
 
     arg.class = argClassForSymClass[symbol->class];
@@ -1125,7 +1154,7 @@ static bool evaluateIdentifier(Token *id) {
             }
             if (id->details.identifier.range != NULL) {
                 if (evaluateStringRange(symbol, id->details.identifier.range, &strOffset, &strLength)) {
-                    if (isCalculation(offset)) freeRegister(offset.reg);
+                    if (isCalculation(offset)) freeAddrReg(offset.reg);
                     return TRUE;
                 }
                 emitLoadReference(&arg, NULL);
@@ -1219,7 +1248,7 @@ static bool evaluateStorageReference(StorageReference *reference, OperatorArgume
         }
         else {
             if (evaluateStringRange(symbol, reference->strRange, &strOffset, &strLength)) {
-                if (isCalculation(offset)) freeRegister(offset.reg);
+                if (isCalculation(offset)) freeAddrReg(offset.reg);
                 return TRUE;
             }
             emitLoadReference(target, object);
@@ -1237,29 +1266,31 @@ static bool evaluateStorageReference(StorageReference *reference, OperatorArgume
 static bool evaluateStringIndex(Token *expression, OperatorArgument *index) {
     void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
     DataType *dt;
+    BaseType type;
 
     if (evaluateExpression(expression, index)) {
         err("Incorrect string index");
         return TRUE;
     }
     dt = getDataType(index);
-    if (dt->type != BaseType_Integer) dt->type = coerceArgument(index, dt->type, BaseType_Integer);
+    if (dt->type != BaseType_Integer) {
+        type = coerceArgument(index, dt->type, BaseType_Integer);
+        if (type == BaseType_Undefined) {
+            err("Incorrent string index type");
+            if (index->class == ArgClass_Calculation) freeRegister(index->reg);
+            return TRUE;
+        }
+    }
 
-    return dt->type == BaseType_Undefined;
+    return FALSE;
 }
 
 static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgument *offset, OperatorArgument *length) {
     void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
     OperatorArgument negOne;
 
-    memset(offset, 0, sizeof(OperatorArgument));
-    offset->class = ArgClass_Constant;
-    offset->details.constant.dt.type = BaseType_Integer;
-    offset->details.constant.value.integer = 0;
-    memset(length, 0, sizeof(OperatorArgument));
-    length->class = ArgClass_Constant;
-    length->details.constant.dt.type = BaseType_Integer;
-    length->details.constant.value.integer = symbol->details.variable.dt.constraint;
+    setIntegerArg(offset, 0);
+    setIntegerArg(length, symbol->details.variable.dt.constraint);
     if (range != NULL) {
         if (range->first != NULL) {
             if (evaluateStringIndex(range->first, offset)) return TRUE;
@@ -1267,13 +1298,10 @@ static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgu
                 offset->details.constant.value.integer -= 1;
             }
             else {
-                memset(&negOne, 0, sizeof(OperatorArgument));
-                negOne.class = ArgClass_Constant;
-                negOne.details.constant.dt.type = BaseType_Integer;
-                negOne.details.constant.value.integer = -1;
+                setIntegerArg(&negOne, -1);
                 emitLoadConst(&negOne);
                 if (offset->class > ArgClass_Function) emitLoadValue(offset);
-                binop = genBinOps[OP_ADD - OP_ADD][BaseType_Integer];
+                binop = genBinOps[OP_ADD][BaseType_Integer];
                 (*binop)(&negOne, offset);
                 freeRegister(negOne.reg);
                 offset->class = ArgClass_Calculation;
@@ -1295,7 +1323,7 @@ static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgu
         loadValue(length);
         loadValue(offset);
         emitPushReg(offset->reg);
-        binop = genBinOps[OP_SUB - OP_ADD][BaseType_Integer];
+        binop = genBinOps[OP_SUB][BaseType_Integer];
         (*binop)(length, offset);
         freeRegister(length->reg);
         length->reg = offset->reg;
@@ -1307,11 +1335,10 @@ static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgu
 }
 
 static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int idx, OperatorArgument *subscript) {
-    void (*binop)(OperatorArgument *leftArg, OperatorArgument *rightArg);
     DataType *dt;
-    bool isConst;
-    OperatorArgument lowerBound;
     TokenListItem *qualifier;
+    Register reg;
+    BaseType type;
 
     qualifier = getQualifier(subscriptList, idx);
     if (qualifier == NULL || qualifier->item == NULL || evaluateExpression(qualifier->item, subscript)) {
@@ -1319,25 +1346,35 @@ static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int 
         return TRUE;
     }
     dt = getDataType(subscript);
-    if (dt->type != BaseType_Integer) dt->type = coerceArgument(subscript, dt->type, BaseType_Integer);
+    if (dt->type != BaseType_Integer) {
+        type = coerceArgument(subscript, dt->type, BaseType_Integer);
+        if (type == BaseType_Undefined) {
+            err("Incorrect subscript type");
+            if (subscript->class == ArgClass_Calculation) freeRegister(subscript->reg);
+            return TRUE;
+        }
+    }
     if (symbol->details.variable.dt.bounds[idx].lower != 0) {
         if (subscript->class == ArgClass_Constant) {
             subscript->details.constant.value.integer -= symbol->details.variable.dt.bounds[idx].lower;
         }
         else {
-            memset(&lowerBound, 0, sizeof(OperatorArgument));
-            lowerBound.class = ArgClass_Constant;
-            lowerBound.details.constant.dt.type = BaseType_Integer;
-            lowerBound.details.constant.value.integer = -symbol->details.variable.dt.bounds[idx].lower;
-            emitLoadConst(&lowerBound);
-            if (subscript->class > ArgClass_Function) emitLoadValue(subscript);
-            binop = genBinOps[OP_ADD - OP_ADD][BaseType_Integer];
-            (*binop)(&lowerBound, subscript);
-            freeRegister(lowerBound.reg);
+            loadValue(subscript);
+            reg = allocateAddrReg();
+            emitCopyToOffset(reg, subscript->reg);
+            freeRegister(subscript->reg);
+            emitAddOffset(reg, -symbol->details.variable.dt.bounds[idx].lower);
+            subscript->reg = reg;
             subscript->class = ArgClass_Calculation;
         }
     }
-
+    else if (subscript->class != ArgClass_Constant) {
+        loadValue(subscript);
+        reg = allocateAddrReg();
+        emitCopyToOffset(reg, subscript->reg);
+        freeRegister(subscript->reg);
+        subscript->reg = reg;
+    }
     return FALSE;
 }
 
@@ -1347,44 +1384,39 @@ static bool executeOperator(OperatorId op) {
     bool isBop;
     bool isConstResult;
     OperatorArgument leftArg;
-    DataType *leftType;
+    BaseType leftType;
     OperatorArgument rightArg;
-    DataType *rightType;
+    BaseType rightType;
 
     popArg(&rightArg);
-    rightType = getDataType(&rightArg);
+    rightType = getDataType(&rightArg)->type;
     isConstResult = isConstant(rightArg);
-    if (isLoadable(rightArg)) {
-        emitLoadValue(&rightArg);
-    }
+    if (isLoadable(rightArg)) loadValue(&rightArg);
     isBop = isBinaryOp(op);
     if (isBop) {
         popArg(&leftArg);
-        leftType = getDataType(&leftArg);
+        leftType = getDataType(&leftArg)->type;
         isConstResult = isConstResult && isConstant(leftArg);
-        argType = calculateCoercedType(op, leftType->type, rightType->type);
+        argType = calculateCoercedType(op, leftType, rightType);
         if (argType == BaseType_Undefined) {
-            err("Invalid argument type to '%s'", opIdToStr(op));
+            err("Invalid type combination %s/%s to '%s'", baseTypeToStr(leftType), baseTypeToStr(rightType), opIdToStr(op));
             return TRUE;
         }
-        if (isLoadable(leftArg)) {
-            emitLoadValue(&leftArg);
-        }
-        if (leftType->type  != argType) leftType->type  = coerceArgument(&leftArg,  leftType->type,  argType);
-        if (rightType->type != argType) rightType->type = coerceArgument(&rightArg, rightType->type, argType);
+        if (isLoadable(leftArg)) loadValue(&leftArg);
+        if (leftType  != argType) leftType  = coerceArgument(&leftArg,  leftType,  argType);
+        if (rightType != argType) rightType = coerceArgument(&rightArg, rightType, argType);
         if (!isConstResult) {
             if (isConstant(leftArg)) emitLoadConst(&leftArg);
             if (isConstant(rightArg)) emitLoadConst(&rightArg);
         }
     }
-
     switch (op) {
     /*
      *  Unary operators
      */
     case OP_NEG:
         if (isConstResult) {
-            switch (rightArg.details.constant.dt.type) {
+            switch (rightType) {
             case BaseType_Integer:
             case BaseType_Pointer:
                 rightArg.details.constant.value.integer = -rightArg.details.constant.value.integer;
@@ -1401,59 +1433,62 @@ static bool executeOperator(OperatorId op) {
                 rightArg.details.constant.value.complex.imaginary = -rightArg.details.constant.value.complex.imaginary;
                 break;
             default:
-                err("Invalid argument type to '%s'", opIdToStr(op));
+                errArgType(op, rightType);
                 return TRUE;
             }
         }
         else {
-            if (rightType->type == BaseType_Integer || rightType->type == BaseType_Real || rightType->type == BaseType_Logical) {
-                emitNegReg(rightArg.reg, rightType->type);
-            }
-            else {
-                err("Invalid argument type to '%s'", opIdToStr(op));
+            switch(rightType) {
+            case BaseType_Integer:
+            case BaseType_Real:
+            case BaseType_Double:
+            case BaseType_Logical:
+                emitNegReg(rightArg.reg, rightType);
+                break;
+            default:
+                errArgType(op, rightType);
                 return TRUE;
             }
         }
         break;
     case OP_NOT:
         if (isConstResult) {
-            switch (rightArg.details.constant.dt.type) {
+            switch (rightType) {
             case BaseType_Integer:
             case BaseType_Pointer:
             case BaseType_Logical:
                 rightArg.details.constant.value.logical = ~rightArg.details.constant.value.logical;
                 break;
             default:
-                err("Invalid argument type to '%s'", opIdToStr(op));
+                errArgType(op, rightType);
                 return TRUE;
             }
         }
         else {
-            if (rightType->type == BaseType_Logical || rightType->type == BaseType_Integer) {
-                emitNotReg(rightArg.reg, rightType->type);
-            }
-            else {
-                err("Invalid argument type to '%s'", opIdToStr(op));
+            switch (rightType) {
+            case BaseType_Integer:
+            case BaseType_Pointer:
+            case BaseType_Logical:
+                emitNotReg(rightArg.reg, rightType);
+                break;
+            default:
+                errArgType(op, rightType);
                 return TRUE;
             }
         }
         break;
     case OP_PLUS:
-        if (isConstResult) {
-            switch (rightArg.details.constant.dt.type) {
-            case BaseType_Integer:
-            case BaseType_Pointer:
-            case BaseType_Real:
-            case BaseType_Logical:
-            case BaseType_Double:
-            case BaseType_Complex:
-                break;
-            default:
-                err("Invalid argument type to '%s'", opIdToStr(op));
-                return TRUE;
-            }
-        }
-        else {
+        switch (rightType) {
+        case BaseType_Integer:
+        case BaseType_Pointer:
+        case BaseType_Real:
+        case BaseType_Logical:
+        case BaseType_Double:
+        case BaseType_Complex:
+            break;
+        default:
+            errArgType(op, rightType);
+            return TRUE;
         }
         break;
     /*
@@ -1484,12 +1519,12 @@ static bool executeOperator(OperatorId op) {
      *  Binary character operators
      */
     case OP_CAT:
-        binop = isConstResult ? cstBinOps[op - OP_ADD][argType] : genBinOps[op - OP_ADD][argType];
+        binop = isConstResult ? cstBinOps[op][argType] : genBinOps[op][argType];
         if (binop != NULL) {
             (*binop)(&leftArg, &rightArg);
         }
         else {
-            err("Operator '%s' does not accept %s", opIdToStr(op), baseTypeToStr(argType));
+            errArgType(op, argType);
             return TRUE;
         }
         break;
@@ -1670,6 +1705,7 @@ static DataType *getDataType(OperatorArgument *arg) {
         return &arg->details.calculation;
     default:
         fprintf(stderr, "Unrecognized operator argument class: %d\n", arg->class);
+        printStackTrace(stderr);
         exit(1);
     }
 }
@@ -1815,16 +1851,6 @@ static void inputInit(ControlInfoList *ciList) {
     }
 }
 
-static void list(char *format, ...) {
-    va_list ap;
-
-    if (listingFile != NULL && doList) {
-        va_start(ap, format);
-        vfprintf(listingFile, format, ap);
-        va_end(ap);
-    }
-}
-
 static void loadValue(OperatorArgument *value) {
     if (value->class == ArgClass_Constant) {
         emitLoadConst(value);
@@ -1857,14 +1883,20 @@ static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
                 err("Too many arguments for intrinsic %s", name);
                 return NULL;
             }
-            if (evaluateExpression(qualifier->item, &results[argc++])) return NULL;
+            if (evaluateExpression(qualifier->item, &results[argc])) return NULL;
+            if (isCalculation(results[argc])) freeRegister(results[argc].reg);
+            argc += 1;
         }
-        if (argc != intrinsic->details.intrinsic.argc) return NULL;
+        if (argc != intrinsic->details.intrinsic.argc) {
+            err("Incorrect number of arguments for intrinsic %s", name);
+            return NULL;
+        }
     }
     else { // function with variable number of arguments
         for (qualifier = fn->details.identifier.qualifiers; qualifier != NULL; qualifier = qualifier->next) {
             if (qualifier->item == NULL) continue;
             if (evaluateExpression(qualifier->item, &r)) return NULL;
+            if (isCalculation(r)) freeRegister(r.reg);
             if (argc == 0) {
                 results[argc++] = r;
                 dt = getDataType(&r);
@@ -1893,6 +1925,10 @@ static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
         }
     }
     return intrinsic;
+}
+
+static void notSupported(char *s) {
+    err("Not yet supported: %s");
 }
 
 static void parseArithmeticIF(char *s, Register reg) {
@@ -2105,6 +2141,7 @@ static char *parseActualArguments(char *s, int *frameSize) {
                 else if (isLoadable(result)) {
                     if (pass == 1) {
                         *frameSize += 1;
+                        freeAllRegisters();
                     }
                     else {
                         emitLoadReference(&result, NULL);
@@ -2115,6 +2152,7 @@ static char *parseActualArguments(char *s, int *frameSize) {
                 else if (dt->type == BaseType_Character) {
                     if (pass == 1) {
                         *frameSize += 1;
+                        freeAllRegisters();
                     }
                     else {
                         emitStoreStack(result.reg, parmIdx);
@@ -2124,6 +2162,7 @@ static char *parseActualArguments(char *s, int *frameSize) {
                 else {
                     if (pass == 1) {
                         *frameSize += 2;
+                        freeAllRegisters();
                     }
                     else {
                         emitStoreStack(result.reg, tempIdx);
@@ -2579,7 +2618,7 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
             break;
         case COMPLEX:
             dt->type = BaseType_Complex;
-            err("Not yet supported: COMPLEX");
+            notSupported("COMPLEX");
             s = start;
             break;
         case DOUBLEPRECISION:
@@ -2633,7 +2672,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
                 err("Too many dimensions");
                 break;
             }
-            dt->bounds[dt->rank].lower = 0;
+            dt->bounds[dt->rank].lower = 1;
             dt->bounds[dt->rank].upper = 0;
             dt->rank += 1;
             s += 1;
@@ -2714,7 +2753,7 @@ static void parseDirective(char *s, int lineNo) {
     s = getNextToken(s + 6, &token, FALSE);
     if (token.type == TokenType_Identifier) {
         if (strcasecmp(token.details.identifier.name, "EJECT") == 0) {
-            list("1\n");
+            listEject();
             return;
         }
         else if (strcasecmp(token.details.identifier.name, "LIST") == 0) {
@@ -2734,7 +2773,7 @@ static void parseDirective(char *s, int lineNo) {
                 else if (strcasecmp(token.details.identifier.name, "STACK") == 0
                          || strcasecmp(token.details.identifier.name, "AUTO") == 0) {
                     if (progUnitSym->class == SymClass_BlockData) {
-                        list("%6d: %s\n", lineNo, start);
+                        list("%6d: %s", lineNo, start);
                         err("ALLOC=%s invalid for BLOCK DATA", token.details.identifier.name);
                         return;
                     }
@@ -2743,7 +2782,7 @@ static void parseDirective(char *s, int lineNo) {
             }
         }
     }
-    list("%6d: %s\n", lineNo, start);
+    list("%6d: %s", lineNo, start);
 }
 
 static char *parseExpression(char *s, Token **expression) {
@@ -2751,6 +2790,7 @@ static char *parseExpression(char *s, Token **expression) {
     Token *leftArg;
     Token *op;
     Token *rightArg;
+    char *start;
     StringRange *strRange;
     Token token;
     Token *tp;
@@ -2768,7 +2808,7 @@ static char *parseExpression(char *s, Token **expression) {
         token.details.operator.id = OP_SEXPR;
         token.details.operator.rightArg = rightArg;
         leftArg = copyToken(&token);
-        s += 1;
+        s = eatWsp(s + 1);
         if (*s == '\0' || *s == ',' || *s == ')') {
             *expression = leftArg;
             return s;
@@ -2793,14 +2833,15 @@ static char *parseExpression(char *s, Token **expression) {
         break;
     case TokenType_Identifier:
         if (*s == '(') {
-            s = eatWsp(s);
+            start = s;
+            s = eatWsp(s + 1);
             if (*s == ')') { // maybe a parameter-less function call
                 expressionList = (TokenListItem *)allocate(sizeof(TokenListItem));
                 s = eatWsp(s + 1);
             }
             else {
                 tp = copyToken(&token);
-                s = parseExpressionList(s, &expressionList);
+                s = parseExpressionList(start, &expressionList);
                 if (s == NULL) {
                     freeToken(tp);
                     freeToken(leftArg);
@@ -2832,6 +2873,7 @@ static char *parseExpression(char *s, Token **expression) {
             return s;
         }
         if (tp == NULL) tp = copyToken(&token);
+        s = eatWsp(s);
         if (*s == '\0' || *s == ',' || *s == ')' || *s == ':') {
             if (tp->type == TokenType_Identifier) {
                 tp->details.identifier.qualifiers = expressionList;
@@ -3066,6 +3108,9 @@ static void parseInputList(char *s, ControlInfoList *ciList) {
     Register reg;
     OperatorArgument target;
     Token token;
+
+    s = eatWsp(s);
+    if (*s == '\0') return;
 
     for (;;) {
         s = getNextToken(s, &token, FALSE);
@@ -3450,6 +3495,7 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
                 parseOPEN(s);
                 break;
             case PAUSE:
+                parsePAUSE(s);
                 break;
             case PRINT:
                 parsePRINT(s);
@@ -3461,6 +3507,7 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
                 parseREAD(s);
                 break;
             case RETURN:
+                parseRETURN(s);
                 break;
             case REWIND:
                 break;
@@ -3657,9 +3704,10 @@ static char *parseOpenInfoList(char *s, OpenInfoList **oiList) {
 static void parseOutputList(char *s, ControlInfoList *ciList) {
     DataType *dt;
     Token *expression;
-    bool isChar;
-    Register reg;
     OperatorArgument result;
+
+    s = eatWsp(s);
+    if (*s == '\0') return;
 
     for (;;) {
         s = parseExpression(s, &expression);
@@ -3668,36 +3716,11 @@ static void parseOutputList(char *s, ControlInfoList *ciList) {
             return;
         }
         if (evaluateExpression(expression, &result) == FALSE) {
-            dt = getDataType(&result);
-            isChar = dt->type == BaseType_Character;
-            if (isConstant(result)) {
-                emitLoadConst(&result);
-                if (isChar) {
-                    emitStoreStack(result.reg, 1);
-                }
-                else {
-                    emitStoreStack(result.reg, 2);
-                    reg = emitLoadStackByteAddr(2);
-                    emitStoreStack(reg, 1);
-                    freeRegister(reg);
-                }
-            }
-            else if (isLoadable(result)) {
-                emitLoadReference(&result, NULL);
-                if (!isChar) emitConvertToByteAddress(result.reg);
-                emitStoreStack(result.reg, 1);
-            }
-            else if (isChar) {
-                emitStoreStack(result.reg, 1);
-            }
-            else {
-                emitStoreStack(result.reg, 2);
-                reg = emitLoadStackByteAddr(2);
-                emitStoreStack(reg, 1);
-                freeRegister(reg);
-            }
+            loadValue(&result);
+            emitStoreStack(result.reg, 1);
             freeRegister(result.reg);
             if (ciList->format == NULL) {
+                dt = getDataType(&result);
                 switch (dt->type) {
                 case BaseType_Character:
                     emitPrimCall("@_lstchr");
@@ -3920,7 +3943,12 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             }
             else if (*s == '(') {
                 s = parseDimDecl(s + 1, symbol);
-                defineLocalVariable(symbol);
+                if (symbol->class == SymClass_Undefined) {
+                    defineLocalVariable(symbol);
+                }
+                else {
+                    defineType(symbol);
+                }
                 s = eatWsp(s);
                 if (*s == ',')
                     s = eatWsp(s + 1);
@@ -4301,6 +4329,7 @@ static void parseDATA(char *s) {
                         break;
                     }
                     if (!isConstant(result)) {
+                        if (isCalculation(result)) freeAddrReg(result.reg);
                         err("Non-constant array subscript");
                         break;
                     }
@@ -4654,10 +4683,7 @@ static void parseDO(char *s) {
         }
     }
     else {
-        result.class = ArgClass_Constant;
-        result.details.constant.dt.type = BaseType_Integer;
-        result.details.constant.dt.rank = 0;
-        result.details.constant.value.integer = 1;
+        setIntegerArg(&result, 1);
     }
 
     isIncr1 = (isIntegerConstant(result) && result.details.constant.value.integer == 1)
@@ -4773,15 +4799,17 @@ static void parseEND(char *s) {
     if (errorCount + warningCount > 0 && listingFile != NULL) fputs("\n\n", listingFile);
 
     if (errorCount > 0) {
-        list(" ***** %d error%s\n", errorCount, (errorCount > 1) ? "s" : "");
+        list(" ***** %d error%s", errorCount, (errorCount > 1) ? "s" : "");
         fprintf(stderr, "%d error%s in %s\n", errorCount, (errorCount > 1) ? "s" : "", progUnitSym->identifier);
     }
     if (warningCount > 0) {
-        list(" ***** %d warning%s\n", warningCount, (warningCount > 1) ? "s" : "");
+        list(" ***** %d warning%s", warningCount, (warningCount > 1) ? "s" : "");
         fprintf(stderr, "%d warning%s in %s\n", warningCount, (warningCount > 1) ? "s" : "", progUnitSym->identifier);
     }
-    printSymbols(listingFile);
+    listSymbols();
+    listSetPageEnd();
     freeAllSymbols();
+    totalErrors += errorCount;
 }
 
 static void parseENDIF(char *s) {
@@ -4798,12 +4826,15 @@ static void parseENDIF(char *s) {
 }
 
 static void parseENTRY(char *s) {
+    notSupported("ENTRY");
 }
 
 static void parseEQUIVALENCE(char *s) {
+    notSupported("EQUIVALENCE");
 }
 
 static void parseEXTERNAL(char *s) {
+    notSupported("EXTERNAL");
 }
 
 static void parseFORMAT(char *s) {
@@ -4835,6 +4866,7 @@ static void parseFORMAT(char *s) {
 }
 
 static void parseFUNCTION(char *s, DataType *dt) {
+    char *start;
     Symbol *symbol;
     Token token;
 
@@ -4854,7 +4886,14 @@ static void parseFUNCTION(char *s, DataType *dt) {
     }
     s = eatWsp(s);
     if (*s == '(') {
-        s = parseFormalArguments(s);
+        start = s;
+        s = eatWsp(s + 1);
+        if (*s == ')') {
+            s += 1;
+        }
+        else {
+            s = parseFormalArguments(start);
+        }
         s = eatWsp(s);
     }
     if (*s != '\0') {
@@ -5234,6 +5273,7 @@ static void parseINQUIRE(char *s) {
 }
 
 static void parseINTRINSIC(char *s) {
+    notSupported("INTRINSIC");
 }
 
 static void parseOutputStmt(char *s, int unitNum) {
@@ -5280,10 +5320,11 @@ static void parsePARAMETER(char *s) {
         name = token.details.identifier.name;
         symbol = findSymbol(name);
         if (symbol == NULL) {
-            symbol = addSymbol(name, SymClass_Parameter);
+            symbol = addSymbol(name, SymClass_Undefined);
         }
-        if (symbol->class == SymClass_Parameter && symbol->details.variable.dt.type == BaseType_Undefined) {
+        if (symbol->class == SymClass_Undefined) {
             defineType(symbol);
+            symbol->class = SymClass_Parameter;
         }
         else {
             err("Duplicate parameter: %s", name);
@@ -5492,6 +5533,10 @@ static void parseOPEN(char *s) {
     verifyEOS(s);
 }
 
+static void parsePAUSE(char *s) {
+    // do nothing
+}
+
 static void parsePRINT(char *s) {
     parseOutputStmt(s, DEFAULT_OUTPUT_UNIT);
 }
@@ -5559,6 +5604,7 @@ static void parseREAD(char *s) {
             freeControlInfoList(ciList);
             return;
         }
+        s = eatWsp(s + 1);
         ciList->unit = createIntegerConstant(DEFAULT_INPUT_UNIT);
     }
     inputInit(ciList);
@@ -5567,10 +5613,24 @@ static void parseREAD(char *s) {
     freeControlInfoList(ciList);
 }
 
+static void parseRETURN(char *s) {
+    if (progUnitSym->class != SymClass_Subroutine && progUnitSym->class != SymClass_Function && progUnitSym->class != SymClass_Program) {
+        err("Misplaced statement");
+        return;
+    }
+    s = eatWsp(s);
+    if (*s != '\0') {
+        notSupported("alternate RETURN");
+    }
+    emitBranch(progUnitSym->details.progUnit.exitLabel);
+}
+
 static void parseSAVE(char *s) {
+    notSupported("SAVE");
 }
 
 static void parseSTOP(char *s) {
+    emitExit(0);
 }
 
 static void parseSUBROUTINE(char *s) {
@@ -5653,7 +5713,6 @@ static void presetImplicit(void) {
 
 static void presetProgUnit(void) {
     doStaticLocals = doStaticLocalsDefault;
-    list("1\n");
     progUnitSym    = NULL;
     state          = STATE_PROG_UNIT;
     doStackPtr     = 0;
@@ -5711,6 +5770,24 @@ static char *readLine(void) {
     if (len < 7) len = 7;
     lineBuf[len] = '\0';
     return lineBuf;
+}
+
+static void setCharArg(OperatorArgument *arg, char *s) {
+    memset(arg, 0, sizeof(OperatorArgument));
+    arg->class = ArgClass_Constant;
+    arg->details.constant.dt.type = BaseType_Character;
+    arg->details.constant.dt.rank = 0;
+    arg->details.constant.value.character.length = strlen(s);
+    arg->details.constant.value.character.string = s;
+}
+
+static void setIntegerArg(OperatorArgument *arg, int value) {
+    memset(arg, 0, sizeof(OperatorArgument));
+    arg->class = ArgClass_Constant;
+    arg->details.constant.dt.type = BaseType_Integer;
+    arg->details.constant.dt.rank = 0;
+    arg->details.constant.value.integer = value;
+
 }
 
 static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList) {
@@ -5819,7 +5896,7 @@ static void warn(char *format, ...) {
     va_start(ap, format);
     vsprintf(buf, format, ap);
     va_end(ap);
-    list(" *WARNING* %s\n", buf);
+    list(" *WARNING* %s", buf);
     fprintf(stderr, "WARNING line %d : %s\n", lineNo, buf);
     warningCount += 1;
 }
@@ -5881,6 +5958,9 @@ static void printExpression(FILE *f, Token *expression) {
 }
 
 static void printToken(FILE *f, Token *token) {
+    TokenListItem *tli;
+    int n;
+
     if (token != NULL) {
         switch (token->type) {
         case TokenType_Keyword:
@@ -5888,6 +5968,21 @@ static void printToken(FILE *f, Token *token) {
             break;
         case TokenType_Identifier:
             fputs(token->details.identifier.name, f);
+            if (token->details.identifier.qualifiers != NULL) {
+                fputs("(", f);
+                for (tli = token->details.identifier.qualifiers, n = 0; tli != NULL; tli = tli->next, n++) {
+                    if (n > 0) fputs(",", f);
+                    printExpression(f, tli->item);
+                }
+                fputs(")", f);
+            }
+            if (token->details.identifier.range != NULL) {
+                fputs("(", f);
+                printExpression(f, token->details.identifier.range->first);
+                fputs(":", f);
+                printExpression(f, token->details.identifier.range->last);
+                fputs(")", f);
+            }
             break;
         case TokenType_Operator:
             fputs(opIdToStr(token->details.operator.id), f);

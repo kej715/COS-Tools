@@ -58,7 +58,7 @@ unsigned long _getStr(int size) {
         strings[nextStringIndex] = (unsigned char *)realloc(strings[nextStringIndex], size);
         stringSizes[nextStringIndex] = size;
     }
-    ptr = (size << 32) | (unsigned long)strings[nextStringIndex];
+    ptr = ((long)size << 32) | (unsigned long)strings[nextStringIndex];
     nextStringIndex += 1;
     if (nextStringIndex >= MAX_STRINGS) nextStringIndex = 0;
 

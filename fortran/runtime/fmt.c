@@ -69,7 +69,7 @@ static char *fmtClasses[] = {
 
 static char hexDigits[16] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
 
-static double powers10[20] = {
+static f64 powers10[20] = {
     1E00,1E01,1E02,1E03,1E04,1E05,1E06,1E07,1E08,1E09,
     1E10,1E11,1E12,1E13,1E14,1E15,1E16,1E17,1E18,1E19
 };
@@ -78,18 +78,19 @@ static FormatDesc *allocDesc(void);
 static char *eatWsp(char *s, char *limit);
 static void endfmtHelper(FormatDesc *fdp);
 static char *fmtClassToStr(FormatClass class);
-static void fmtInt(unsigned long value, FormatDesc *fdp, int radix);
-static void fmtReal(double value, FormatDesc *fdp);
-static void fmtRealE(double value, FormatDesc *fdp);
-static void fmtRealF(double value, FormatDesc *fdp);
-static void fmtRealG(double value, FormatDesc *fdp);
+static void fmtInt(u64 value, FormatDesc *fdp, int radix);
+static void fmtReal(f64 value, FormatDesc *fdp);
+static void fmtRealE(f64 value, FormatDesc *fdp);
+static void fmtRealF(f64 value, FormatDesc *fdp);
+static void fmtRealG(f64 value, FormatDesc *fdp);
 static char *getPrecision(char *s, char *limit, FormatDesc *fdp);
-static long inpInt(FormatDesc *fdp, int base);
-static double inpReal(FormatDesc *fdp);
-static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor);
-static char *parseFloat(char *s, char *limit, double *value);
-static char *parseInteger(char *s, char *limit, int *value);
+static i64 inpInt(FormatDesc *fdp, int base);
+static f64 inpReal(FormatDesc *fdp);
+static void outfmtHelper(void *value, int doEndOnRep, int *eor);
+static char *parseFloat(char *s, char *limit, f64 *value);
+static char *parseInteger(char *s, char *limit, i64 *value);
 static char *prsfmtHelper(char *s, char *limit, FormatDesc **list);
+static void showWhere(char *fmt, char *cursor, char *limit);
 
 void _endfmt(void) {
     endfmtHelper(firstDesc);
@@ -136,17 +137,14 @@ void _inpchr(int unitNum, unsigned long ref) {
     if (cursor < limit && *cursor == ',') cursor += 1;
 }
 
-void _inpdbl(int unitNum, DataValue *ref) {
-    double value;
-
+void _inpdbl(int unitNum, f64 *value) {
     cursor = eatWsp(cursor, limit);
-    cursor = parseFloat(cursor, limit, &value);
+    cursor = parseFloat(cursor, limit, value);
     cursor = eatWsp(cursor, limit);
     if (cursor < limit && *cursor == ',') cursor += 1;
-    ref->real = value;
 }
 
-void _inpfmt(DataValue *value) {
+void _inpfmt(void *value) {
     unsigned long charRef;
     int fieldWidth;
     int len;
@@ -211,18 +209,18 @@ void _inpfmt(DataValue *value) {
         case Fmt_E:
         case Fmt_F:
         case Fmt_G:
-            value->real = inpReal(nextDesc);
+            *(f64 *)value = inpReal(nextDesc);
             return;
         case Fmt_I:
-            value->integer = inpInt(nextDesc, 10);
+            *(i64 *)value = inpInt(nextDesc, 10);
             return;
         case Fmt_L:
             fieldWidth = (nextDesc->width == 0) ? 1 : nextDesc->width;
-            value->logical = (cursor < limit && *cursor == 'T') ? ~0L : 0;
+            *(u64 *)value = (cursor < limit && *cursor == 'T') ? ~0L : 0;
             cursor += fieldWidth;
             return;
         case Fmt_O:
-            value->integer = inpInt(nextDesc, 8);
+            *(i64 *)value = inpInt(nextDesc, 8);
             return;
         case Fmt_P:
             scaleFactor = nextDesc->repeatCount;
@@ -240,7 +238,7 @@ void _inpfmt(DataValue *value) {
             cursor += 1;
             break;
         case Fmt_Z:
-            value->integer = inpInt(nextDesc, 16);
+            *(i64 *)value = inpInt(nextDesc, 16);
             return;
         case Fmt_Embedded:
             nextDesc = nextDesc->child;
@@ -260,42 +258,38 @@ void _inpfmt(DataValue *value) {
     }
 }
 
-void _inpint(int unitNum, DataValue *ref) {
-    int value;
-
+void _inpint(int unitNum, i64 *value) {
     cursor = eatWsp(cursor, limit);
-    cursor = parseInteger(cursor, limit, &value);
+    cursor = parseInteger(cursor, limit, value);
     cursor = eatWsp(cursor, limit);
     if (cursor < limit && *cursor == ',') cursor += 1;
-    ref->integer = value;
 }
 
-void _inplog(int unitNum, DataValue *ref) {
-    ref->logical = 0;
+void _inplog(int unitNum, u64 *value) {
+    *value = 0;
     cursor = eatWsp(cursor, limit);
     if (cursor < limit && toupper(*cursor) == 'T') {
-        ref->logical = ~0L;
+        *value = ~0L;
         cursor += 1;
     }
     while (cursor < limit && *cursor != ',') cursor += 1;
     if (cursor < limit) cursor += 1;
 }
 
-void _lstchr(int unitNum, unsigned long value) {
+void _lstchr(int unitNum, unsigned long ref) {
     int len;
     char *s;
 
-    s = (char *)(value & 0xffffffff);
-    len = value >> 32;
+    s = (char *)(ref & 0xffffffff);
+    len = ref >> 32;
     while (len-- > 0) {
         if (cursor < limit) *cursor++ = *s++;
     }
 }
 
-void _lstdbl(int unitNum, DataValue *value) {
+void _lstdbl(int unitNum, f64 value) {
     char buf[16];
     int decpt;
-    double doubleValue;
     char *ep;
     int exp;
     int ignore;
@@ -304,22 +298,21 @@ void _lstdbl(int unitNum, DataValue *value) {
     char *s;
     char *s2;
 
-    doubleValue = value->real;
-    if (doubleValue < 0) {
+    if (value < 0) {
         isNegative = 1;
-        doubleValue = -doubleValue;
+        value = -value;
     }
     else {
         isNegative = 0;
     }
     if (cursor < limit) *cursor++ = ' ';
     if (isNegative && cursor < limit) *cursor++ = '-';
-    if (doubleValue == 0.0) {
+    if (value == 0.0) {
         if (cursor < limit) *cursor++ = '0';
         if (cursor < limit) *cursor++ = '.';
     }
-    else if (doubleValue >= 1.0E-6 && doubleValue <= 1.0E+9) {
-        s = fcvt(doubleValue, 14, &decpt, &ignore);
+    else if (value >= 1.0E-6 && value <= 1.0E+9) {
+        s = fcvt(value, 14, &decpt, &ignore);
         while (decpt < 0) {
             if (cursor < limit) *cursor++ = '0';
             decpt += 1;
@@ -335,7 +328,7 @@ void _lstdbl(int unitNum, DataValue *value) {
         while (cursor < limit && *s != '\0') *cursor++ = *s++;
     }
     else {
-        s = ecvt(doubleValue, 14, &decpt, &ignore);
+        s = ecvt(value, 14, &decpt, &ignore);
         ep = buf + sizeof(buf) - 1;
         *ep-- = '\0';
         exp = decpt - 1;
@@ -356,25 +349,23 @@ void _lstdbl(int unitNum, DataValue *value) {
     }
 }
 
-void _lstint(int unitNum, DataValue *value) {
+void _lstint(int unitNum, i64 value) {
     char buf[33];
-    long intValue;
     int isNegative;
     char *s;
 
-    intValue = value->integer;
     isNegative = 0;
-    if (intValue < 0) {
+    if (value < 0) {
         isNegative = 1;
-        intValue = -intValue;
+        value = -value;
     }
     s = buf + sizeof(buf) - 1;
     *s-- = '\0';
     do {
-        *s-- = '0' + (intValue % 10);
-        intValue /= 10;
+        *s-- = '0' + (value % 10);
+        value /= 10;
     }
-    while (intValue != 0);
+    while (value != 0);
     if (isNegative) {
         *s = '-';
     }
@@ -385,19 +376,19 @@ void _lstint(int unitNum, DataValue *value) {
     while (cursor < limit && *s != '\0') *cursor++ = *s++;
 }
 
-void _lstlog(int unitNum, DataValue *value) {
+void _lstlog(int unitNum, u64 value) {
     char lc;
 
-    lc = (value->logical == 0) ? 'F' : 'T';
+    lc = (value == 0) ? 'F' : 'T';
     if (cursor < limit) *cursor++ = ' ';
     if (cursor < limit) *cursor++ = lc;
 }
 
 void _outfin(int *eor) {
-    outfmtHelper((DataValue *)0, 1, eor);
+    outfmtHelper(NULL, 1, eor);
 }
 
-void _outfmt(DataValue *value, int *eor) {
+void _outfmt(void *value, int *eor) {
     outfmtHelper(value, 0, eor);
 }
 
@@ -483,7 +474,7 @@ static char *fmtClassToStr(FormatClass class) {
     return (class <= Fmt_Embedded) ? fmtClasses[class] : "unknown";
 }
 
-static void fmtInt(unsigned long value, FormatDesc *fdp, int radix) {
+static void fmtInt(u64 value, FormatDesc *fdp, int radix) {
     char buf[32];
     char *cp;
     int fieldWidth;
@@ -515,7 +506,7 @@ static void fmtInt(unsigned long value, FormatDesc *fdp, int radix) {
         break;
     default:
         sign = doPlusSigns ? 1 : 0;
-        sval = (long)value;
+        sval = (i64)value;
         if (sval < 0) {
             sval = -sval;
             isNegative = TRUE;
@@ -559,7 +550,7 @@ static void fmtInt(unsigned long value, FormatDesc *fdp, int radix) {
     cursor += fieldWidth;
 }
 
-static void fmtReal(double value, FormatDesc *fdp) {
+static void fmtReal(f64 value, FormatDesc *fdp) {
     switch (fdp->class) {
     case Fmt_F:
         fmtRealF(value, fdp);
@@ -576,9 +567,9 @@ static void fmtReal(double value, FormatDesc *fdp) {
     }
 }
 
-static void fmtRealE(double value, FormatDesc *fdp) {
-    char buf[16];
-    char *bufLim;
+static void fmtRealE(f64 value, FormatDesc *fdp) {
+    char ebuf[16];
+    char *ebufLim;
     char *cp;
     int decpt;
     char *ep;
@@ -587,19 +578,18 @@ static void fmtRealE(double value, FormatDesc *fdp) {
     int fieldWidth;
     int isNegative;
     int len;
+    int maxDigits;
     int n;
     char *s;
     char *s2;
     int sign;
 
-    s = ecvt(value, fdp->minDigits, &decpt, &isNegative);
-    len = strlen(s);
+    s = ecvt(value, 32, &decpt, &isNegative);
     expLength = (fdp->expLength == 0) ? 2 : fdp->expLength;
     sign = isNegative || doPlusSigns;
-    fieldWidth = len + sign + 2;
-    fieldWidth += expLength;
-    ep = bufLim = buf + sizeof(buf) - 1;
-    exp = decpt - 1;
+    fieldWidth = fdp->minDigits + sign + expLength + 4;
+    ep = ebufLim = ebuf + sizeof(ebuf) - 1;
+    exp = decpt;
     if (exp < 0) exp = -exp;
     n = expLength;
     do {
@@ -613,7 +603,7 @@ static void fmtRealE(double value, FormatDesc *fdp) {
     if (fieldWidth < fdp->width) fieldWidth = fdp->width;
     cp = cursor + fieldWidth - 1;
     if ((fdp->width != 0 && fdp->width < fieldWidth)
-        || ((expLength + 2) < (bufLim - ep)))  {
+        || ((expLength + 2) < (ebufLim - ep)))  {
         fieldWidth = fdp->width;
         for (n = fieldWidth; n > 0; n--) {
             if (cp < limit) *cp = '*';
@@ -621,21 +611,28 @@ static void fmtRealE(double value, FormatDesc *fdp) {
         }
     }
     else {
-        s2 = bufLim;
+        s2 = ebufLim;
         while (s2 > ep) {
             if (cp < limit) *cp = *s2;
             cp -= 1;
             s2 -= 1;
         }
+        len = strlen(s);
+        if (len > fdp->minDigits) len = fdp->minDigits;
+        n = fdp->minDigits - len;
+        while (n-- > 0) {
+            if (cp < limit) *cp = '0';
+            cp -= 1;
+        }
         s2 = s + len - 1;
-        while (s2 > s) {
+        while (s2 >= s) {
             if (cp < limit) *cp = *s2;
             cp -= 1;
             s2 -= 1;
         }
         if (cp < limit) *cp = '.';
         cp -= 1;
-        if (cp < limit) *cp = *s;
+        if (cp < limit) *cp = '0';
         cp -= 1;
         if (sign && cp < limit) {
             *cp = isNegative ? '-' : '+';
@@ -644,12 +641,13 @@ static void fmtRealE(double value, FormatDesc *fdp) {
     cursor += fieldWidth;
 }
 
-static void fmtRealF(double value, FormatDesc *fdp) {
+static void fmtRealF(f64 value, FormatDesc *fdp) {
     char *cp;
     int decpt;
     int fieldWidth;
     int isNegative;
     int len;
+    int lim;
     int n;
     char *s;
     char *s2;
@@ -659,13 +657,35 @@ static void fmtRealF(double value, FormatDesc *fdp) {
     s = fcvt(value, fdp->minDigits, &decpt, &isNegative);
     len = strlen(s);
     sign = isNegative || doPlusSigns;
-    fieldWidth = len + sign + 1;
-    if (decpt == 0) {
+    fieldWidth = sign + 1;
+    if (decpt > 0) {
+        lim = decpt + fdp->minDigits;
+        if (lim < len) {
+            len = lim;
+            *(s + len) = '\0';
+        }
+    }
+    else if (decpt == 0) {
         fieldWidth += 1;
+        lim = fdp->minDigits;
+        if (lim < len) {
+            len = lim;
+            *(s + len) = '\0';
+        }
     }
     else if (decpt < 0) {
-        fieldWidth += -decpt + 1;
+        n = -decpt;
+        fieldWidth += n + 1;
+        if (n < fdp->minDigits) {
+            len = fdp->minDigits - n;
+            *(s + len) = '\0';
+        }
+        else {
+            len = 0;
+            *s = '\0';
+        }
     }
+    fieldWidth += len;
     if (fieldWidth < fdp->width) fieldWidth = fdp->width;
     cp = cursor + fieldWidth - 1;
     if (fdp->width != 0 && fdp->width < fieldWidth) {
@@ -705,7 +725,7 @@ static void fmtRealF(double value, FormatDesc *fdp) {
     cursor += fieldWidth;
 }
 
-static void fmtRealG(double value, FormatDesc *fdp) {
+static void fmtRealG(f64 value, FormatDesc *fdp) {
     int expLength;
     FormatDesc fd;
 
@@ -769,11 +789,11 @@ static char *getPrecision(char *s, char *limit, FormatDesc *fdp) {
     return s;
 }
 
-static long inpInt(FormatDesc *fdp, int base) {
+static i64 inpInt(FormatDesc *fdp, int base) {
     char c;
     bool isNegative;
     char *lim;
-    long res;
+    i64 res;
     char *s;
 
     res = 0;
@@ -783,11 +803,13 @@ static long inpInt(FormatDesc *fdp, int base) {
     if (isBlankZero == FALSE) s = eatWsp(s, lim);
     isNegative = FALSE;
     if (s < lim) {
-        if (*s == '-')
+        if (*s == '-') {
             isNegative = TRUE;
-        else if (*s == '+')
-            isNegative = FALSE;
-        s += 1;
+            s += 1;
+        }
+        else if (*s == '+') {
+            s += 1;
+        }
     }
     if (isBlankZero == FALSE) s = eatWsp(s, lim);
     switch (base) {
@@ -839,16 +861,16 @@ static long inpInt(FormatDesc *fdp, int base) {
     return isNegative ? -res : res;
 }
 
-static double inpReal(FormatDesc *fdp) {
-    double divisor;
+static f64 inpReal(FormatDesc *fdp) {
+    f64 divisor;
     char *dp;
     char *ep;
-    double frac;
+    f64 frac;
     bool isNegative;
     char *lim;
-    double res;
+    f64 res;
     char *s;
-    int valE;
+    i64 valE;
 
     dp = NULL;
     ep = NULL;
@@ -884,7 +906,7 @@ static double inpReal(FormatDesc *fdp) {
          *  Process whole number part
          */
         while (s < dp && *s >= '0' && *s <= '9') {
-            res = (res * 10.0) + (double)(*s - '0');
+            res = (res * 10.0) + (f64)(*s - '0');
             s += 1;
         }
         /*
@@ -895,7 +917,7 @@ static double inpReal(FormatDesc *fdp) {
             s += 1;
             divisor = 10.0;
             while (s < ep && *s >= '0' && *s <= '9') {
-                frac += (double)(*s - '0') / divisor;
+                frac += (f64)(*s - '0') / divisor;
                 divisor *= 10.0;
                 s += 1;
             }
@@ -922,7 +944,7 @@ static double inpReal(FormatDesc *fdp) {
     return res;
 }
 
-static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor) {
+static void outfmtHelper(void *value, int doEndOnRep, int *eor) {
     unsigned long charRef;
     int fieldWidth;
     int len;
@@ -983,25 +1005,25 @@ static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor) {
         case Fmt_F:
         case Fmt_G:
             if (doEndOnRep == 0) {
-                fmtReal((double)value->real, nextDesc);
+                fmtReal((f64)value, nextDesc);
             }
             return;
         case Fmt_I:
             if (doEndOnRep == 0) {
-                fmtInt(value->integer, nextDesc, 10);
+                fmtInt((u64)value, nextDesc, 10);
             }
             return;
         case Fmt_L:
             if (doEndOnRep == 0) {
                 fieldWidth = (nextDesc->width == 0) ? 1 : nextDesc->width;
                 s = cursor + fieldWidth - 1;
-                if (s < limit) *s = (value->logical == 0) ? 'F' : 'T';
+                if (s < limit) *s = ((u64)value == 0) ? 'F' : 'T';
                 cursor += fieldWidth;
             }
             return;
         case Fmt_O:
             if (doEndOnRep == 0) {
-                fmtInt(value->integer, nextDesc, 8);
+                fmtInt((u64)value, nextDesc, 8);
             }
             return;
         case Fmt_P:
@@ -1028,7 +1050,7 @@ static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor) {
             break;
         case Fmt_Z:
             if (doEndOnRep == 0) {
-                fmtInt(value->integer, nextDesc, 16);
+                fmtInt((u64)value, nextDesc, 16);
             }
             return;
         case Fmt_EOR:
@@ -1053,12 +1075,12 @@ static void outfmtHelper(DataValue *value, int doEndOnRep, int *eor) {
     }
 }
 
-static char *parseFloat(char *s, char *limit, double *value) {
-    double divisor;
-    double frac;
+static char *parseFloat(char *s, char *limit, f64 *value) {
+    f64 divisor;
+    f64 frac;
     bool isNegative;
-    int valE;
-    double valS;
+    i64 valE;
+    f64 valS;
 
     *value = 0.0;
     if (s >= limit) return s;
@@ -1074,7 +1096,7 @@ static char *parseFloat(char *s, char *limit, double *value) {
      *  Process whole number part
      */
     while (s < limit && *s >= '0' && *s <= '9') {
-        *value = (*value * 10.0) + (double)(*s - '0');
+        *value = (*value * 10.0) + (f64)(*s - '0');
         s += 1;
     }
     /*
@@ -1113,7 +1135,7 @@ static char *parseFloat(char *s, char *limit, double *value) {
     return s;
 }
 
-static char *parseInteger(char *s, char *limit, int *value) {
+static char *parseInteger(char *s, char *limit, i64 *value) {
     bool isNegative;
 
     *value = 0;
@@ -1136,15 +1158,18 @@ static char *parseInteger(char *s, char *limit, int *value) {
 
 static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
     char *dp;
+    char *fmt;
     FormatDesc *head;
     FormatDesc *next;
     FormatDesc *prev;
     char quote;
     char *start;
 
+    fmt = s;
     s = eatWsp(s, limit);
     if (s >= limit || *s != '(') {
         fputs("FORMAT list does not begin with '('\n", stderr);
+        showWhere(fmt, s, limit);
         exit(1);
     }
     s += 1;
@@ -1157,11 +1182,13 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             s = parseInteger(s, limit, &next->repeatCount);
             if (next->repeatCount < 1) {
                 fprintf(stderr, "Invalid repeat count: %d\n", next->repeatCount);
+                showWhere(fmt, s, limit);
                 exit(1);
             }
         }
         if (s >= limit) {
             fputs("FORMAT list does not end with ')'\n", stderr);
+            showWhere(fmt, s, limit);
             exit(1);
         }
         switch (*s) {
@@ -1205,6 +1232,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             }
             if (next->repeatCount != 0) {
                 fprintf(stderr, "Invalid repeat count on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             break;
@@ -1213,6 +1241,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             next->class = Fmt_String;
             if (next->repeatCount == 0) {
                 fprintf(stderr, "Invalid length specified on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             next->string = (char *)malloc(next->repeatCount + 1);
@@ -1225,6 +1254,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             while (next->repeatCount-- > 0) {
                 if (s >= limit) {
                     fputs("Invalid hollerith descriptor\n", stderr);
+                    showWhere(fmt, s, limit);
                     exit(1);
                 }
                 *dp++ = *s++;
@@ -1252,6 +1282,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             }
             if (next->repeatCount != 0) {
                 fprintf(stderr, "Invalid repeat count on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             next->repeatCount = 1;
@@ -1272,15 +1303,18 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             }
             if (s >= limit || !isdigit(*s)) {
                 fprintf(stderr, "Position value missing from '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             s = parseInteger(s, limit, &next->width);
             if (next->width == 0 && next->class == Fmt_T) {
                 fprintf(stderr, "Invalid position value on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             if (next->repeatCount != 0) {
                 fprintf(stderr, "Invalid repeat count on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             next->repeatCount = 1;
@@ -1296,6 +1330,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             next->class = Fmt_String;
             if (next->repeatCount != 0) {
                 fprintf(stderr, "Invalid repeat count on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             next->repeatCount = 1;
@@ -1304,6 +1339,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             for (;;) {
                 if (s >= limit) {
                     fputs("Unclosed string in format list\n", stderr);
+                    showWhere(fmt, s, limit);
                     exit(1);
                 }
                 else if (*s == quote) {
@@ -1329,6 +1365,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             next->class = Fmt_EOR;
             if (next->repeatCount != 0) {
                 fprintf(stderr, "Invalid repeat count on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             s += 1;
@@ -1338,6 +1375,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             next->class = Fmt_Term;
             if (next->repeatCount != 0) {
                 fprintf(stderr, "Invalid repeat count on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             s += 1;
@@ -1347,6 +1385,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             next->class = Fmt_Nospace;
             if (next->repeatCount != 0) {
                 fprintf(stderr, "Invalid repeat count on '%s' descriptor\n", fmtClassToStr(next->class));
+                showWhere(fmt, s, limit);
                 exit(1);
             }
             s += 1;
@@ -1365,6 +1404,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             return s + 1;
         default:
             fprintf(stderr, "Unrecognized format descriptor: '%c'\n", *s);
+            showWhere(fmt, s, limit);
             exit(1);
         }
         if (prev != NULL) {
@@ -1379,6 +1419,17 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
             s += 1;
         }
     }
+}
+
+static void showWhere(char *fmt, char *cursor, char *limit) {
+    int n;
+    char *s;
+    
+    for (s = fmt; s < limit; s++) fputc(*s, stderr);
+    fputc('\n', stderr);
+    for (s = fmt; s < cursor; s++) fputc(' ', stderr);
+    fputc('^', stderr);
+    fputc('\n', stderr);
 }
 
 #if DEBUG

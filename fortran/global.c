@@ -27,7 +27,11 @@
 #include "const.h"
 #include "types.h"
 
+char  currentDate[9];
+char  currentTime[9];
 bool  doEchoSource          = FALSE;
+bool  doList                = TRUE;
+bool  doStaticLocals        = TRUE;
 bool  doStaticLocalsDefault = TRUE;
 int   lineNo                = 0;
 FILE *listingFile           = NULL;

@@ -30,6 +30,7 @@ HDRS = binops.h        \
        codegen.h       \
        coercion.h      \
        const.h         \
+       fnv.h           \
        proto.h         \
        types.h         \
        ../basetypes.h
@@ -38,8 +39,10 @@ OBJS = binops.o   \
        codegen.o  \
        coercion.o \
        compile.o  \
+       fnv32a.o   \
        global.o   \
        lex.o      \
+       list.o     \
        main.o     \
        services.o \
        symbols.o
@@ -75,9 +78,13 @@ codegen.o: codegen.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
 compile.o: compile.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
+fnv32a.o: fnv32a.c fnv.h
+	$(CC) $(CFLAGS) -c $<
 global.o: global.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
 lex.o: lex.c $(HDRS)
+	$(CC) $(CFLAGS) -c $<
+list.o: list.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
 main.o: main.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
