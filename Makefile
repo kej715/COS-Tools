@@ -127,7 +127,7 @@ lib.abs: $(LDROBJS)
 	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) lib
 
 clean:
-	rm -f *.o *.abs cal ldr lib ; \
+	rm -f *.o *.abs cal dasm ldr lib ; \
 	$(MAKE) -C cos-interface clean ; \
 	$(MAKE) -C cos-commands clean ; \
 	$(MAKE) -C fortran clean
