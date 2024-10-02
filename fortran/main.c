@@ -209,14 +209,22 @@ static char *parseOptions(int argc, char *argv[]) {
 
 static void usage(void) {
 #if defined(__cos)
-    fputs("usage: KFTC [ALLOC=STATIC|STACK|AUTO][I=idn][L=ldn][O=odn][S]\n", stderr);
-    fputs("  idn - FORTRAN source code dataset name (default $IN)\n", stderr);
-    fputs("  ldn - listing file dataset name (default $OUT)\n", stderr);
-    fputs("  odn - output file dataset name (default ZZZZCAL)\n", stderr);
+    fputs("usage: KFTC [ALLOC=STATIC|STACK|AUTO][I=sfile][L=lfile][O=ofile][S]\n", stderr);
+    fputs("  ALLOC=key - variable storage allocation strategy\n", stderr);
+    fputs("              STATIC : variables are allocated in static storage\n", stderr);
+    fputs("              STACK or AUTO : variables are allocated on the runtime stack\n", stderr);
+    fputs("  I=sfile   - FORTRAN source code file (default $IN)\n", stderr);
+    fputs("  L=lfile   - listing file (default $OUT)\n", stderr);
+    fputs("  O=ofile   - output file (default ZZZZCAL)\n", stderr);
+    fputs("  S         - echo source code lines to output file\n", stderr);
 #else
-    fputs("usage: kftc [-a static|stack|auto][-l lpath][-o opath][-s] spath\n", stderr);
-    fputs("  lpath - pathname of output listing file\n", stderr);
-    fputs("  opath - pathname of output object file\n", stderr);
-    fputs("  spath - pathname of input source file\n", stderr);
+    fputs("usage: kftc [-a static|stack|auto][-l lfile][-o ofile][-s] sfile\n", stderr);
+    fputs("  -a key    - variable storage allocation strategy\n", stderr);
+    fputs("              static : variables are allocated in static storage\n", stderr);
+    fputs("              stack or auto : variables are allocated on the runtime stack\n", stderr);
+    fputs("  -l lfile  - listing file (default none)\n", stderr);
+    fputs("  -o ofile  - output file (default none)\n", stderr);
+    fputs("  -s        - echo source code lines to output file\n", stderr);
+    fputs("  sfile     - FORTRAN source code file\n", stderr);
 #endif
 }
