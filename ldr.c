@@ -99,7 +99,7 @@ static Module *lastLibraryModule = NULL;
 static Module *lastObjectModule = NULL;
 static Module *libraryModuleTree;
 static char   *ldrName = "xLDR";
-static char   *ldrVersion = "0.1";
+static char   *ldrVersion = "0.9";
 static int    libraryCount = 0;
 static char   *libraryPaths[MAX_LIBRARIES];
 static FILE   *loadMap = NULL;
