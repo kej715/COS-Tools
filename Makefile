@@ -133,7 +133,8 @@ clean:
 	$(MAKE) -C fortran clean
 
 install: cal dasm ldr lib
-	install -b -o root -m 755 cal dasm ldr lib $(PREFIX)/bin
+	install -b -o root -m 755 cal dasm ldr lib $(PREFIX)/bin ; \
+	$(MAKE) -C fortran install
 
 cal.o:  cal.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
