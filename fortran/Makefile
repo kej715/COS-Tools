@@ -68,7 +68,8 @@ clean:
 	$(MAKE) -C intrinsic clean
 
 install: kftc
-	install -b -o root -m 755 kftc $(PREFIX)/bin
+	install -b -o root -m 755 kftc  $(PREFIX)/bin ; \
+	install -b -o root -m 755 cft77 $(PREFIX)/bin
 
 binops.o: binops.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
