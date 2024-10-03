@@ -9,12 +9,14 @@ provided in Andras' repository.
 - [Tools](#tools)
 - &nbsp;&nbsp;[cal](#cal)
 - &nbsp;&nbsp;[dasm](#dasm)
+- &nbsp;&nbsp;[kftc](#kftc)
 - &nbsp;&nbsp;[ldr](#ldr)
 - &nbsp;&nbsp;[lib](#lib)
 - [Running on Cray X-MP](#running)
 - [Going Native with the Tools](#native)
 - &nbsp;&nbsp;[CAL](#cal-ntv)
 - &nbsp;&nbsp;[DASM](#dasm-ntv)
+- &nbsp;&nbsp;[KFTC](#kftc-ntv)
 - &nbsp;&nbsp;[LDR](#ldr-ntv)
 - &nbsp;&nbsp;[LIB](#lib-ntv)
 
@@ -24,6 +26,7 @@ Tools provided by this repo currently include:
 
 - __cal__. A cross-assembler supporting [Cray Assembly Language v2](http://www.bitsavers.org/pdf/cray/CAL/SR-2003_CAL_Assembler_Version_2_Feb86.pdf).
 - __dasm__. A disassembler able to disassemble executables produced by __ldr__.
+- __kftc__. A FORTRAN 77 cross-compiler
 - __ldr__. A linking loader producing executables from relocatables produced by the __cal__ cross-assembler and libraries managed by __lib__.
 - __lib__. A library manager supporting collections of relocatables produced by the __cal__ cross-assembler.
 
@@ -94,6 +97,69 @@ dasm path [start] [limit]
   start - parcel address at which to start disassembly (default: 0200a)
   limit - parcel address at which to end disassembly (default: end of executable
 ```
+
+### <a id="kftc"></a> kftc
+
+__kftc__ is a FORTRAN 77 cross-compiler for the COS operating system and Cray X-MP computer system. It
+accepts FORTRAN 77 source files and produces Cray Assembly Language source files suitable for input
+to [cal](#cal). The synopsis of the __kftc__ command is:
+
+```
+kftc [-a static|stack|auto][-l lfile][-o ofile][-s] sfile
+  -a       - variable storage allocation strategy
+               static (default) : variables are allocated in static storage
+               stack or auto    : variables are allocated on the runtime stack
+  -l lfile - listing file
+  -o ofile - output file (CAL source file)
+  -s       - echo FORTRAN source lines to output file
+  sfile    - FORTRAN source file
+```
+
+A typical usage of the __kftc__ command looks like:
+
+```
+kftc -o hello.cal hello.f
+```
+
+This would cross-compile a FORTRAN source file named `hello.f` and produce an output file
+named `hello.cal`. You can use the `-l` argument to produce a listing file and the `-s`
+argument to echo FORTRAN source lines to the output file.
+
+The `cal` cross-assembler can then be applied to the output file to produce a Cray X-MP object
+file, as in:
+
+```
+cal -x -o hello.o hello.cal
+```
+
+Note that the _kftc_ runtime and intrinsic function libraries depend upon [this fork of
+Amsterdam Compiler Kit (ACK)](https://github.com/kej715/ack) which supports the Cray
+X-MP supercomputer and the COS operating system platform. It provides a C cross-compiler
+that produces runtime libraries for the Cray X-MP and COS. See [Going Native with the Tools](#native)
+for additional details.
+
+If you clone [this fork of ACK](https://github.com/kej715/ack) and build and install it, runtime
+and intrinsic function libraries needed by _kftc_ will become available, and you can then use
+_kftc_, _cal_, and _ldr_ to cross-compile and link FORTRAN 77 programs that can be uploaded to a
+Cray X-MP and run on the COS operating system.
+
+A convenient shell script for cross-compiling FORTRAN programs is also provided_ Its name is _cft77_.
+It accepts the name of a FORTRAN source file as a parameter, and the source file is assumed to have
+extension ".f". It produces an assembly language source file, a Cray X-MP object file, a load map,
+and a Cray X-MP absolute executable as output. For example, to cross-compile a FORTRAN source file
+named _hello.f_, the script would be called as follows:
+
+```
+cft77 hello
+```
+
+and the following files would be produced as output:
+
+- __hello.cal__ : assembly language source file
+- __hello.o__ : Cray X-MP object file
+- __hello.lst__ : listing file
+- __hello.map__ : laod map
+- __hello.abs__ : Cray X-MP absolute executable
 
 ### <a id="ldr"></a> ldr
 
@@ -189,7 +255,7 @@ First, display the source code, a simple assembly language program that displays
 log message:
 
 ```
-kej@Kevins-Air examples % cat hello.cal
+% cat hello.cal
          TITLE     'Hello'
          SUBTITLE  'Simple *Hello World* program'
          IDENT     HELLO
@@ -208,7 +274,7 @@ HELLO    S0        O'004          ; F$MSG
 ```
 Cross-assemble it:
 ```
-kej@Kevins-Air examples % cal hello.cal
+% cal hello.cal
 ```
 The cross-assembler produces a relocatable object file named _hello.obj_ and a listing file
 named _hello.lst_:
@@ -219,8 +285,8 @@ named _hello.lst_:
 ```
 Use __ldr__ to produce an absolute executable from the relocatable object file:
 ```
-kej@Kevins-Air examples % ldr hello.obj
-kej@Kevins-Air examples % ls -l hello.*
+% ldr hello.obj
+% ls -l hello.*
 -rw-r--r--@ 1 kej  staff   416 Mar 21 21:15 hello.abs
 -rw-r--r--@ 1 kej  staff   427 Mar  9 12:23 hello.cal
 -rw-r--r--@ 1 kej  staff  2361 Mar 21 21:12 hello.lst
@@ -229,7 +295,7 @@ kej@Kevins-Air examples % ls -l hello.*
 Use FTP to upload it to the NOS 2.8.7 system (_kevins-max.local_) as an indirect access
 permanent file named HELLO, in binary mode:
 ```
-kej@Kevins-Air examples % ftp kevins-max.local
+% ftp kevins-max.local
 Trying [fe80::1889:9f48:a180:d9ce%en0]:21 ...
 ftp: Can't connect to `fe80::1889:9f48:a180:d9ce%en0:21': Connection refused
 Trying 192.168.1.238:21 ...
@@ -254,7 +320,7 @@ ftp> quit
 ```
 Use Telnet to log into the NOS 2.8.7 system:
 ```
-kej@Kevins-Air examples % telnet kevins-max.local
+% telnet kevins-max.local
 Trying 192.168.1.238...
 Connected to kevins-max.local.
 Escape character is '^]'.
@@ -414,6 +480,10 @@ using the LIST command:
   20:02:35.2755       0.0222    ABORT         - BASE=00775000 LIMIT=01153000 CPU-NUMBER=00
   20:02:35.2774       0.0222    ABORT         - JOB STEP ABORTED.
 ```
+
+The same tools and technique can be used to upload and run FORTRAN programs that have been
+cross-compiled using the _cft77_ script.
+
 ## <a id="native"></a> Going Native with the Tools
 
 [This fork of Amsterdam Compiler Kit (ACK)](https://github.com/kej715/ack) supports the Cray
@@ -426,8 +496,9 @@ cross-compile programs written in the following languages:
 - __Pascal__
 
 If you clone this repository and build and install it, you can use it to cross-compile
-the COS Tools (i.e., _cal_, _dasm_, _ldr_, and _lib_). This will produce an assembler,
-disassembler, linking loader, and librarian that will run natively on the Cray X-MP and COS.
+the COS Tools (i.e., _cal_, _dasm_, _kftc_, _ldr_, and _lib_). This will produce an assembler,
+disassembler, FORTRAN 77 compiler, linking loader, and library manager that will run natively
+on the Cray X-MP and COS.
 
 To build the tools to run natively:
 
@@ -446,20 +517,38 @@ To build the tools to run natively:
     make cos
     ```
 
-`make cos` will produce four native executables for the Cray X-MP and COS:
+`make cos` will produce the following native executables for the Cray X-MP and COS:
 
-- __cal.abs__
-- __dasm.abs__
-- __ldr.abs__
-- __lib.abs__
+- __cal.abs__ : the Cray Assembly Language assembler
+- __dasm.abs__ : the disassembler
+- __kftc.abs__ : the FORTRAN 77 compiler
+- __ldr.abs__ : the linking loader
+- __lib.abs__ : the library manager
 
-These can be uploaded to a Control Data computer running NOS 2.8.7 (e.g., using FTP
-in binary mode as described earlier), and then the _Cray Station_ interface can be used to
-copy them to the Cray X-MP and saved as permanent files there. The following NOS CCL procedure
-will accomplish this:
+`make cos` also generates a collection of native executables reproducing utility commands
+missing from the originally recovered copy of COS 1.17. These can be found in the
+`cos-commands` subdirectory, and they include:
+
+- __charges.abs__ : run automatically by COS at the end of each job to report resource consumption information.
+- __copyd.abs__ : copies blocked datasets
+- __copyf.abs__ : copies files of blocked datasets
+- __copyr.abs__ : copies records of blocked datasets
+- __note.abs__ : writes text to a dataset
+- __skipd.abs__ : skips blocked datasets
+- __skipf.abs__ : skips files of blocked datasets
+- __skipr.abs__ : skips records of blocked datasets
+
+See [COS Version 1 Reference Manual](http://bitsavers.trailing-edge.com/pdf/cray/COS/SR-0011-O-CRAY_XMP_and_CRAY_1_Computer_Systems-COS_Version_1_Reference_Manual-May_1987.OCR.pdf) for details about these commands and [COS Commands](cos-commands/README.md) for notes about the
+reproduced implementations of them.
+
+All of these executables can be uploaded to a Control Data computer running NOS 2.8.7
+(e.g., using FTP in binary mode as described earlier), and then the _Cray Station_ interface
+can be used to copy them to the Cray X-MP and install them as commands there. The following
+NOS CCL procedure will accomplish this:
 
 ```
-.PROC,SAVE*I,F=(*F,*N=CRAYBIN).
+.PROC,INSTALL*I"INSTALL AN EXECUTABLE AS A COMMAND",
+F"EXECUTABLE FILE NAME"=(*F).
 .IF,FILE(F,AS),LOCAL.
   REWIND,F.
 .ELSE,LOCAL.
@@ -470,28 +559,28 @@ REPLACE,ZZZCBIN=F.
 CSUBMIT,CRAYJOB,TO.
 REVERT,NOLIST.
 .DATA,CRAYJOB.
-JOB,JN=CRAYRUN.
+JOB,JN=INSTALL.
 ACCOUNT,AC=CRAY,APW=XYZZY,UPW=QUASAR.
 ECHO,ON=ALL.
 OPTION,STAT=ON.
 FETCH,DN=F,MF=FE,DF=TR,^
 TEXT='USER,GUEST,GUEST.GET,F.CTASK.'.
 SAVE,DN=F,EXO=ON.
+RELEASE,DN=F.
+ACCESS,DN=F,ENTER.
 ```
 
 Assuming that this procedure is added as a record to the file named CRAY, created above,
-it can be executed as follows to copy an executable (e.g., CAL) to the Cray X-MP and save it
-as an executable permanent file:
+it can be executed as follows to copy an executable (e.g., CAL) to the Cray X-MP and install
+it as a command:
 
 ```
-BEGIN,SAVE,CRAY,CAL.
+BEGIN,INSTALL,CRAY,CAL.
 ```
 
-A batch job submitted to the Cray X-MP could then use the ACCESS command to access the
-executable and run it, e.g., using commands that look like:
+A batch job submitted to the Cray X-MP could then call the command as in:
 
 ```
-ACCESS,DN=CAL.
 CAL,I=SOURCE.
 ```
 
@@ -521,12 +610,13 @@ CAL[,B=ofile][,F][,I=sfile][,L=lfile][,N=ident][,T=tfile]...[,W][,X].
 A typical usage of the __CAL__ command looks like:
 
 ```
-CAL,I=HELLO
+CAL,I=HELLO.
 ```
 
 This would assemble a local source file named `HELLO` and produce an object file named
 `$BLD`. By default, an assembler listing will be written to `$OUT`. You can use the `B=` and
-`L=` arguments to override these defaults. Additionally, if you specify `L=0`, no listing file will be produced, and if you specify `B=0`, no object file will be produced.
+`L=` arguments to override these defaults. Additionally, if you specify `L=0`, no listing file
+will be produced, and if you specify `B=0`, no object file will be produced.
 
 ### <a id="dasm-ntv"></a> DASM
 
@@ -538,6 +628,150 @@ DASM,file[,start][,limit].
   start - parcel address at which to start disassembly (default: 0200a)
   limit - parcel address at which to end disassembly (default: end of executable
 ```
+### <a id="kftc-ntv"></a> KFTC
+
+The synopsis of the __KFTC__ command when built for running natively is:
+
+```
+KFTC [ALLOC=STATIC|STACK|AUTO][I=sfile][L=lfile][O=ofile][S]
+  ALLOC=key - variable storage allocation strategy
+              STATIC : variables are allocated in static storage
+              STACK or AUTO : variables are allocated on the runtime stack
+  I=sfile   - FORTRAN source code file (default $IN)
+  L=lfile   - listing file (default $OUT)
+  O=ofile   - output file (default ZZZZCAL)
+  S         - echo source code lines to output file
+```
+
+A typical usage of the __KFTC__ command looks like:
+
+```
+KFTC,I=HELLO.
+```
+
+Remember that KFTC produces an assembly language source file. CAL can be applied
+to this assembly language source file to produce a Cray X-MP object file, and LDR
+can be applied to the object file to produce a Cray X-MP absolute executable. However,
+assembly language source files produced by KFTC tend to reference runtime and intrinsic
+library functions, and the libraries containing implementations of those functions
+must be specified to LDR also, in order for it to be able to resolve the references.
+
+All of the libraries needed are either provided by ACK or by the _fortran_ subdirectory
+of this repository. The following table identfies them. The column definitions are:
+
+- _COS Library_ : name of the library dataset on COS
+- _Local Library_ : name of the library file on your build machine
+- _Source_ : source of the library, either ACK or a _fortran_ subdirectory
+
+Note that when ACK is built and installed using default configuration parameters, the
+local library files can be found in the directory `/usr/local/share/ack/cos`.
+
+```
+  COS Library  Local Library  Source             Description
+  -----------  -------------  -----------------  ----------------------------------
+  RTLIB        librt.lib      fortran/runtime    FORTRAN runtime library
+  IOLIB        libio.lib      fortran/runtime    FORTRAN I/O library
+  INTFLIB      libintf.lib    fortran/intrinsic. FORTRAN intrinsic function library
+  EMLIB        libem.a        ACK                ACK machine support library
+  SYSLIB       libsys.a       ACK                ACK OS support library
+  CLIB         libc.a         ACK                ACK C language library
+```
+
+Each of these files can be uploaded to a NOS 2.8.7 system using FTP in binary mode, and then
+they can be copied to COS and saved as permanent files there using the following NOS CCL
+procedure:
+
+```
+.PROC,SAVE*I"SAVE A PERMANENT FILE",
+F"NAME OF FILE"=(*F).
+.IF,FILE(F,AS),LOCAL.
+  REWIND,F.
+.ELSE,LOCAL.
+  GET,F.
+.ENDIF,LOCAL.
+COPYBF,F,ZZZCBIN.
+REPLACE,ZZZCBIN=F.
+CSUBMIT,CRAYJOB,TO.
+REVERT,NOLIST.
+.DATA,CRAYJOB.
+JOB,JN=INSTALL.
+ACCOUNT,AC=CRAY,APW=XYZZY,UPW=QUASAR.
+ECHO,ON=ALL.
+OPTION,STAT=ON.
+FETCH,DN=F,MF=FE,DF=TR,^
+TEXT='USER,GUEST,GUEST.GET,F.CTASK.'.
+SAVE,DN=F.
+```
+
+After uploading each of the library files listed in the table, above, to NOS 2.8.7 and
+assigning the names in the _COS Library_ column to them, they can be saved on COS using the
+following commands. This assumes that the CCL procedure, above, is added as a record to the
+file named CRAY:
+
+```
+BEGIN,SAVE,CRAY,RTLIB.
+BEGIN,SAVE,CRAY,IOLIB.
+BEGIN,SAVE,CRAY,INTFLIB.
+BEGIN,SAVE,CRAY,EMLIB.
+BEGIN,SAVE,CRAY,SYSLIB.
+BEGIN,SAVE,CRAY,CLIB.
+```
+
+With the _CAL_, _COPYF_, _KFTC_ and _LDR_ executables installed as commands, and the six
+libraries saved as permanent files on COS, the following NOS CCL procedure can be used to
+submit a job via _Cray Station_ to COS to compile, link, and execute a FORTRAN 77 program:
+
+```
+.PROC,FTN*I"COMPILE AND RUN FORTRAN PROGRAM",
+I"FORTRAN SOURCE FILE NAME"=(*F,*N=SOURCE),
+T"CPU TIME LIMIT"=(*S/D,*N=180),
+D"OPTIONAL DATA INPUT FILE"=(*F,*N=).
+.IF,FILE(I,AS),LOCAL.
+  REWIND,I.
+.ELSE,LOCAL.
+  GET,I.
+.ENDIF,LOCAL.
+SKIPEI,CRAYJOB.
+COPY,I,CRAYJOB.
+.IF,$D$.NE.$$,DATA.
+  REWIND,D.
+  COPY,D,CRAYJOB.
+.ENDIF,DATA.
+CSUBMIT,CRAYJOB,TO.
+REVERT,NOLIST.
+.DATA,CRAYJOB.
+JOB,JN=FTN,#T=T.
+ACCOUNT,AC=CRAY,APW=XYZZY,UPW=QUASAR.
+ECHO,ON=ALL.
+OPTION,STAT=ON.
+COPYF,O=I.
+REWIND,DN=I.
+ACCESS,DN=CLIB.
+ACCESS,DN=EMLIB.
+ACCESS,DN=IOLIB.
+ACCESS,DN=INTFLIB.
+ACCESS,DN=RTLIB.
+ACCESS,DN=SYSLIB.
+MEMORY,FL,USER.
+KFTC,#I=I,O=ZZZZCAL.
+REWIND,DN=ZZZZCAL.
+CAL,X,#I=ZZZZCAL,L=0.
+LDR,M=MAP,AB,DN=$BLD,LIB=IOLIB:INTFLIB:RTLIB:EMLIB:SYSLIB:CLIB.
+$ABD.
+```
+
+For example, suppose the procedure, above, has been added to the procedure file named CRAY.
+Suppose further that the NOS 2.8.7 user has created a FORTRAN program named FIBO, FIBO
+reads data from the COS standard input file, $IN, and the user has entered some data for
+the program in a NOS file named DATA. The user could use the procedure, above, to submit the
+program and its input data to COS by executing the following command:
+
+```
+BEGIN,FTN,CRAY,I=FIBO,D=DATA.
+```
+
+The job's output will be returned to the NOS 2.8.7 user's wait queue. It will include a
+listing of the FORTRAN program and the output produced by executing it.
 
 ### <a id="ldr-ntv"></a> LDR
 
