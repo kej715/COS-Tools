@@ -42,15 +42,18 @@ make cos
 See [Going Native with the Tools](../README.md#native) for instructions about installing the
 native compiler and the libraries on which it depends on a Cray X-MP system running COS 1.17.
 
-FORTRAN 77 features not currently implemented by _KFTC_ include:
+FORTRAN 77 features not yet implemented by _KFTC_ include:
 
 - Statement functions
+- Direct access files
 - EQUIVALENCE
 - Alternate return points in SUBROUTINE and RETURN
 - EXTERNAL
 - ENTRY
 - INTRINSIC
-- SAVE, but variables are allocated in static memory by default
+- SAVE, but variables are allocated in static memory by default, so always saved in that case
 - POINTER, a language extension provided by Cray FORTRAN
-- DOUBLE PRECISION, currently handled the same as REAL
+- DOUBLE PRECISION is handled the same as REAL
 - COMPLEX
+
+In addition, _KFTC_ does not currently implement any vectorization.
