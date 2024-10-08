@@ -1144,11 +1144,17 @@ static int parseOptions(int argc, char *argv[]) {
     int firstSrcIndex;
 
 #if DEBUG
+#if defined(__cos)
     for (i = 0; i < argc; i++) {
-        if (i > 0) fputs(" ", stderr);
+        fprintf(stderr, "argv[%d] %s\n", i, argv[i]);
+    }
+#else
+    for (i = 0; i < argc; i++) {
+        if (i > 0) fputc(' ', stderr);
         fputs(argv[i], stderr);
     }
-    fputs("\n", stderr);
+    fputc('\n', stderr);
+#endif
 #endif
 
     firstSrcIndex = -1;
