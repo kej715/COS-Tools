@@ -19,6 +19,7 @@ provided in Andras' repository.
 - &nbsp;&nbsp;[KFTC](#kftc-ntv)
 - &nbsp;&nbsp;[LDR](#ldr-ntv)
 - &nbsp;&nbsp;[LIB](#lib-ntv)
+- [Installing Tools from NOS 2.8.7](#nos-tools)
 
 ## <a id="tools"></a> Supported Tools
 
@@ -379,7 +380,7 @@ F.
 Note that _Control-T_ is pressed to exit TEXT mode.
 
 The CATLIST command displays all of the user's permanent files. This confirms that the
-cross-compiled executable, FIB, uploaded previously and the procedure file, CRAY, just
+cross-assembled executable, HELLO, uploaded previously and the procedure file, CRAY, just
 created have been saved as indirect access files as expected.
 ```
 /catlist
@@ -819,3 +820,16 @@ contents of a library, execute the __LIB__ command as in:
 ```
 LIB,L=$OUT,MATHLIB.
 ```
+
+## <a id="nos-tools"></a>Installing Tools from NOS 2.8.7
+
+Previous sections defined NOS CCL procedures enabling files to be transferred from NOS 2.8.7
+to COS 1.17 and saved there. The NOS 2.8.7 system described earlier and provided
+[here](https://github.com/kej715/DtCyber/tree/main/NOS2.8.7#readme) supports an optionally
+installed product named `cos-tools`. When the product named `cos-tools` is installed on
+NOS 2.8.7, it installs all of the native tools described above (e.g., _CAL_, _KFTC_, _LDR_,
+etc.) on COS 1.17. It also installs a CCL procedure library named `CRAY` in the catalog
+of user INSTALL, and that library includes all of the CCL procedures described above.
+See [COS Tools](https://github.com/kej715/DtCyber/tree/main/NOS2.8.7#cos-tools) in the
+[NOS 2.8.7](https://github.com/kej715/DtCyber/tree/main/NOS2.8.7#readme) repository for more
+details.
