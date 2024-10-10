@@ -45,6 +45,7 @@ native compiler and the libraries on which it depends on a Cray X-MP system runn
 FORTRAN 77 features not yet implemented by _KFTC_ include:
 
 - Statement functions
+- Implied DO loops
 - Direct access files
 - EQUIVALENCE
 - Alternate return points in SUBROUTINE and RETURN
@@ -56,4 +57,4 @@ FORTRAN 77 features not yet implemented by _KFTC_ include:
 - DOUBLE PRECISION is handled the same as REAL
 - COMPLEX
 
-In addition, _KFTC_ does not currently implement any vectorization.
+In addition, _KFTC_ does not yet implement any vectorization.
