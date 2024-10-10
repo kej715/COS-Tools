@@ -28,6 +28,7 @@
 #define BASE_STACK_SIZE          100
 #define BLOCK_STACK_SIZE         100
 #define COLUMN_LIMIT             72
+#define EDIT_CONTROL_STACK_SIZE  100
 #define EXTERN_TABLE_INCREMENT   100
 #define FALSE                    0
 #define IMAGE_INCREMENT          4096

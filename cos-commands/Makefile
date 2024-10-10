@@ -21,10 +21,16 @@
 #
 #--------------------------------------------------------------------------
 
-BINDIR = /usr/local/bin
+BINDIR = ..
 COSDIR = ../cos-interface
 
-all:	copyd.abs copyf.abs copyr.abs note.abs skipd.abs skipf.abs skipr.abs
+all:	charges.abs copyd.abs copyf.abs copyr.abs note.abs skipd.abs skipf.abs skipr.abs
+
+charges.abs: charges.obj
+	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
+
+charges.obj: charges.cal
+	$(BINDIR)/cal -t $(COSDIR)/systxt $<
 
 copyd.abs: copyd.obj
 	$(BINDIR)/ldr -o $@ $(COSDIR)/libcos.lib $<
@@ -69,6 +75,6 @@ skipr.obj: skipr.cal
 	$(BINDIR)/cal -t $(COSDIR)/systxt $<
 
 clean:
-	rm -f *.obj *.abs *.lst
+	rm -f *.obj *.abs *.lst *.map
 
 #---------------------------  End Of File  --------------------------------

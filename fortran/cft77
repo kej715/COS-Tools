@@ -1,0 +1,21 @@
+#!/bin/sh
+#
+#  Cross-compile a FORTRAN 77 program. This script assumes that the
+#  tools defined in the COS-Tools repository have been built and
+#  installed and also that the Amsterdam Compiler Kit has been built
+#  and installed.
+#
+#  Arguments:
+#    $1 : name of FORTRAN source file, assumed to have extension ".f"
+#
+#  Produces:
+#    $1.cal : assembly language source file
+#    $1.o   : Cray X-MP object file
+#    $1.lst : listing file
+#    $1.map : load map
+#    $1.abs : Cray X-MP absoluate executable
+#
+export ACKROOT=/usr/local/share/ack
+kftc -l $1.lst -o $1.cal -s $1.f
+cal -x -o $1.o -l - -i $1.cal >> $1.lst
+ldr -o $1.abs -m $1.map $1.o runtime/libio.lib runtime/librt.lib intrinsic/libintf.lib $ACKROOT/cos/libem.a $ACKROOT/cos/libsys.a $ACKROOT/cos/libc.a

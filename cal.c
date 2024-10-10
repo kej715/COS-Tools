@@ -219,7 +219,6 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
 
     *isExtText = FALSE;
     while (argi < argc) {
-        if (!IS_KEY(argv[argi])) break;
         if (strcmp(argv[argi], F_KEY) == 0) {
             argi += 1;
         }
@@ -248,8 +247,11 @@ static int openNextSource(int argi, int argc, char *argv[], bool *isExtText) {
         else if (strcmp(argv[argi], X_KEY) == 0) {
             argi += 1;
         }
-        else {
+        else if (IS_KEY(argv[argi])) {
             argi += 2;
+        }
+        else {
+            break;
         }
     }
     if (argi >= argc) return -1;
@@ -323,7 +325,6 @@ static void parseOptions(int argc, char *argv[]) {
         if (strcmp(argv[i], F_KEY) == 0) {
             isFlexibleSyntax = TRUE;
         }
-#if defined(__cos)
         else if (strcmp(argv[i], I_KEY) == 0) {
             i += 1;
             if (i >= argc || IS_KEY(argv[i])) {
@@ -331,7 +332,6 @@ static void parseOptions(int argc, char *argv[]) {
             }
             sourceCount += 1;
         }
-#endif
         else if (strcmp(argv[i], L_KEY) == 0) {
             i += 1;
             if (i >= argc) {
@@ -489,6 +489,8 @@ static int runPass(int passNo, bool isExtText) {
     Module *module;
 
     pass = passNo;
+    editControlStackPtr = 0;
+    currentEditControl = defaultEditControl;
     listControlStackPtr = 0;
     currentListControl = defaultListControl;
     clearErrorIndications();

@@ -1244,6 +1244,8 @@ char *getNextToken(char *s, Token *token) {
                 token->details.name.len = MAX_NAME_LENGTH;
                 token->details.name.qualPtr = NULL;
                 token->details.name.qualLen = 0;
+                strcpy(start + MAX_NAME_LENGTH, s);
+                s = start + MAX_NAME_LENGTH;
             }
             else {
                 token->type = TokenType_Error;
@@ -1554,24 +1556,34 @@ static char *interpolateMicros(char *dst, int dstLen, char *src, int srcLen) {
 
     srcLimit = src + srcLen;
     dstLimit = dst + dstLen;
-    while (src < srcLimit) {
-        if (*src == '"') {
+    if (currentEditControl == EditControl_On) {
+        while (src < srcLimit) {
+            if (*src == '"') {
+                src += 1;
+                start = src;
+                while (src < srcLimit && *src != '"') src += 1;
+                if (src < srcLimit && *src == '"') {
+                    micro = evaluateMicro(start, src - start);
+                    while (*micro != '\0' && dst < dstLimit) *dst++ = *micro++;
+                }
+                else {
+                    if (dst < dstLimit) *dst++ = '"';
+                    src = start - 1;
+                }
+            }
+            else if (*src != '_' && dst < dstLimit) {
+                *dst++ = *src;
+            }
             src += 1;
-            start = src;
-            while (src < srcLimit && *src != '"') src += 1;
-            if (src < srcLimit && *src == '"') {
-                micro = evaluateMicro(start, src - start);
-                while (*micro != '\0' && dst < dstLimit) *dst++ = *micro++;
-            }
-            else {
-                if (dst < dstLimit) *dst++ = '"';
-                src = start - 1;
-            }
         }
-        else if (*src != '_' && dst < dstLimit) {
-            *dst++ = *src;
+    }
+    else {
+        while (src < srcLimit) {
+            if (dst < dstLimit) {
+                *dst++ = *src;
+            }
+            src += 1;
         }
-        src += 1;
     }
     return dst;
 }

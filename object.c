@@ -277,6 +277,7 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
     u32 bitAddress;
     u64 currentWord;
     int emptyBitCount;
+    u64 mask;
     int shiftCount;
     u64 subfield;
     int subfieldLen;
@@ -297,10 +298,12 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
     }
     fieldAttributes |= val->attributes;
     bits = (val->type == NumberType_Integer) ? val->value.intValue : toCrayFloat(val->value.intValue);
+    mask = ~((~(u64)0 >> len) << len);
     currentWord = getWord(section, section->originCounter);
     emptyBitCount = 64 - section->wordBitPosCounter;
     while (len > emptyBitCount) {
         shiftCount = len - emptyBitCount;
+        currentWord &= ~(mask >> shiftCount);
         currentWord |= bits >> shiftCount;
         putWord(section, section->originCounter, currentWord);
         subfieldLen = 64 - fieldStartingBitPos;
@@ -309,7 +312,8 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
         listFlush(section);
         listCodeLocation(section);
         len = shiftCount;
-        bits = extractSubfield(bits, 64 - len, len);
+        mask = ~((~(u64)0 >> len) << len);
+        bits &= mask;
         advanceBitPosition(section, emptyBitCount);
         currentWord = getWord(section, section->originCounter);
         fieldStartingBitPos = 0;
@@ -317,6 +321,7 @@ void emitFieldBits(Section *section, Value *val, int len, bool doListFlush) {
     }
     if (len > 0) {
         shiftCount = 64 - (section->wordBitPosCounter + len);
+        currentWord &= ~(mask << shiftCount);
         currentWord |= bits << shiftCount;
         putWord(section, section->originCounter, currentWord);
         advanceBitPosition(section, len);
@@ -578,6 +583,9 @@ u64 toCrayFloat(u64 ieee) {
     u64 fraction;
     u64 sign;
 
+#if defined(__cos)
+    return ieee;
+#else
     if (ieee == 0) return 0;
     sign = ieee & 0x8000000000000000;
     exponent = ((ieee >> 52) & 0x7ff) - 1023; // unbias the 11-bit exponent
@@ -588,6 +596,7 @@ u64 toCrayFloat(u64 ieee) {
     //
     cray_f = sign | ((((exponent + 1) + 040000) & 0x7fff) << 48) | ((fraction >> 5) | 0x800000000000);
     return cray_f;
+#endif
 }
 
 static int writeEntryEntries(Module *module, Dataset *ds) {
@@ -651,7 +660,7 @@ static int writeCommonBlockEntry(ObjectBlock *block, Dataset *ds) {
     word |= blockType << 54;
     if (block->location == SectionLocation_EM) word |= (u64)2 << 48;
     blockOrigin = block->lowestParcelAddress & 0xfffffc;
-    blockSize = (((block->highestParcelAddress + 4) & 0xfffffc) - blockOrigin) >> 2;
+    blockSize = (block->lowestParcelAddress != block->highestParcelAddress) ? (((block->highestParcelAddress + 4) & 0xfffffc) - blockOrigin) >> 2 : 0;
     word |= blockSize;
     if (cosDsWriteWord(ds, word) == -1) return -1;
     return 0;
@@ -719,12 +728,15 @@ int writeObjectRecord(Module *module, Dataset *ds) {
      */
     if (writePDT(module, ds) == -1) return -1;
     /*
-     *  Write a Text Table (TXT) for each object block
+     *  Write a Text Table (TXT) for each non-empty object block
      */
     index = 0;
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-         if (writeTXT(block, index++, (block->type == SectionType_Mixed || block->type == SectionType_Code) && module->isAbsolute, ds) == -1)
-             return -1;
+        if (block->lowestParcelAddress != block->highestParcelAddress) { // block is not empty
+            if (writeTXT(block, index++, (block->type == SectionType_Mixed || block->type == SectionType_Code) && module->isAbsolute, ds) == -1) {
+                return -1;
+            }
+        }
     }
     /*
      *  Write Block Relocation Table(s) (BRT's) for each object block that
@@ -831,7 +843,12 @@ static int writeProgramEntry(ObjectBlock *block, Dataset *ds) {
     if (writeName(block->id, ds) == -1) return -1;
     word = (u64)1 << 63;
     programOrigin = block->lowestParcelAddress >> 2;
-    programSize = ((block->highestParcelAddress + 4) >> 2) - programOrigin;
+    if (block->lowestParcelAddress != block->highestParcelAddress) {
+        programSize = ((block->highestParcelAddress + 4) >> 2) - programOrigin;
+    }
+    else {
+        programSize = 0;
+    }
     if (getErrorCount() > 0) word |= (u64)1 << 62;
     word |= programOrigin << 24;
     word |= programSize;

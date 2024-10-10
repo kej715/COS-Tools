@@ -29,7 +29,6 @@
 /*
  *  Error indications
  */
-
 typedef enum errorCode {
     Err_None = 0,
     Err_DataItem,
@@ -60,6 +59,14 @@ typedef enum errorCode {
     Warn_RedefinedMacro,
     Info_ModuleEnd
 } ErrorCode;
+
+/*
+ *  Edit control modes
+ */
+typedef enum editControl {
+    EditControl_Off = 0,
+    EditControl_On
+} EditControl;
 
 /*
  *  Listing flags

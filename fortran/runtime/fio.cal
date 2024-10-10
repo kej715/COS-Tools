@@ -1,0 +1,45 @@
+         TITLE     'FIO'
+         SUBTITLE  'Miscellaneous FORTRAN Utility Interfaces'
+         IDENT     FIO
+         COMMENT   'FIO - Miscellaneous FORTRAN Utility Interfaces'
+         EXT       @%exit
+
+FIO      SECTION   CODE
+
+**
+*  @%fioeof - Default end-of-file condition handler
+*
+*    The FORTRAN runtime branches here when end-of-file is detected and
+*    the FORTRAN program does not provide its own condition handler.
+*
+*  Entry:
+*    (S7) FORTRAN I/O unit number
+*
+         ENTRY     @%fioeof
+@%fioeof BSS       0
+         MESSAGE   ='End of file encountered'Z,US
+         A7        A7-1
+         S1        1
+         ,A7       S1
+         R         @%exit
+
+**
+*  @%fioerr - Default FORTRAN I/O error condition handler
+*
+*    The FORTRAN runtime branches here when an I/O error is detected and
+*    the FORTRAN program does not provide its own condition handler.
+*
+*  Entry:
+*    (S7) FORTRAN I/O unit number
+*
+         ENTRY     @%fioerr
+@%fioerr BSS       0
+         MESSAGE   ='I/O error encountered'Z,US
+         A7        A7-1
+         S1        1
+         ,A7       S1
+         R         @%exit
+
+         SECTION   *
+
+         END
