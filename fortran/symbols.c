@@ -476,6 +476,10 @@ void generateLabel(char *label) {
     labelPrefixIdx = (labelPrefixIdx + 1) & 0x0f;
 }
 
+Symbol *getSymbolRoot(void) {
+    return symbols;
+}
+
 DataType *getSymbolType(Symbol *symbol) {
     switch (symbol->class) {
     case SymClass_Undefined:

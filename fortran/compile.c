@@ -1928,7 +1928,7 @@ static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
 }
 
 static void notSupported(char *s) {
-    err("Not yet supported: %s");
+    err("Not yet supported: %s", s);
 }
 
 static void parseArithmeticIF(char *s, Register reg) {
@@ -5626,7 +5626,80 @@ static void parseRETURN(char *s) {
 }
 
 static void parseSAVE(char *s) {
-    notSupported("SAVE");
+    char *name;
+    Symbol *symbol;
+    Token token;
+
+    s = eatWsp(s);
+    if (*s == '\0') {
+        // all variables are saved
+        doStaticLocals = TRUE;
+        symbol = getSymbolRoot();
+        while (symbol != NULL) {
+            if (symbol->class == SymClass_Auto) {
+                symbol->class = SymClass_Static;
+                symbol->details.variable.offset = staticOffset;
+                symbol->details.variable.staticBlock = progUnitSym;
+                staticOffset += calculateSize(symbol);
+            }
+            symbol = symbol->next;
+        }
+        return;
+    }
+    for (;;) {
+        s = getNextChar(s);
+        if (*s == '\0') {
+            break;
+        }
+        else if (*s == '/') {
+            s = getIdentifier(s + 1, &token);
+            if (token.type != TokenType_Identifier) {
+                err("Invalid common block name");
+                return;
+            }
+            else if (*s != '/') {
+                err("Missing '/' after common block name");
+                return;
+            }
+            s += 1;
+        }
+        else {
+            s = getNextToken(s, &token, FALSE);
+            if (token.type != TokenType_Identifier) {
+                err("Syntax");
+                return;
+            }
+            name = token.details.identifier.name;
+            symbol = findSymbol(name);
+            if (symbol == NULL) {
+                symbol = addSymbol(name, SymClass_Undefined);
+                defineType(symbol);
+            }
+            switch (symbol->class) {
+            case SymClass_Undefined:
+            case SymClass_Auto:
+                symbol->class = SymClass_Static;
+                symbol->details.variable.offset = staticOffset;
+                symbol->details.variable.staticBlock = progUnitSym;
+                staticOffset += calculateSize(symbol);
+                break;
+            case SymClass_Static:
+            case SymClass_Global:
+                /* do nothing */
+                break;
+            default:
+                err("Invalid identifier in SAVE: %s", name);
+                break;
+            }
+        }
+        s = eatWsp(s);
+        if (*s == ',') {
+            s += 1;
+        }
+        else if (*s != '\0') {
+            err("Syntax");
+        }
+    }
 }
 
 static void parseSTOP(char *s) {
@@ -5747,28 +5820,44 @@ static void pushOp(OperatorDetails *op) {
 static char *readLine(void) {
     int c;
     int len;
+    char *limit;
+    char *lineEnd;
     char *lp;
 
-    lp = fgets(lineBuf, sizeof(lineBuf), sourceFile);
-    if (lp == NULL) return NULL;
-    len = strlen(lineBuf);
+    lp = lineBuf;
+    limit = lp + (sizeof(lineBuf) - 1);
+    lineEnd = lp;
+    for (;;) {
+        c = fgetc(sourceFile);
+        if (c == EOF) {
+            if (feof(sourceFile) && lp != lineEnd) break;
+            return NULL;
+        }
+#if defined(__cos)
+        else if (c == 0x1b) {
+            /*
+             * Handle COS blank compression indicator
+             */
+            c = fgetc(sourceFile);
+            if (c == EOF) break;
+            c -= 036; /* blank count is biased by 36 octal */
+            while (c-- > 0 && lp < limit) *lp++ = ' ';
+        }
+#endif
+        else if (c == '\n') {
+            break;
+        }
+        else if (lp < limit) {
+            *lp++ = c;
+            if (c != ' ') lineEnd = lp;
+        }
+    }
+    *lineEnd = '\0';
+    len = lineEnd - lineBuf;
     if (len < 8) { // valid lines are at least 7 characters long
-        if (len > 0 && lineBuf[len - 1] == '\n') lineBuf[len - 1] = ' ';
         while (len < 7) lineBuf[len++] = ' ';
         lineBuf[len] = '\0';
     }
-    else if (lineBuf[len - 1] != '\n') { // if line is outrageously long or doesn't have EOL
-        for (;;) {
-            c = fgetc(sourceFile);
-            if (c == -1 || c == '\n') break;
-        }
-    }
-    else {
-        lineBuf[--len] = '\0';
-    }
-    while (len > 0 && lineBuf[len - 1] == ' ') len -= 1; // trim trailing blanks
-    if (len < 7) len = 7;
-    lineBuf[len] = '\0';
     return lineBuf;
 }
 

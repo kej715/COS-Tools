@@ -47,6 +47,7 @@ void generateLabel(char *label);
 char *getNextChar(char *s);
 char *getIdentifier(char *s, Token *token);
 char *getNextToken(char *s, Token *token, bool doMatchKeywords);
+Symbol *getSymbolRoot(void);
 DataType *getSymbolType(Symbol *sym);
 void list(char *format, ...);
 void listEject(void);
