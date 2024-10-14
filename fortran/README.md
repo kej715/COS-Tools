@@ -52,7 +52,6 @@ FORTRAN 77 features not yet implemented by _KFTC_ include:
 - EXTERNAL
 - ENTRY
 - INTRINSIC
-- SAVE, but variables are allocated in static memory by default, so always saved in that case
 - POINTER, a language extension provided by Cray FORTRAN
 - DOUBLE PRECISION is handled the same as REAL
 - COMPLEX
