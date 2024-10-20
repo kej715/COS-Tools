@@ -1,6 +1,6 @@
 #include <math.h>
 
-double _rint(double *x) {
+long _rint(double *x) {
 
-return (*x > 0) ? floor(*x) : -floor(-*x);
+return (*x > 0) ? (long)floor(*x) : (long)(-floor(-*x));
 }
