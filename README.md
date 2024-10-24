@@ -47,6 +47,17 @@ sudo make install
 By default, the tools are installed in the directory `/usr/local/bin`. Edit the `Makefile` if
 you want to install them elsewhere.
 
+### IMPORTANT NOTE ABOUT FORTRAN 77
+__kftc__ (the FORTRAN 77 compiler) will not build successfully until
+[this fork of Amsterdam Compiler Kit (ACK)](https://github.com/kej715/ack) has been built and
+installed. A mutual dependency exists, however, between ACK and this (the COS-Tools)
+repository. Specifically, __cal__, __ldr__, and __lib__ must be built and installed before ACK
+can be built and installed successfully. Consequently, you should build and install this
+repository first, then build and install ACK. After ACK has been built and installed
+successfully, return to this repository and build and install it again; __kftc__ should then
+build and install successfully too.
+
+
 ### <a id="cal"></a> cal
 
 __cal__ is a cross-assembler for the Cray Assembly Language. It accepts source programs

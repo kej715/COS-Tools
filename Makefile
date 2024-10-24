@@ -88,10 +88,14 @@ LIBOBJS = lib.o          \
           fnv32a.o       \
           services.o
 
-all: cal dasm ldr lib
+all: cal dasm ldr lib kftc
 	$(MAKE) -C cos-interface ; \
-	$(MAKE) -C cos-commands ; \
+	$(MAKE) -C cos-commands
+
+kftc:
+ifneq ("$(wildcard $(PREFIX)/bin/ack)","")
 	$(MAKE) -C fortran
+endif
 
 cos:
 	rm -f *.o ; \
@@ -132,9 +136,13 @@ clean:
 	$(MAKE) -C cos-commands clean ; \
 	$(MAKE) -C fortran clean
 
-install: cal dasm ldr lib
-	install -b -o root -m 755 cal dasm ldr lib $(PREFIX)/bin ; \
+install: cal dasm ldr lib kftc-inst
+	install -b -o root -m 755 cal dasm ldr lib $(PREFIX)/bin
+
+kftc-inst: kftc
+ifneq ("$(wildcard $(PREFIX)/bin/ack)","")
 	$(MAKE) -C fortran install
+endif
 
 cal.o:  cal.c $(CALHDRS)
 	$(CC) $(CFLAGS) -c $<
