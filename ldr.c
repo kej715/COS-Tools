@@ -517,6 +517,8 @@ static void calculateCommonBaseAddresses(Block *block) {
     u32 limit;
     u8 *moduleId;
 
+    if (block == NULL) return;
+
     blockId = block->id;
     moduleId = block->module->id;
     baseAddress = blockLimit;
