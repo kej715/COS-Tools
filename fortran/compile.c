@@ -99,6 +99,7 @@ static char *getStorageReference(char *s, char *paramName, BaseType type, Storag
 static void inputCheckIostat(ControlInfoList *ciList);
 static void inputFini(ControlInfoList *ciList);
 static void inputInit(ControlInfoList *ciList);
+static bool isAssignment(char *s, bool *hasError);
 static void loadValue(OperatorArgument *value);
 static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic);
 static void notSupported(char *s);
@@ -300,7 +301,9 @@ void compile(char *name) {
     time_t clock;
     DataType dt;
     DoStackEntry *entry;
+    bool hasError;
     int i;
+    bool isAsgn;
     char lineLabel[6];
     char *lp;
     Register reg1, reg2;
@@ -356,12 +359,14 @@ void compile(char *name) {
             }
         }
         *lp = '\0';
-        s = getNextToken(s + 1, &token, TRUE);
-        if (token.type == TokenType_Keyword) {
-            stmtClass = token.details.keyword.class;
-        }
-        else if (token.type == TokenType_Identifier) {
+        isAsgn = isAssignment(s, &hasError);
+        if (hasError) continue;
+        s = getNextToken(s + 1, &token, isAsgn == FALSE);
+        if (isAsgn) {
             stmtClass = StmtClass_Executable;
+        }
+        else if (token.type == TokenType_Keyword) {
+            stmtClass = token.details.keyword.class;
         }
         else {
             stmtClass = StmtClass_None;
@@ -636,7 +641,7 @@ void compile(char *name) {
                     break;
                 }
             }
-            else if (token.type == TokenType_Identifier) {
+            else if (isAsgn) {
                 parseAssignment(s, &token);
             }
             else {
@@ -1851,6 +1856,47 @@ static void inputInit(ControlInfoList *ciList) {
     }
 }
 
+static bool isAssignment(char *s, bool *hasError) {
+    Token *expression;
+    TokenListItem *expressionList;
+    StringRange *strRange;
+    Token token;
+
+    *hasError = FALSE;
+    s = getNextToken(s, &token, FALSE);
+    if (token.type != TokenType_Identifier) return FALSE;
+    if (*s == '(') {
+        s = parseExpressionList(s, &expressionList);
+        if (s == NULL) {
+            err("Invalid array index");
+            *hasError = TRUE;
+            return TRUE;
+        }
+        freeTokenList(expressionList);
+        s = eatWsp(s);
+        if (*s == '(') {
+            s = parseStringRange(s, &strRange);
+            if (s == NULL) {
+                err("Invalid character range");
+                *hasError = TRUE;
+                return TRUE;
+            }
+            freeStringRange(strRange);
+        }
+    }
+    s = eatWsp(s);
+    if (*s != '=') return FALSE;
+    s = parseExpression(s + 1, &expression);
+    if (expression == NULL) {
+        err("Expression syntax");
+        *hasError = TRUE;
+        return FALSE;
+    }
+    freeToken(expression);
+    s = eatWsp(s);
+    return *s == '\0';
+}
+
 static void loadValue(OperatorArgument *value) {
     if (value->class == ArgClass_Constant) {
         emitLoadConst(value);
@@ -1986,7 +2032,6 @@ static void parseAssignment(char *s, Token *id) {
         freeStorageReference(&reference);
         return;
     }
-
     s = eatWsp(parseExpression(s + 1, &expression));
     if (expression == NULL) {
         err("Expression syntax");
@@ -2202,57 +2247,50 @@ static char *parseCharConstraint(char *s, Token *token, DataType *dt) {
     Token *expression;
     OperatorArgument result;
     Token savedToken;
-    char *start;
 
     s = eatWsp(s);
-    start = s;
-
-    if (*s == '*') {
+    if (isdigit(*s)) {
+        s = getIntValue(s, &dt->constraint);
+    }
+    else if (*s == '(') {
         s = eatWsp(s + 1);
-        if (isdigit(*s)) {
-            s = getIntValue(s, &dt->constraint);
-        }
-        else if (*s == '(') {
+        if (*s == '*') {
             s = eatWsp(s + 1);
-            if (*s == '*') {
-                s = eatWsp(s + 1);
-                if (*s == ')') {
-                    dt->constraint = -1;
-                    s += 1;
-                }
-                else {
-                    s = start;
-                }
+            if (*s == ')') {
+                dt->constraint = -1;
+                s += 1;
             }
             else {
-                savedToken = *token;
-                s = parseExpression(s, &expression);
-                *token = savedToken;
-                if (expression == NULL
-                    || evaluateExpression(expression, &result)
-                    || !isConstant(result)
-                    || result.details.constant.dt.type != BaseType_Integer
-                    || result.details.constant.value.integer < 1) {
-                    err("Invalid character length");
-                }
-                else {
-                    dt->constraint = result.details.constant.value.integer;
-                    s = eatWsp(s);
-                    if (*s == ')') {
-                        s += 1;
-                    }
-                    else {
-                        err("Character length syntax");
-                    }
-                }
-                freeToken(expression);
+                err("Character length syntax");
             }
         }
         else {
-            s = start;
+            savedToken = *token;
+            s = parseExpression(s, &expression);
+            *token = savedToken;
+            if (expression == NULL
+                || evaluateExpression(expression, &result)
+                || !isConstant(result)
+                || result.details.constant.dt.type != BaseType_Integer
+                || result.details.constant.value.integer < 1) {
+                err("Invalid character length");
+            }
+            else {
+                dt->constraint = result.details.constant.value.integer;
+                s = eatWsp(s);
+                if (*s == ')') {
+                    s += 1;
+                }
+                else {
+                    err("Character length syntax");
+                }
+            }
+            freeToken(expression);
         }
     }
-
+    else {
+        err("Character length syntax");
+    }
     return s;
 }
 
@@ -2598,19 +2636,15 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
 }
 
 static char *parseDataType(char *s, Token *token, DataType *dt) {
-    char *start;
-    int value;
-
     memset(dt, 0, sizeof(DataType));
     dt->type = BaseType_Undefined;
-    start = s;
     if (token->type == TokenType_Keyword) {
         switch (token->details.keyword.id) {
         case CHARACTER:
             dt->type = BaseType_Character;
             s = eatWsp(s);
             if (*s == '*') {
-                s = parseCharConstraint(s, token, dt);
+                s = parseCharConstraint(s + 1, token, dt);
             }
             else {
                 dt->constraint = 1;
@@ -2619,7 +2653,6 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
         case COMPLEX:
             dt->type = BaseType_Complex;
             notSupported("COMPLEX");
-            s = start;
             break;
         case DOUBLEPRECISION:
             dt->type = BaseType_Double;
@@ -2637,12 +2670,8 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
             dt->type = BaseType_Real;
             break;
         default:
-            s = start;
             break;
         }
-    }
-    else if (token->type != TokenType_Invalid) {
-        s = start;
     }
     return s;
 }
@@ -3033,7 +3062,6 @@ static char *parseExpressionList(char *s, TokenListItem **list) {
             return start;
         }
         else {
-            err("Invalid expression list");
             freeTokenList(firstExpression);
             *list = NULL;
             return NULL;
@@ -3441,10 +3469,14 @@ static char *parseInquireInfoList(char *s, InquireInfoList **iiList) {
 
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
     IfStackEntry *entry;
+    bool hasError;
+    bool isAsgn;
     char label[8];
     Token token;
 
-    s = getNextToken(s, &token, TRUE);
+    isAsgn = isAssignment(s, &hasError);
+    if (hasError) return;
+    s = getNextToken(s, &token, isAsgn == FALSE);
     if (token.type == TokenType_Identifier && strcasecmp(token.details.identifier.name, "THEN") == 0) {
         if (isFromLogIf) {
             err("Block IF not allowed from logical IF");
@@ -3523,7 +3555,7 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
                 break;
             }
         }
-        else if (token.type == TokenType_Identifier) {
+        else if (isAsgn) {
             parseAssignment(s, &token);
         }
         else {
@@ -3810,7 +3842,10 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
     if (*s == '(') {
         if (dt->rank > 0) {
             s = parseExpressionList(s, &expressionList);
-            if (s == NULL) return NULL;
+            if (s == NULL) {
+                err("Invalid array index");
+                return NULL;
+            }
             if (expressionList == NULL) {
                 err("Invalid array index");
                 return NULL;
@@ -3820,6 +3855,7 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
                 if (isChrAsgn) {
                     s = parseStringRange(s, &strRange);
                     if (s == NULL) {
+                        err("Invalid character range");
                         freeTokenList(expressionList);
                         return NULL;
                     }
@@ -3833,7 +3869,10 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
         }
         else if (isChrAsgn) {
             s = parseStringRange(s, &strRange);
-            if (s == NULL) return NULL;
+            if (s == NULL) {
+                err("Invalid character range");
+                return NULL;
+            }
         }
         else {
             err("Undefined array %s", name);
@@ -3885,7 +3924,6 @@ static char *parseStringRange(char *s, StringRange **range) {
         }
     }
     if (*s != ')') {
-        err("Invalid character range");
         freeStringRange(sr);
         return NULL;
     }
@@ -3925,7 +3963,7 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             if (dt->type == BaseType_Character) {
                 s = eatWsp(s);
                 if (*s == '*') {
-                    s = parseCharConstraint(s, &token, &symbol->details.variable.dt);
+                    s = parseCharConstraint(s + 1, &token, &symbol->details.variable.dt);
                     if (symbol->details.variable.dt.constraint == -1 && symbol->class != SymClass_Argument
                         && symbol->class != SymClass_Function) {
                         err("Invalid assumed-length CHARACTER declaration");
