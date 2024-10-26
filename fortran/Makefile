@@ -25,7 +25,7 @@ CFLAGS  = -O3 $(INCL) $(EXTRACFLAGS)
 #CFLAGS  = -O0 -g $(INCL) $(EXTRACFLAGS)
 PREFIX = /usr/local
 COSOBJS = $(PREFIX)/share/ack/cos/boot.o $(PREFIX)/share/ack/cos/c-ansi.o
-EXTRAOBJS = -lm
+EXTRALIBS = -lm
 
 HDRS = binops.h        \
        codegen.h       \
@@ -53,15 +53,15 @@ all: kftc
 	$(MAKE) -C intrinsic cos
 
 cos:
-	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) ; \
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) kftc.abs ; \
 	$(MAKE) -C runtime cos ; \
 	$(MAKE) -C intrinsic cos
 
 kftc: $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
+	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRALIBS)
 
-kftc.abs:
-	CC=ack $(MAKE) kftc
+kftc.abs: $(OBJS)
+	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
 
 clean:
 	rm -f *.o *.abs kftc ; \
