@@ -888,7 +888,14 @@ static bool evaluateExprHelper(Token *expression) {
             }
         }
         pushOp(&expression->details.operator);
-        if (evaluateExprHelper(expression->details.operator.rightArg)) return TRUE;
+        rightArg = expression->details.operator.rightArg;
+        if (rightArg->type == TokenType_Operator
+            && isUnaryOp(rightArg->details.operator.id)
+            && rightArg->details.operator.precedence >= expression->details.operator.precedence) {
+            err("Expression syntax");
+            return TRUE;
+        }
+        if (evaluateExprHelper(rightArg)) return TRUE;
         while (opStkPtr > opStkBtm && opStack[opStkPtr - 1].id != OP_SEXPR) {
             popOp(&op);
             if (executeOperator(op.id)) return TRUE;
@@ -1434,9 +1441,6 @@ static bool executeOperator(OperatorId op) {
                 rightArg.details.constant.value.logical = ~rightArg.details.constant.value.logical;
                 break;
             case BaseType_Complex:
-                rightArg.details.constant.value.complex.real = -rightArg.details.constant.value.complex.real;
-                rightArg.details.constant.value.complex.imaginary = -rightArg.details.constant.value.complex.imaginary;
-                break;
             default:
                 errArgType(op, rightType);
                 return TRUE;
@@ -2987,6 +2991,36 @@ static char *parseExpression(char *s, Token **expression) {
         op = copyToken(&token);
         s = parseExpression(s, &rightArg);
         if (rightArg != NULL) {
+            if (isUnaryOp(op->details.operator.id) && rightArg->type == TokenType_Constant) {
+                if (op->details.operator.id == OP_NEG) {
+                    freeToken(op);
+                    *expression = rightArg;
+                    switch (rightArg->details.constant.dt.type) {
+                    case BaseType_Integer:
+                    case BaseType_Pointer:
+                        rightArg->details.constant.value.integer = -rightArg->details.constant.value.integer;
+                        break;
+                    case BaseType_Real:
+                    case BaseType_Double:
+                        rightArg->details.constant.value.real = -rightArg->details.constant.value.real;
+                        break;
+                    case BaseType_Logical:
+                        rightArg->details.constant.value.logical = ~rightArg->details.constant.value.logical;
+                        break;
+                    case BaseType_Complex:
+                    default:
+                        err("Syntax");
+                        freeToken(rightArg);
+                        *expression = NULL;
+                    }
+                    return s;
+                }
+                else if (op->details.operator.id == OP_PLUS) {
+                    freeToken(op);
+                    *expression = rightArg;
+                    return s;
+                }
+            }
             switch (rightArg->type) {
             case TokenType_Identifier:
             case TokenType_Constant:
