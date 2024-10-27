@@ -101,7 +101,7 @@ cos:
 	rm -f *.o ; \
 	$(MAKE) cal ldr lib ; \
 	rm -f *.o ; \
-	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) ; \
+	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) cal dasm ldr lib ; \
 	$(MAKE) -C cos-interface ; \
 	$(MAKE) -C cos-commands ; \
 	$(MAKE) -C fortran cos
