@@ -55,7 +55,7 @@ static u64 getField(u8 *bytes, u32 rightmostBit, u16 fieldLength);
 static char *getTableType(u8 type);
 static u64 getWord(u8 *bytes);
 static int idcmp(u8 *id1, u8*id2, int len);
-static int isLibrary(Dataset *ds, int pass, char *sourcePath, char **cachedPath);
+static int isLibrary(Dataset *ds, int pass, char *sourcePath);
 static int loadLibraryModule(Dataset *ds, Module *module, char *libraryPath, int pass, u64 *tableHeader);
 static int loadLibraryModules(int pass);
 static int loadObjectModules(Dataset *ds, u8 *moduleId, int pass);
@@ -107,6 +107,8 @@ static char   *mFile = NULL;
 static char   *oFile = NULL;
 static char   *osDate = "02/28/89";
 static char   *osName = "COS 1.17";
+static int    sourceCount = 0;
+static char   *sourcePaths[MAX_SOURCE_FILES];
 static Symbol *startSymbol = NULL;
 static Symbol *symbolTable = NULL;
 
@@ -125,12 +127,13 @@ static Symbol *symbolTable = NULL;
 #endif
 
 int main(int argc, char *argv[]) {
-    char *cachedPath;
     time_t clock;
     char *cp;
     Dataset *ds;
     int firstFileIndex;
     int fileIndex;
+    char *filePath;
+    int i;
     u8 moduleId[9];
     char objectPath[MAX_FILE_PATH_LENGTH+1];
     int pass;
@@ -149,6 +152,59 @@ int main(int argc, char *argv[]) {
     firstFileIndex = parseOptions(argc, argv);
 
     //
+    //  Build list of unique source object file and library paths
+    //
+    fileIndex = firstFileIndex;
+    while (fileIndex < argc) {
+        if (IS_KEY(argv[fileIndex])) {
+#if defined(__cos)
+            if (strcmp(argv[fileIndex], AB_KEY) == 0
+                || strcmp(argv[fileIndex], M_KEY) == 0) {
+                fileIndex += 2;
+                continue;
+            }
+#else
+            if (strcmp(argv[fileIndex], O_KEY) == 0
+                || strcmp(argv[fileIndex], M_KEY) == 0) {
+                fileIndex += 2;
+                continue;
+            }
+#endif
+            fileIndex += 1;
+        }
+#if defined(__cos)
+        else if (strcmp(argv[fileIndex], "AB") == 0) {
+            fileIndex += 1;
+            continue;
+        }
+#endif
+        addSuffix(argv[fileIndex], ".obj", sourcePath);
+        i = 0;
+        while (i < sourceCount) {
+            if (strcmp(sourcePath, sourcePaths[i]) == 0) break;
+            i += 1;
+        }
+        if (i >= sourceCount) {
+            if (i >= MAX_SOURCE_FILES) {
+                eprintf("Too many source files, max is %d", MAX_SOURCE_FILES);
+                exit(1);
+            }
+#if DEBUG
+            eprintf("Source file[%d] : %s", sourceCount, sourcePath);
+#endif
+            cp = (char *)allocate(strlen(sourcePath) + 1);
+            strcpy(cp, sourcePath);
+            sourcePaths[sourceCount++] = cp;
+        }
+#if DEBUG
+        else {
+            eprintf("Redundant source file: %s", sourcePath);
+        }
+#endif
+        fileIndex += 1;
+    }
+
+    //
     //  Execute the load in two passes. In pass one, process PDT's
     //  to build a module chain, create a symbol table of entry points,
     //  and calculate total image size. In pass two, process TXT's
@@ -160,60 +216,37 @@ int main(int argc, char *argv[]) {
         eprintf("Start pass %d", pass);
 #endif
         currentModule = NULL;
-        fileIndex = firstFileIndex;
+        fileIndex = 0;
 
-        while (fileIndex < argc) {
-            if (IS_KEY(argv[fileIndex])) {
-#if defined(__cos)
-                if (strcmp(argv[fileIndex], AB_KEY) == 0
-                    || strcmp(argv[fileIndex], M_KEY) == 0) {
-                    fileIndex += 2;
-                    continue;
-                }
-#else
-                if (strcmp(argv[fileIndex], O_KEY) == 0
-                    || strcmp(argv[fileIndex], M_KEY) == 0) {
-                    fileIndex += 2;
-                    continue;
-                }
-#endif
-                fileIndex += 1;
-            }
-#if defined(__cos)
-            else if (strcmp(argv[fileIndex], "AB") == 0) {
-                fileIndex += 1;
-                continue;
-            }
-#endif
-            addSuffix(argv[fileIndex], ".obj", sourcePath);
-            ds = cosDsOpen(sourcePath);
+        while (fileIndex < sourceCount) {
+            filePath = sourcePaths[fileIndex++];
+            ds = cosDsOpen(filePath);
             if (ds == NULL) {
-                eprintf("Failed to open %s", sourcePath);
+                eprintf("Failed to open %s", filePath);
                 exit(1);
             }
-            status = isLibrary(ds, pass, sourcePath, &cachedPath);
+            status = isLibrary(ds, pass, filePath);
 #if DEBUG
-            if (status != -1) eprintf("%s is %s", sourcePath, status == 0 ? "an object file" : "a library");
+            if (status != -1) eprintf("%s is %s", filePath, status == 0 ? "an object file" : "a library");
 #endif
             if (status == -1) {
-                eprintf("Failed to read %s", sourcePath);
+                eprintf("Failed to read %s", filePath);
                 exit(1);
             }
             else if (status == 0) {
-                calculateModuleName(sourcePath, moduleId);
+                calculateModuleName(filePath, moduleId);
                 if (loadObjectModules(ds, moduleId, pass) == -1) {
-                    eprintf("Failed to load object modules from %s", sourcePath);
+                    eprintf("Failed to load object modules from %s", filePath);
                     exit(1);
                 }
             }
             else if (pass == 1) {
-                if (collectLibraryModules(ds, cachedPath) == -1) {
-                    eprintf("Failed to read entry names from %s", cachedPath);
+                if (collectLibraryModules(ds, filePath) == -1) {
+                    eprintf("Failed to read entry names from %s", filePath);
                     exit(1);
                 }
             }
             cosDsClose(ds);
-            fileIndex += 1;
         }
         if (pass == 1) {
 #if DEBUG
@@ -810,7 +843,7 @@ static int idcmp(u8 *id1, u8 *id2, int len) {
     return strncasecmp((char *)id1, (char *)id2, len);
 }
 
-static int isLibrary(Dataset *ds, int pass, char *sourcePath, char **cachedPath) {
+static int isLibrary(Dataset *ds, int pass, char *sourcePath) {
     u8 buf[8];
     char *cp;
     u64 hdr;
@@ -820,7 +853,6 @@ static int isLibrary(Dataset *ds, int pass, char *sourcePath, char **cachedPath)
     u8 tableType;
 
     status = 0;
-    *cachedPath = NULL;
     if (pass == 1) {
         n = cosDsRead(ds, buf, 8);
         cosDsRewind(ds);
@@ -832,17 +864,13 @@ static int isLibrary(Dataset *ds, int pass, char *sourcePath, char **cachedPath)
                 eprintf("Too many libraries specified, max is %d", MAX_LIBRARIES);
                 exit(1);
             }
-            cp = (char *)allocate(strlen(sourcePath) + 1);
-            strcpy(cp, sourcePath);
-            libraryPaths[libraryCount++] = cp;
-            *cachedPath = cp;
+            libraryPaths[libraryCount++] = sourcePath;
             status = 1;
         }
     }
     else {
         for (i = 0; i < libraryCount; i++) {
             if (strcmp(libraryPaths[i], sourcePath) == 0) {
-                *cachedPath = libraryPaths[i];
                 status = 1;
                 break;
             }
@@ -1540,13 +1568,13 @@ static int processTXT(Dataset *ds, u64 hdr, int tableLength) {
             return skipBytes(ds, tableLength);
         }
 #if DEBUG
-        eprintf("Load block %d of module %s to address %o%c", blockIndex, currentModule->id, imageOffset >> 3, 'a' + ((imageOffset >> 1) & 3));
+        eprintf("Load block %d of module %.8s to address %o%c", blockIndex, currentModule->id, imageOffset >> 3, 'a' + ((imageOffset >> 1) & 3));
 #endif
         n = cosDsRead(ds, image + imageOffset, tableLength);
         return (n == tableLength) ? 0 : -1;
     }
     else {
-        eprintf("Failed to find block %d referenced by TXT of module %s", blockIndex, currentModule->id);
+        eprintf("Failed to find block %d referenced by TXT of module %.8s", blockIndex, currentModule->id);
         errorCount += 1;
         return skipBytes(ds, tableLength);
     }
@@ -1576,12 +1604,12 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
         bitAddress = word & 0x3fffffff;
         block = findBlock(currentModule, blockIndex);
         if (block == NULL) {
-            eprintf("Failed to find block %d referenced by XRT of module %s", blockIndex, currentModule->id);
+            eprintf("Failed to find block %d referenced by XRT of module %.8s", blockIndex, currentModule->id);
             errorCount += 1;
             continue;
         }
         if (extIndex >= currentModule->externalRefCount) {
-            eprintf("Invalid external reference index %d in XRT of module %s", blockIndex, currentModule->id);
+            eprintf("Invalid external reference index %d in XRT of module %.8s", blockIndex, currentModule->id);
             errorCount += 1;
             continue;
         }
