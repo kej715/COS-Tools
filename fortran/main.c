@@ -81,6 +81,7 @@ int main(int argc, char *argv[]) {
 #define L_KEY "L="
 #define O_KEY "O="
 #define S_KEY "S"
+#define STDIN  "$IN"
 #define STDOUT "$OUT"
 #else
 #define IS_KEY(s) (*(s) == '-')
@@ -88,6 +89,7 @@ int main(int argc, char *argv[]) {
 #define L_KEY "-l"
 #define O_KEY "-o"
 #define S_KEY "-s"
+#define STDIN  "-"
 #define STDOUT "-"
 #endif
 
@@ -97,12 +99,12 @@ static char *parseOptions(int argc, char *argv[]) {
     char *sourcePath;
 
 #if defined(__cos)
-    sourceFile  = stdin;
     listingFile = stdout;
     objectPath  = "ZZZZCAL";
 #else
     objectPath  = NULL;
 #endif
+    sourceFile  = stdin;
     sourcePath  = NULL;
     i = 1;
     while (i < argc) {
@@ -124,15 +126,17 @@ static char *parseOptions(int argc, char *argv[]) {
 #if defined(__cos)
         else if (strcmp(argv[i], I_KEY) == 0) {
             i += 1;
-            if (i >= argc) {
+            if (i >= argc || sourcePath != NULL) {
                 usage();
             }
-            sourceFile = fopen(argv[i], "r");
-            if (sourceFile == NULL) {
-                perror(argv[i]);
-                exit(1);
+            sourcePath = argv[i];
+            if (strcmp(sourcePath, STDIN) != 0) {
+                sourceFile = fopen(argv[i], "r");
+                if (sourceFile == NULL) {
+                    perror(sourcePath);
+                    exit(1);
+                }
             }
-            if (sourcePath == NULL) sourcePath = argv[i];
         }
 #endif
         else if (strcmp(argv[i], L_KEY) == 0) {
@@ -193,8 +197,8 @@ static char *parseOptions(int argc, char *argv[]) {
 #endif
         i += 1;
     }
+    if (sourcePath == NULL) sourcePath = STDIN;
 #if defined(__cos)
-    if (sourcePath == NULL) sourcePath = "$IN";
     if (objectFile == NULL && strcmp(objectPath, "0") != 0) {
         objectFile = fopen(objectPath, "w");
         if (objectFile == NULL) {
