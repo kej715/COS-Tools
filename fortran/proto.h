@@ -29,6 +29,8 @@
 #include "types.h"
 
 Symbol *addCommonBlock(char *name);
+EquivGroup *addEquivGroup(void);
+void addEquivMember(EquivGroup *group, Symbol *symbol, int offset);
 Symbol *addLabel(char *label);
 Symbol *addSymbol(char *identifier, SymbolClass class);
 void *allocate(int size);
@@ -43,6 +45,7 @@ Symbol *findIntrinsicFunction(char *name);
 Symbol *findLabel(char *label);
 Symbol *findSymbol(char *identifier);
 void freeAllSymbols(void);
+void freeEquivGroups(void);
 void generateLabel(char *label);
 char *getNextChar(char *s);
 char *getIdentifier(char *s, Token *token);
@@ -57,6 +60,7 @@ void printStackTrace(FILE *fp);
 void *reallocate(void *old, int oldSize, int newSize);
 void registerIntrinsicFunctions(void);
 void resetCommonBlocks(void);
+char *symClassToStr(SymbolClass class);
 
 extern char currentDate[];
 extern char currentTime[];
@@ -64,6 +68,7 @@ extern bool doEchoSource;
 extern bool doList;
 extern bool doStaticLocals;
 extern bool doStaticLocalsDefault;
+extern EquivGroup *equivGroups;
 extern int lineNo;
 extern FILE *listingFile;
 extern FILE *objectFile;

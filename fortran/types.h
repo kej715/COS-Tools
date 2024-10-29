@@ -375,6 +375,18 @@ typedef struct operatorArgument {
     Register reg;
 } OperatorArgument;
 
+typedef struct equivMember {
+    struct equivMember *next;
+    Symbol *symbol;
+    int offset;
+} EquivMember;
+
+typedef struct equivGroup {
+    struct equivGroup *next;
+    EquivMember *firstMember;
+    EquivMember *lastMember;
+} EquivGroup;
+
 typedef enum fileStatus {
     FileStatus_Unknown = 0,
     FileStatus_Old,

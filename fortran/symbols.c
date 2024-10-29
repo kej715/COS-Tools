@@ -44,9 +44,11 @@ static Symbol *labels = NULL;
 static int labelCounter = 0;
 static int labelPrefixIdx = 0;
 static char labelPrefixes[] = {'H','I','G','J','F','K','E','L','D','M','C','N','B','O','A','P'};
+static EquivGroup *lastEquivGroup = NULL;
 static Symbol *lastSymbol = NULL;
 static DataType undefinedType = { BaseType_Undefined };
 
+EquivGroup *equivGroups = NULL;
 Symbol *progUnitSym;
 Symbol *symbols = NULL;
 
@@ -220,6 +222,36 @@ Symbol *addCommonBlock(char *name) {
     Symbol *symbol;
 
     return addNode(name, SymClass_NamedCommon, &commonBlocks);
+}
+
+EquivGroup *addEquivGroup(void) {
+    EquivGroup *group;
+
+    group = (EquivGroup *)allocate(sizeof(EquivGroup));
+    if (equivGroups == NULL) {
+        equivGroups = group;
+    }
+    else {
+        lastEquivGroup->next = group;
+    }
+    lastEquivGroup = group;
+
+    return group;
+}
+
+void addEquivMember(EquivGroup *group, Symbol *symbol, int offset) {
+    EquivMember *member;
+
+    member = (EquivMember *)allocate(sizeof(EquivMember));
+    member->symbol = symbol;
+    member->offset = offset;
+    if (group->firstMember == NULL) {
+        group->firstMember = member;
+    }
+    else {
+        group->lastMember->next = member;
+    }
+    group->lastMember = member;
 }
 
 Symbol *addLabel(char *label) {
@@ -456,6 +488,27 @@ void freeAllSymbols(void) {
     freeTree(labels);
     labels = NULL;
     lastSymbol = NULL;
+}
+
+void freeEquivGroups(void) {
+    EquivMember *member;
+    EquivMember *nextMember;
+    EquivGroup *group;
+    EquivGroup *nextGroup;
+
+    group = equivGroups;
+    while (group != NULL) {
+        nextGroup = group->next;
+        member = group->firstMember;
+        while (member != NULL) {
+            nextMember = member->next;
+            free(member);
+            member = nextMember;
+        }
+        free(group);
+        group = nextGroup;
+    }
+    equivGroups = NULL;
 }
 
 static void freeNode(Symbol *symbol) {

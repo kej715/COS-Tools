@@ -60,6 +60,7 @@ typedef enum parsingState {
 
 static void adjustDataInitializers(void);
 static char *baseTypeToStr(BaseType type);
+static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList);
 static char *collectStmt(void);
 static Token *copyToken(Token *token);
 static Token *createIntegerConstant(int value);
@@ -236,6 +237,57 @@ static void adjustDataInitializers(void) {
     for (dListItem = firstDListItem; dListItem != NULL; dListItem = dListItem->next) {
         dListItem->blockOffset = dListItem->symbol->details.variable.offset;
     }
+}
+
+static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList) {
+    int d;
+    int dim;
+    int rank;
+    int result;
+    OperatorArgument subscript;
+
+    rank = symbol->details.variable.dt.rank;
+    enableEmission(FALSE);
+
+    /*
+     *  Initialize result with last subscript
+     */
+    if (evaluateSubscript(symbol, subscriptList, rank - 1, &subscript)) {
+        result = -1;
+    }
+    else if (isConstant(subscript)) {
+        result = subscript.details.constant.value.integer;
+        if (rank > 1) { // 2 or more dimensional array
+            for (d = rank - 2; d >= 0; d--) {
+                dim = (symbol->details.variable.dt.bounds[d].upper - symbol->details.variable.dt.bounds[d].lower) + 1;
+                result *= dim;
+                if (evaluateSubscript(symbol, subscriptList, d, &subscript)) {
+                    result = -1;
+                    break;
+                }
+                if (isConstant(subscript)) {
+                    result += subscript.details.constant.value.integer;
+                }
+                else {
+                    err("Index expression not constant");
+                    if (isCalculation(subscript)) freeAddrReg(subscript.reg);
+                    result = -1;
+                    break;
+                }
+            }
+        }
+    }
+    else {
+        err("Index expression not constant");
+        if (isCalculation(subscript)) freeAddrReg(subscript.reg);
+        result = -1;
+    }
+    if (symbol->details.variable.dt.type == BaseType_Character) {
+        result *= symbol->details.variable.dt.constraint;
+    }
+    enableEmission(TRUE);
+
+    return result;
 }
 
 static char *collectStmt() {
@@ -1871,11 +1923,7 @@ static bool isAssignment(char *s, bool *hasError) {
     if (token.type != TokenType_Identifier) return FALSE;
     if (*s == '(') {
         s = parseExpressionList(s, &expressionList);
-        if (s == NULL) {
-            err("Invalid array index");
-            *hasError = TRUE;
-            return TRUE;
-        }
+        if (s == NULL) return FALSE;
         freeTokenList(expressionList);
         s = eatWsp(s);
         if (*s == '(') {
@@ -4881,6 +4929,7 @@ static void parseEND(char *s) {
     listSymbols();
     listSetPageEnd();
     freeAllSymbols();
+    freeEquivGroups();
     totalErrors += errorCount;
 }
 
@@ -4902,7 +4951,90 @@ static void parseENTRY(char *s) {
 }
 
 static void parseEQUIVALENCE(char *s) {
-    notSupported("EQUIVALENCE");
+    TokenListItem *expressionList;
+    EquivGroup *group;
+    char *id;
+    int n;
+    int offset;
+    Symbol *symbol;
+    Token token;
+
+    for (;;) {
+        s = eatWsp(s);
+        if (*s != '(') {
+            err("Syntax");
+            return;
+        }
+        s += 1;
+        group = addEquivGroup();
+        n = 0;
+        for (;;) {
+            s = getNextToken(s, &token, FALSE);
+            if (token.type != TokenType_Identifier) {
+                err("Syntax");
+                return;
+            }
+            id = token.details.identifier.name;
+            symbol = findSymbol(id);
+            if (symbol == NULL) {
+                symbol = findIntrinsicFunction(id);
+                if (symbol != NULL) {
+                    symbol->class = SymClass_Intrinsic;
+                }
+                else {
+                    symbol = addSymbol(id, SymClass_Undefined);
+                }
+            }
+            switch (symbol->class) {
+            case SymClass_Undefined:
+                defineLocalVariable(symbol);
+                /* fall through */
+            case SymClass_Auto:
+            case SymClass_Static:
+            case SymClass_Global:
+                break;
+            default:
+                err("Invalid symbol class of %s: %s", id, symClassToStr(symbol->class));
+                return;
+            }
+            offset = 0;
+            if (*s == '(') {
+                s = parseExpressionList(s, &expressionList);
+                if (s == NULL) {
+                    err("Invalid array index");
+                    return;
+                }
+                offset = calculateConstOffset(symbol, expressionList);
+                freeTokenList(expressionList);
+                if (offset == -1) return;
+            }
+            addEquivMember(group, symbol, offset);
+            n += 1;
+            s = eatWsp(s);
+            if (*s == ')') {
+                s += 1;
+                break;
+            }
+            else if (*s == ',') {
+                s += 1;
+            }
+            else {
+                err("Syntax");
+                return;
+            }
+        }
+        if (n < 2) {
+            err("Syntax");
+            return;
+        }
+        s = eatWsp(s);
+        if (*s == ',') {
+            s += 1;
+        }
+        else if (*s == '\0') {
+            break;
+        }
+    }
 }
 
 static void parseEXTERNAL(char *s) {

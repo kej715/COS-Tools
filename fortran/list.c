@@ -32,7 +32,6 @@
 static char *dataTypeToStr(DataType *dt);
 static void listTree(Symbol *symbol);
 static void resetHeaderLine(void);
-static char *symClassToStr(SymbolClass class);
 
 #define LINES_PER_PAGE      55
 #define LISTING_LINE_LENGTH 132
@@ -213,7 +212,7 @@ static void resetHeaderLine(void) {
     headerLine[LISTING_LINE_LENGTH+1] = '\0';
 }
 
-static char *symClassToStr(SymbolClass class) {
+char *symClassToStr(SymbolClass class) {
     switch (class) {
     case SymClass_Undefined:   return "Undefined";
     case SymClass_Program:     return "Program";
