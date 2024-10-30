@@ -47,6 +47,7 @@ static bool       doPlusSigns;
 static FormatDesc *firstDesc;
 static char       fmtBuf[MAX_FMT_LEN+1];
 static bool       isBlankZero;
+static bool       isLastChr;
 static char       *limit;
 static FormatDesc *nextDesc;
 static char       record[MAX_FMT_RECL];
@@ -285,6 +286,7 @@ void _lstchr(int unitNum, unsigned long ref) {
     while (len-- > 0) {
         if (cursor < limit) *cursor++ = *s++;
     }
+    isLastChr = TRUE;
 }
 
 void _lstdbl(int unitNum, f64 value) {
@@ -305,7 +307,7 @@ void _lstdbl(int unitNum, f64 value) {
     else {
         isNegative = 0;
     }
-    if (cursor < limit) *cursor++ = ' ';
+    if (cursor < limit && isLastChr == FALSE) *cursor++ = ' ';
     if (isNegative && cursor < limit) *cursor++ = '-';
     if (value == 0.0) {
         if (cursor < limit) *cursor++ = '0';
@@ -347,6 +349,7 @@ void _lstdbl(int unitNum, f64 value) {
         while (cursor < limit && *s != '\0') *cursor++ = *s++;
         while (cursor < limit && *ep != '\0') *cursor++ = *ep++;
     }
+    isLastChr = FALSE;
 }
 
 void _lstint(int unitNum, i64 value) {
@@ -372,16 +375,18 @@ void _lstint(int unitNum, i64 value) {
     else {
         s += 1;
     }
-    if (cursor < limit) *cursor++ = ' ';
+    if (cursor < limit && isLastChr == FALSE) *cursor++ = ' ';
     while (cursor < limit && *s != '\0') *cursor++ = *s++;
+    isLastChr = FALSE;
 }
 
 void _lstlog(int unitNum, u64 value) {
     char lc;
 
     lc = (value == 0) ? 'F' : 'T';
-    if (cursor < limit) *cursor++ = ' ';
+    if (cursor < limit && isLastChr == FALSE) *cursor++ = ' ';
     if (cursor < limit) *cursor++ = lc;
+    isLastChr = FALSE;
 }
 
 void _outfin(int *eor) {
@@ -419,6 +424,7 @@ void _prslst(void) {
     revertDesc = NULL;
     doPlusSigns = FALSE;
     isBlankZero = FALSE;
+    isLastChr = FALSE;
     scaleFactor = 0;
 }
 
@@ -1259,6 +1265,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
                 }
                 *dp++ = *s++;
             }
+            *dp = '\0';
             next->repeatCount = 1;
             break;
         case 'P':
@@ -1343,7 +1350,7 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
                     exit(1);
                 }
                 else if (*s == quote) {
-                    if ((s + 1) < limit && *(s + 1) != quote) break;
+                    if ((s + 1) >= limit || *(s + 1) != quote) break;
                     s += 1;
                 }
                 s += 1;
