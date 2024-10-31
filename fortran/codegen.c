@@ -1632,16 +1632,9 @@ void emitString(CharacterValue *cvp, bool hasZByte) {
     s = cvp->string;
     emit("'");
     while (len > 0 && *s != '\0') {
-        while (len > 0 && *s != '\0' && *s != '\'') {
-            emit("%c", *s);
-            s += 1;
-            len -= 1;
-        }
-        if (*s == '\'') {
-            emit("''");
-            s += 1;
-            len -= 1;
-        }
+        if (*s == '\'') emit("'");
+        emit("%c", *s++);
+        len -= 1;
     }
     while (len-- > 0) emit(" ");
     if (hasZByte)
