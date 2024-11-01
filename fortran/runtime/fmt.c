@@ -289,6 +289,7 @@ void _lstchr(int unitNum, unsigned long ref) {
     isLastChr = TRUE;
 }
 
+#define MAX_DIGITS 14
 void _lstdbl(int unitNum, f64 value) {
     char buf[16];
     int decpt;
@@ -314,23 +315,39 @@ void _lstdbl(int unitNum, f64 value) {
         if (cursor < limit) *cursor++ = '.';
     }
     else if (value >= 1.0E-6 && value <= 1.0E+9) {
-        s = fcvt(value, 14, &decpt, &ignore);
-        while (decpt < 0) {
-            if (cursor < limit) *cursor++ = '0';
-            decpt += 1;
-        }
-        while (decpt > 0 && *s != '\0') {
-            if (cursor < limit) *cursor++ = *s++;
-            decpt -= 1;
-        }
-        if (cursor < limit) *cursor++ = '.';
+        s = fcvt(value, MAX_DIGITS, &decpt, &ignore);
         len = strlen(s);
+        if (len > MAX_DIGITS) {
+            len = MAX_DIGITS;
+            *(s + len) = '\0';
+        }
         s2 = s + len - 1;
-        while (s2 >= s && *s2 == '0') *s2-- = '\0';
+        if (decpt <= 0) {
+            if (cursor < limit) *cursor++ = '0';
+            if (cursor < limit) *cursor++ = '.';
+            while (decpt < 0) {
+                if (cursor < limit) *cursor++ = '0';
+                decpt += 1;
+            }
+        }
+        else {
+            while (decpt > 0 && *s != '\0') {
+                if (cursor < limit) *cursor++ = *s++;
+                decpt -= 1;
+            }
+            if (cursor < limit) *cursor++ = '.';
+        }
+        while (s2 > s && *s2 == '0') *s2-- = '\0';
         while (cursor < limit && *s != '\0') *cursor++ = *s++;
     }
     else {
-        s = ecvt(value, 14, &decpt, &ignore);
+        s = ecvt(value, MAX_DIGITS, &decpt, &ignore);
+        len = strlen(s);
+        if (len > MAX_DIGITS) {
+            len = MAX_DIGITS;
+            *(s + len) = '\0';
+        }
+        s2 = s + len - 1;
         ep = buf + sizeof(buf) - 1;
         *ep-- = '\0';
         exp = decpt - 1;
@@ -344,7 +361,6 @@ void _lstdbl(int unitNum, f64 value) {
         if (cursor < limit) *cursor++ = *s;
         s += 1;
         if (cursor < limit) *cursor++ = '.';
-        s2 = s + strlen(s) - 1;
         while (s2 > s && *s2 == '0') *s2-- = '\0';
         while (cursor < limit && *s != '\0') *cursor++ = *s++;
         while (cursor < limit && *ep != '\0') *cursor++ = *ep++;
@@ -424,7 +440,7 @@ void _prslst(void) {
     revertDesc = NULL;
     doPlusSigns = FALSE;
     isBlankZero = FALSE;
-    isLastChr = FALSE;
+    isLastChr = TRUE;
     scaleFactor = 0;
 }
 

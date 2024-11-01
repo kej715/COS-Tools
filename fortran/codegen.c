@@ -689,6 +689,7 @@ void emitLoadConst(OperatorArgument *arg) {
     char buf[32];
     char *cp;
     DataType dt;
+    f64 f;
     i64 i;
     u64 l;
 
@@ -735,7 +736,13 @@ void emitLoadConst(OperatorArgument *arg) {
         break;
     case BaseType_Double:
     case BaseType_Real:
-        sprintf(buf, "%f", arg->details.constant.value.real);
+        f = arg->details.constant.value.real;
+        if (f >= 1.0E-5 && f <= 1.0E+9) {
+            sprintf(buf, "%f", f);
+        }
+        else {
+            sprintf(buf, "%g", f);
+        }
         emit("         S%o        =", arg->reg);
         for (cp = buf; *cp == ' '; cp++)
              ;

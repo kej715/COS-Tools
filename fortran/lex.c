@@ -128,6 +128,56 @@ static Operator logicalOpTable[] = {
  */
 #define MAX_LOGICAL_OP_LEN 5
 
+/*
+ *  Powers of ten used in parsing exponential notation
+ */
+static double powTenNeg[] = {
+    1.0,       // 1.0E-0
+    0.1,       // 1.0E-1
+    0.01,      // 1.0E-2
+    0.001,     // 1.0E-3
+    0.0001,    // 1.0E-4
+    0.00001,   // 1.0E-5
+    0.000001,  // 1.0E-6
+    0.0000001, // 1.0E-7
+    1.0E-8,
+    1.0E-9,
+    1.0E-10,
+    1.0E-11,
+    1.0E-12,
+    1.0E-13,
+    1.0E-14,
+    1.0E-15,
+    1.0E-16,
+    1.0E-17,
+    1.0E-18,
+    1.0E-19,
+    1.0E-20
+};
+static double powTenPos[] = {
+    1.0,        // 1.0E+0
+    10.0,       // 1.0E+1
+    100.0,      // 1.0E+2
+    1000.0,     // 1.0E+3
+    10000.0,    // 1.0E+4
+    100000.0,   // 1.0E+5
+    1000000.0,  // 1.0E+6
+    10000000.0, // 1.0E+7
+    1.0E+8,
+    1.0E+9,
+    1.0E+10,
+    1.0E+11,
+    1.0E+12,
+    1.0E+13,
+    1.0E+14,
+    1.0E+15,
+    1.0E+16,
+    1.0E+17,
+    1.0E+18,
+    1.0E+19,
+    1.0E+20
+};
+
 char *getIdentifier(char *s, Token *token) {
     static char id[MAX_ID_LENGTH+1];
     int len;
@@ -261,13 +311,20 @@ static char *getFloat(char *s, Token *token) {
         }
         if (s != NULL) {
             s = getInteger(s, &valE);
-            while (valE > 0) {
-                val *= 10.0;
-                valE -= 1;
+            if (valE >= 0) {
+                while (valE >= 20) {
+                    val *= powTenPos[20];
+                    valE -= 20;
+                }
+                val *= powTenPos[valE];
             }
-            while (valE < 0) {
-                val /= 10.0;
-                valE += 1;
+            else {
+                valE = -valE;
+                while (valE >= 20) {
+                    val *= powTenNeg[20];
+                    valE -= 20;
+                }
+                val *= powTenNeg[valE];
             }
         }
         else {
