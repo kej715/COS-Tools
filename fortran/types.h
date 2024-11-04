@@ -313,6 +313,7 @@ typedef struct pointeeDetails {
 typedef struct progUnitDetails {
     DataType dt;
     int offset;
+    bool isStorageAssigned;
     char exitLabel[8];
     char frameSizeLabel[8];
     char staticDataLabel[8];
@@ -321,7 +322,11 @@ typedef struct progUnitDetails {
 typedef struct variableDetails {
     DataType dt;
     int offset;
+    bool isStorageAssigned;
+    bool isSubordinate;
     struct symbol *staticBlock;
+    struct symbol *nextInStorage;
+    int nextOffset;
 } VariableDetails;
 
 typedef union symbolDetails {
@@ -374,18 +379,6 @@ typedef struct operatorArgument {
     ArgumentDetails details;
     Register reg;
 } OperatorArgument;
-
-typedef struct equivMember {
-    struct equivMember *next;
-    Symbol *symbol;
-    int offset;
-} EquivMember;
-
-typedef struct equivGroup {
-    struct equivGroup *next;
-    EquivMember *firstMember;
-    EquivMember *lastMember;
-} EquivGroup;
 
 typedef enum fileStatus {
     FileStatus_Unknown = 0,

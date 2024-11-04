@@ -605,16 +605,18 @@ void compile(char *name) {
              *  possible definition statements.
              */
             state = STATE_DEFINITION;
+            presetOffsetCalculation();
+            autoOffset = -calculateAutoOffsets();
+            staticOffset = calculateStaticOffsets();
+            calculateCommonOffsets();
+            adjustDataInitializers();
 
         case STATE_DEFINITION:
             /*
-             *  Token is not a specification statement, so fall through to process
-             *  possible definition statements.
+             *  Token is not a definition statement, so fall through to process
+             *  possible executable statements.
              */
             state = STATE_EXECUTABLE;
-            autoOffset = -calculateAutoOffsets();
-            staticOffset = calculateStaticOffsets();
-            adjustDataInitializers();
 
         case STATE_EXECUTABLE:
             if (token.type == TokenType_Keyword) {
@@ -4929,7 +4931,6 @@ static void parseEND(char *s) {
     listSymbols();
     listSetPageEnd();
     freeAllSymbols();
-    freeEquivGroups();
     totalErrors += errorCount;
 }
 
@@ -4951,11 +4952,14 @@ static void parseENTRY(char *s) {
 }
 
 static void parseEQUIVALENCE(char *s) {
+    int delta;
     TokenListItem *expressionList;
-    EquivGroup *group;
     char *id;
+    int lastOffset;
+    Symbol *lastSymbol;
     int n;
     int offset;
+    Symbol *peer;
     Symbol *symbol;
     Token token;
 
@@ -4966,8 +4970,8 @@ static void parseEQUIVALENCE(char *s) {
             return;
         }
         s += 1;
-        group = addEquivGroup();
         n = 0;
+        lastSymbol = NULL;
         for (;;) {
             s = getNextToken(s, &token, FALSE);
             if (token.type != TokenType_Identifier) {
@@ -4988,10 +4992,11 @@ static void parseEQUIVALENCE(char *s) {
             switch (symbol->class) {
             case SymClass_Undefined:
                 defineLocalVariable(symbol);
-                /* fall through */
+                break;
             case SymClass_Auto:
             case SymClass_Static:
             case SymClass_Global:
+                /* do nothing */
                 break;
             default:
                 err("Invalid symbol class of %s: %s", id, symClassToStr(symbol->class));
@@ -5006,10 +5011,18 @@ static void parseEQUIVALENCE(char *s) {
                 }
                 offset = calculateConstOffset(symbol, expressionList);
                 freeTokenList(expressionList);
-                if (offset == -1) return;
+                if (offset == -1) {
+                    return;
+                }
             }
-            addEquivMember(group, symbol, offset);
             n += 1;
+            if (lastSymbol != NULL) {
+                if (linkVariables(lastSymbol, symbol, lastOffset - offset) == FALSE) {
+                    err("Invalid equivalence: %s, %s", lastSymbol->identifier, symbol->identifier);
+                }
+            }
+            lastSymbol = symbol;
+            lastOffset = offset;
             s = eatWsp(s);
             if (*s == ')') {
                 s += 1;
@@ -5061,7 +5074,7 @@ static void parseFORMAT(char *s) {
         s += 1;
     }
     if (*end != ')') {
-        err("FORMAT does not end with '('");
+        err("FORMAT does not end with ')'");
         return;
     }
     cval.length = strlen(start);

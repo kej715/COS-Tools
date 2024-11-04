@@ -36,6 +36,7 @@ static void emitCommonTree(Symbol *symbol);
 static Symbol *findNode(char *label, Symbol *tree);
 static void freeNode(Symbol *symbol);
 static void freeTree(Symbol *symbol);
+static bool insertEquivVariable(Symbol *left, Symbol *right, int offset);
 static void resetCommonTree(Symbol *symbol);
 
 static Symbol *commonBlocks = NULL;
@@ -44,11 +45,9 @@ static Symbol *labels = NULL;
 static int labelCounter = 0;
 static int labelPrefixIdx = 0;
 static char labelPrefixes[] = {'H','I','G','J','F','K','E','L','D','M','C','N','B','O','A','P'};
-static EquivGroup *lastEquivGroup = NULL;
 static Symbol *lastSymbol = NULL;
 static DataType undefinedType = { BaseType_Undefined };
 
-EquivGroup *equivGroups = NULL;
 Symbol *progUnitSym;
 Symbol *symbols = NULL;
 
@@ -224,36 +223,6 @@ Symbol *addCommonBlock(char *name) {
     return addNode(name, SymClass_NamedCommon, &commonBlocks);
 }
 
-EquivGroup *addEquivGroup(void) {
-    EquivGroup *group;
-
-    group = (EquivGroup *)allocate(sizeof(EquivGroup));
-    if (equivGroups == NULL) {
-        equivGroups = group;
-    }
-    else {
-        lastEquivGroup->next = group;
-    }
-    lastEquivGroup = group;
-
-    return group;
-}
-
-void addEquivMember(EquivGroup *group, Symbol *symbol, int offset) {
-    EquivMember *member;
-
-    member = (EquivMember *)allocate(sizeof(EquivMember));
-    member->symbol = symbol;
-    member->offset = offset;
-    if (group->firstMember == NULL) {
-        group->firstMember = member;
-    }
-    else {
-        group->lastMember->next = member;
-    }
-    group->lastMember = member;
-}
-
 Symbol *addLabel(char *label) {
     Symbol *symbol;
 
@@ -334,35 +303,95 @@ static Symbol *allocNode(char *identifier, SymbolClass class) {
 }
 
 int calculateAutoOffsets(void) {
+    int baseOffset;
+    Symbol *equiv;
+    int equivOffset;
+    int highestOffset;
     int offset;
     Symbol *symbol;
-    int totalSize;
 
     /*
-     *  Pass 1. Calculate the size of each synbol and the total amount of storage needed.
+     *  Pass 1. Calculate the offset of each symbol relative to top of stack.
      */
-    totalSize = 0;
+    offset = 0;
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        if (symbol->class == SymClass_Auto || symbol->class == SymClass_Function) {
-            totalSize += calculateSize(symbol);;
-        }
-    }
-    /*
-     *  Pass 2. Calculate the offset of each symbol.
-     */
-    offset = -totalSize;
-    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        if (symbol->class == SymClass_Auto) {
+        if (symbol->class == SymClass_Auto
+            && symbol->details.variable.isStorageAssigned == FALSE
+            && symbol->details.variable.isSubordinate == FALSE) {
+            symbol->details.variable.isStorageAssigned = TRUE;
             symbol->details.variable.offset = offset;
-            offset += symbol->size;
+            if (symbol->details.variable.nextInStorage != NULL) {
+                baseOffset = offset;
+                highestOffset = baseOffset + symbol->size;
+                equiv = symbol->details.variable.nextInStorage;
+                equivOffset = symbol->details.variable.nextOffset;
+                while (equiv != NULL) {
+                    equiv->details.variable.isStorageAssigned = TRUE;
+                    baseOffset += equivOffset;
+                    equiv->details.variable.offset = baseOffset;
+                    if (highestOffset < baseOffset + equiv->size) highestOffset = baseOffset + equiv->size;
+                    equivOffset = equiv->details.variable.nextOffset;
+                    equiv = equiv->details.variable.nextInStorage;
+                }
+                offset = highestOffset;
+            }
+            else {
+                offset += symbol->size;
+            }
         }
         else if (symbol->class == SymClass_Function) {
             symbol->details.progUnit.offset = offset;
             offset += symbol->size;
         }
     }
+    /*
+     *  Pass 2. Adjust offsets to be relative to frame pointer.
+     */
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        if (symbol->class == SymClass_Auto) {
+            symbol->details.variable.offset -= offset;
+        }
+        else if (symbol->class == SymClass_Function) {
+            symbol->details.progUnit.offset -= offset;
+        }
+    }
 
-    return totalSize;
+    return offset;
+}
+
+void calculateCommonOffsets(void) {
+    int baseOffset;
+    Symbol *equiv;
+    int equivOffset;
+    int highestOffset;
+    int offset;
+    Symbol *symbol;
+
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        if (symbol->class == SymClass_Global
+            && symbol->details.variable.isStorageAssigned == FALSE
+            && symbol->details.variable.isSubordinate == FALSE) {
+            symbol->details.variable.isStorageAssigned = TRUE;
+            offset = symbol->details.variable.offset;
+            if (symbol->details.variable.nextInStorage != NULL) {
+                baseOffset = offset;
+                highestOffset = baseOffset + symbol->size;
+                equiv = symbol->details.variable.nextInStorage;
+                equivOffset = symbol->details.variable.nextOffset;
+                while (equiv != NULL) {
+                    equiv->details.variable.isStorageAssigned = TRUE;
+                    baseOffset += equivOffset;
+                    equiv->details.variable.offset = baseOffset;
+                    if (highestOffset < baseOffset + equiv->size) highestOffset = baseOffset + equiv->size;
+                    equivOffset = equiv->details.variable.nextOffset;
+                    equiv = equiv->details.variable.nextInStorage;
+                }
+                if (highestOffset > symbol->details.variable.staticBlock->details.common.limit) {
+                    symbol->details.variable.staticBlock->details.common.limit = highestOffset;
+                }
+            }
+        }
+    }
 }
 
 int calculateSize(Symbol *symbol) {
@@ -388,35 +417,47 @@ int calculateSize(Symbol *symbol) {
         symbol->size = 0;
         break;
     }
-    return symbol->size * countArrayElements(symbol);
+    symbol->size *= countArrayElements(symbol);
+    return symbol->size;
 }
 
 int calculateStaticOffsets(void) {
+    int baseOffset;
+    Symbol *equiv;
+    int equivOffset;
+    int highestOffset;
     int offset;
     Symbol *symbol;
-    int totalSize;
 
-    /*
-     *  Pass 1. Calculate the size of each synbol and the total amount of storage needed.
-     */
-    totalSize = 0;
-    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        if (symbol->class == SymClass_Static) {
-            totalSize += calculateSize(symbol);;
-        }
-    }
-    /*
-     *  Pass 2. Calculate the offset of each symbol.
-     */
     offset = 0;
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        if (symbol->class == SymClass_Static) {
+        if (symbol->class == SymClass_Static
+            && symbol->details.variable.isStorageAssigned == FALSE
+            && symbol->details.variable.isSubordinate == FALSE) {
+            symbol->details.variable.isStorageAssigned = TRUE;
             symbol->details.variable.offset = offset;
-            offset += symbol->size;
+            if (symbol->details.variable.nextInStorage != NULL) {
+                baseOffset = offset;
+                highestOffset = baseOffset + symbol->size;
+                equiv = symbol->details.variable.nextInStorage;
+                equivOffset = symbol->details.variable.nextOffset;
+                while (equiv != NULL) {
+                    equiv->details.variable.isStorageAssigned = TRUE;
+                    baseOffset += equivOffset;
+                    equiv->details.variable.offset = baseOffset;
+                    if (highestOffset < baseOffset + equiv->size) highestOffset = baseOffset + equiv->size;
+                    equivOffset = equiv->details.variable.nextOffset;
+                    equiv = equiv->details.variable.nextInStorage;
+                }
+                offset = highestOffset;
+            }
+            else {
+                offset += symbol->size;
+            }
         }
     }
 
-    return totalSize;
+    return offset;
 }
 
 int countArrayElements(Symbol *symbol) {
@@ -441,10 +482,10 @@ void emitCommonBlocks(void) {
 static void emitCommonTree(Symbol *symbol) {
     if (symbol != NULL) {
         emitCommonTree(symbol->left);
-        emitCommonTree(symbol->right);
         emitActivateSection(symbol->identifier, "COMMON");
         emitWordBlock(symbol->details.common.label, symbol->details.common.limit);
         emitDeactivateSection(symbol->identifier);
+        emitCommonTree(symbol->right);
     }
 }
 
@@ -490,27 +531,6 @@ void freeAllSymbols(void) {
     lastSymbol = NULL;
 }
 
-void freeEquivGroups(void) {
-    EquivMember *member;
-    EquivMember *nextMember;
-    EquivGroup *group;
-    EquivGroup *nextGroup;
-
-    group = equivGroups;
-    while (group != NULL) {
-        nextGroup = group->next;
-        member = group->firstMember;
-        while (member != NULL) {
-            nextMember = member->next;
-            free(member);
-            member = nextMember;
-        }
-        free(group);
-        group = nextGroup;
-    }
-    equivGroups = NULL;
-}
-
 static void freeNode(Symbol *symbol) {
     free(symbol->identifier);
     free(symbol);
@@ -549,6 +569,132 @@ DataType *getSymbolType(Symbol *symbol) {
         return &symbol->details.pointee.dt;
     default:
         return &undefinedType;
+    }
+}
+
+static bool insertEquivVariable(Symbol *left, Symbol *right, int offset) {
+    int leftOffset;
+    Symbol *next;
+
+    switch (left->class) {
+    case SymClass_Auto:
+        switch (right->class) {
+        case SymClass_Auto:
+            break;
+        case SymClass_Global:
+            if (offset != 0) return FALSE;
+        case SymClass_Static:
+            left->class = right->class;
+            left->details.variable.staticBlock = right->details.variable.staticBlock;
+            break;
+        default:
+            return FALSE;
+        }
+        break;
+    case SymClass_Static:
+        switch (right->class) {
+        case SymClass_Static:
+            break;
+        case SymClass_Auto:
+            right->class = left->class;
+            right->details.variable.staticBlock = left->details.variable.staticBlock;
+            break;
+        case SymClass_Global:
+            if (offset != 0) return FALSE;
+            left->class = right->class;
+            left->details.variable.staticBlock = right->details.variable.staticBlock;
+            break;
+        default:
+            return FALSE;
+        }
+        break;
+    case SymClass_Global:
+        switch (right->class) {
+        case SymClass_Static:
+        case SymClass_Auto:
+            right->class = left->class;
+            right->details.variable.staticBlock = left->details.variable.staticBlock;
+            break;
+        case SymClass_Global:
+            if (offset != 0 || left->details.variable.staticBlock != right->details.variable.staticBlock) return FALSE;
+            break;
+        default:
+            return FALSE;
+        }
+        break;
+    default:
+        return FALSE;
+    }
+
+    right->details.variable.nextInStorage = NULL;
+    right->details.variable.isSubordinate = TRUE;
+    next = left->details.variable.nextInStorage;
+    while (next != NULL && left->details.variable.nextOffset < offset) {
+        offset -= left->details.variable.nextOffset;
+        left = next;
+        next = next->details.variable.nextInStorage;
+    }
+    left->details.variable.nextInStorage = right;
+    leftOffset = left->details.variable.nextOffset;
+    left->details.variable.nextOffset = offset;
+    if (next != NULL) {
+        right->details.variable.nextInStorage = next;
+        right->details.variable.nextOffset = leftOffset - offset;
+    }
+
+    return TRUE;
+}
+
+bool linkVariables(Symbol *fromSym, Symbol *toSym, int offset) {
+    Symbol *left;
+    Symbol *next;
+    int nextOffset;
+    Symbol *right;
+
+    if (offset >= 0) {
+        left   = fromSym;
+        right  = toSym;
+    }
+    else {
+        left   = toSym;
+        right  = fromSym;
+        offset = -offset;
+    }
+    if (left == right) return FALSE;
+
+    next = right->details.variable.nextInStorage;
+    nextOffset = right->details.variable.nextOffset;
+    if (insertEquivVariable(left, right, offset) == FALSE) return FALSE;
+    while (next != NULL) {
+        left = right;
+        right = next;
+        offset = nextOffset;
+        next = right->details.variable.nextInStorage;
+        nextOffset = right->details.variable.nextOffset;
+        right->details.variable.nextInStorage = NULL;
+        if (insertEquivVariable(left, right, offset) == FALSE) return FALSE;
+    }
+
+    return TRUE;
+}
+
+void presetOffsetCalculation(void) {
+    Symbol *symbol;
+    int size;
+
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        switch (symbol->class) {
+        case SymClass_Auto:
+        case SymClass_Static:
+        case SymClass_Global:
+            size = calculateSize(symbol);
+            break;
+        case SymClass_Function:
+            size = calculateSize(symbol);
+            break;
+        default:
+            break;
+        }
     }
 }
 

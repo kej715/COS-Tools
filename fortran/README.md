@@ -47,7 +47,6 @@ FORTRAN 77 features not yet implemented by _KFTC_ include:
 - Statement functions
 - Implied DO loops
 - Direct access files
-- EQUIVALENCE
 - Alternate return points in SUBROUTINE and RETURN
 - EXTERNAL
 - ENTRY
