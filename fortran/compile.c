@@ -59,6 +59,7 @@ typedef enum parsingState {
 } ParsingState;
 
 static void adjustDataInitializers(void);
+static char *appendLine(char *sp, char *lp);
 static char *baseTypeToStr(BaseType type);
 static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList);
 static char *collectStmt(void);
@@ -239,6 +240,38 @@ static void adjustDataInitializers(void) {
     }
 }
 
+static char *appendLine(char *sp, char *lp) {
+    char *nbp;
+    char *qp;
+    char *stmtLimit;
+    char *xp;
+
+    stmtLimit = stmtBuf + MAX_STMT_LENGTH;
+    xp = NULL;
+    qp = NULL;
+    nbp = sp - 1;
+    while (*lp != '\0') {
+        if (sp >= stmtLimit) {
+            *sp = '\0';
+            err("Statement too long");
+            return NULL;
+        }
+        if (!isspace(*lp)) {
+            nbp = sp;
+            if (*lp == '\'' || *lp == '"')
+                qp = sp;
+            else if (*lp == '!' && sp > (stmtBuf + 5))
+                xp = sp;
+        }
+        *sp++ = *lp++;
+    }
+    sp = nbp + 1;
+    if (xp != NULL && (qp == NULL || xp > qp)) sp = xp;
+    *sp = '\0';
+
+    return sp;
+}
+
 static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList) {
     int d;
     int dim;
@@ -297,7 +330,6 @@ static char *collectStmt() {
 
     s = stmtBuf;
     *s = '\0';
-    stmtLimit = stmtBuf + MAX_STMT_LENGTH;
 
     for (;;) {
         lp = lineBuf;
@@ -332,12 +364,21 @@ static char *collectStmt() {
         }
         else if (stmtBuf[0] == '\0') {
             list("%6d: %s", ++lineNo, lp);
-            while (*lp != '\0') *s++ = *lp++;
+            lineBuf[72] = '\0';
+            s = appendLine(s, lineBuf);
+            if (s == NULL) {
+                lineBuf[0] = '\0';
+                break;
+            }
         }
         else if (lineBuf[5] != ' ' && lineBuf[5] != '0') {
             list("%6d: %s", ++lineNo, lp);
-            lp = lineBuf + 6;
-            while (*lp != '\0' && s < stmtLimit) *s++ = *lp++;
+            lineBuf[72] = '\0';
+            s = appendLine(s, lineBuf + 6);
+            if (s == NULL) {
+                lineBuf[0] = '\0';
+                break;
+            }
         }
         else {
             *s = '\0';
