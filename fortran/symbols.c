@@ -304,10 +304,12 @@ static Symbol *allocNode(char *identifier, SymbolClass class) {
 
 int calculateAutoOffsets(void) {
     int baseOffset;
+    DataType *dt;
     Symbol *equiv;
     int equivOffset;
     int highestOffset;
     int offset;
+    int size;
     Symbol *symbol;
 
     /*
@@ -319,31 +321,47 @@ int calculateAutoOffsets(void) {
             && symbol->details.variable.isStorageAssigned == FALSE
             && symbol->details.variable.isSubordinate == FALSE) {
             symbol->details.variable.isStorageAssigned = TRUE;
-            symbol->details.variable.offset = offset;
+            symbol->details.variable.offset = offset >> 3;
             if (symbol->details.variable.nextInStorage != NULL) {
                 baseOffset = offset;
-                highestOffset = baseOffset + symbol->size;
+                dt = getSymbolType(symbol);
+                size = (dt->type == BaseType_Character) ? countArrayElements(symbol) * dt->constraint : symbol->size << 3;
+                highestOffset = baseOffset + size;
                 equiv = symbol->details.variable.nextInStorage;
                 equivOffset = symbol->details.variable.nextOffset;
                 while (equiv != NULL) {
+                    dt = getSymbolType(equiv);
                     equiv->details.variable.isStorageAssigned = TRUE;
                     baseOffset += equivOffset;
-                    equiv->details.variable.offset = baseOffset;
-                    if (highestOffset < baseOffset + equiv->size) highestOffset = baseOffset + equiv->size;
+                    if (dt->type == BaseType_Character) {
+                        dt->firstChrOffset = baseOffset & 7;
+                        size = countArrayElements(equiv) * dt->constraint;
+                    }
+                    else if ((baseOffset & 7) == 0) {
+                        size = equiv->size << 3;
+                    }
+                    else {
+                        err("Invalid equivalence: %s, %s\n", symbol->identifier, equiv->identifier);
+                    }
+                    equiv->details.variable.offset = baseOffset >> 3;
+                    if (highestOffset < baseOffset + size) highestOffset = baseOffset + size;
                     equivOffset = equiv->details.variable.nextOffset;
                     equiv = equiv->details.variable.nextInStorage;
                 }
-                offset = highestOffset;
+                offset = (highestOffset + 7) & ~7L;
             }
             else {
-                offset += symbol->size;
+                offset += symbol->size << 3;
             }
         }
         else if (symbol->class == SymClass_Function) {
-            symbol->details.progUnit.offset = offset;
-            offset += symbol->size;
+            symbol->details.progUnit.offset = offset >> 3;
+            offset += symbol->size << 3;
         }
     }
+
+    offset = offset >> 3;
+
     /*
      *  Pass 2. Adjust offsets to be relative to frame pointer.
      */
@@ -361,10 +379,12 @@ int calculateAutoOffsets(void) {
 
 void calculateCommonOffsets(void) {
     int baseOffset;
+    DataType *dt;
     Symbol *equiv;
     int equivOffset;
     int highestOffset;
     int offset;
+    int size;
     Symbol *symbol;
 
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
@@ -392,16 +412,57 @@ void calculateCommonOffsets(void) {
             }
         }
     }
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        if (symbol->class == SymClass_Global
+            && symbol->details.variable.isStorageAssigned == FALSE
+            && symbol->details.variable.isSubordinate == FALSE) {
+            symbol->details.variable.isStorageAssigned = TRUE;
+            offset = symbol->details.variable.offset << 3;
+            if (symbol->details.variable.nextInStorage != NULL) {
+                baseOffset = offset;
+                dt = getSymbolType(symbol);
+                size = (dt->type == BaseType_Character) ? countArrayElements(symbol) * dt->constraint : symbol->size << 3;
+                highestOffset = baseOffset + size;
+                equiv = symbol->details.variable.nextInStorage;
+                equivOffset = symbol->details.variable.nextOffset;
+                while (equiv != NULL) {
+                    dt = getSymbolType(equiv);
+                    equiv->details.variable.isStorageAssigned = TRUE;
+                    baseOffset += equivOffset;
+                    if (dt->type == BaseType_Character) {
+                        dt->firstChrOffset = baseOffset & 7;
+                        size = countArrayElements(equiv) * dt->constraint;
+                    }
+                    else if ((baseOffset & 7) == 0) {
+                        size = equiv->size << 3;
+                    }
+                    else {
+                        err("Invalid equivalence: %s, %s\n", symbol->identifier, equiv->identifier);
+                    }
+                    equiv->details.variable.offset = baseOffset >> 3;
+                    if (highestOffset < baseOffset + size) highestOffset = baseOffset + size;
+                    equivOffset = equiv->details.variable.nextOffset;
+                    equiv = equiv->details.variable.nextInStorage;
+                }
+                highestOffset = ((highestOffset + 7) & ~7L) >> 3;
+                if (highestOffset > symbol->details.variable.staticBlock->details.common.limit) {
+                    symbol->details.variable.staticBlock->details.common.limit = highestOffset;
+                }
+            }
+        }
+    }
 }
 
 int calculateSize(Symbol *symbol) {
     DataType *dt;
+    int n;
 
     dt = getSymbolType(symbol);
     switch (dt->type) {
     case BaseType_Character:
-        symbol->size = (dt->constraint > 0) ? (dt->constraint + 7) / 8 : 1;
-        break;
+        n = (dt->constraint > 0) ? dt->constraint : 1;
+        symbol->size = (n * countArrayElements(symbol) + 7) >> 3;
+        return symbol->size;
     case BaseType_Logical:
     case BaseType_Integer:
     case BaseType_Real:
@@ -423,10 +484,12 @@ int calculateSize(Symbol *symbol) {
 
 int calculateStaticOffsets(void) {
     int baseOffset;
+    DataType *dt;
     Symbol *equiv;
     int equivOffset;
     int highestOffset;
     int offset;
+    int size;
     Symbol *symbol;
 
     offset = 0;
@@ -435,29 +498,42 @@ int calculateStaticOffsets(void) {
             && symbol->details.variable.isStorageAssigned == FALSE
             && symbol->details.variable.isSubordinate == FALSE) {
             symbol->details.variable.isStorageAssigned = TRUE;
-            symbol->details.variable.offset = offset;
+            symbol->details.variable.offset = offset >> 3;
             if (symbol->details.variable.nextInStorage != NULL) {
                 baseOffset = offset;
-                highestOffset = baseOffset + symbol->size;
+                dt = getSymbolType(symbol);
+                size = (dt->type == BaseType_Character) ? countArrayElements(symbol) * dt->constraint : symbol->size << 3;
+                highestOffset = baseOffset + size;
                 equiv = symbol->details.variable.nextInStorage;
                 equivOffset = symbol->details.variable.nextOffset;
                 while (equiv != NULL) {
+                    dt = getSymbolType(equiv);
                     equiv->details.variable.isStorageAssigned = TRUE;
                     baseOffset += equivOffset;
-                    equiv->details.variable.offset = baseOffset;
-                    if (highestOffset < baseOffset + equiv->size) highestOffset = baseOffset + equiv->size;
+                    if (dt->type == BaseType_Character) {
+                        dt->firstChrOffset = baseOffset & 7;
+                        size = countArrayElements(equiv) * dt->constraint;
+                    }
+                    else if ((baseOffset & 7) == 0) {
+                        size = equiv->size << 3;
+                    }
+                    else {
+                        err("Invalid equivalence: %s, %s\n", symbol->identifier, equiv->identifier);
+                    }
+                    equiv->details.variable.offset = baseOffset >> 3;
+                    if (highestOffset < baseOffset + size) highestOffset = baseOffset + size;
                     equivOffset = equiv->details.variable.nextOffset;
                     equiv = equiv->details.variable.nextInStorage;
                 }
-                offset = highestOffset;
+                offset = (highestOffset + 7) & ~7L;
             }
             else {
-                offset += symbol->size;
+                offset += symbol->size << 3;
             }
         }
     }
 
-    return offset;
+    return offset >> 3;
 }
 
 int countArrayElements(Symbol *symbol) {
@@ -645,12 +721,26 @@ static bool insertEquivVariable(Symbol *left, Symbol *right, int offset) {
     return TRUE;
 }
 
-bool linkVariables(Symbol *fromSym, Symbol *toSym, int offset) {
+bool linkVariables(Symbol *fromSym, int fromOffset, Symbol *toSym, int toOffset) {
     Symbol *left;
+    DataType *leftDt;
     Symbol *next;
     int nextOffset;
+    int offset;
     Symbol *right;
+    DataType *rightDt;
 
+    if (fromSym == toSym) return FALSE;
+
+    leftDt         = getSymbolType(fromSym);
+    rightDt        = getSymbolType(toSym);
+    if (leftDt->type != BaseType_Character) {
+        fromOffset = fromOffset << 3;
+    }
+    if (rightDt->type != BaseType_Character) {
+        toOffset = toOffset << 3;
+    }
+    offset = fromOffset - toOffset;
     if (offset >= 0) {
         left   = fromSym;
         right  = toSym;
@@ -660,8 +750,6 @@ bool linkVariables(Symbol *fromSym, Symbol *toSym, int offset) {
         right  = fromSym;
         offset = -offset;
     }
-    if (left == right) return FALSE;
-
     next = right->details.variable.nextInStorage;
     nextOffset = right->details.variable.nextOffset;
     if (insertEquivVariable(left, right, offset) == FALSE) return FALSE;

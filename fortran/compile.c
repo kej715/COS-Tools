@@ -68,7 +68,6 @@ static Token *createIntegerConstant(int value);
 static void defineLocalVariable(Symbol *symbol);
 static void defineType(Symbol *symbol);
 static char *eatWsp(char *s);
-static void err(char *format, ...);
 static void errArgType(OperatorId op, BaseType type);
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset);
 static bool evaluateExpression(Token *expression, OperatorArgument *result);
@@ -141,7 +140,6 @@ static void setCharArg(OperatorArgument *arg, char *s);
 static void setIntegerArg(OperatorArgument *arg, int value);
 static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList);
 static void verifyEOS(char *s);
-static void warn(char *format, ...);
 
 static void parseASSIGN(char *s);
 static void parseBLOCKDATA(char *s);
@@ -209,13 +207,10 @@ static Symbol defaultProgSym = {
 };
 static int autoOffset = 0;
 static Symbol *currentLabel;
-static int errorCount = 0;
 static DataType implicitTypes[26];
 static char lineBuf[MAX_LINE_LENGTH+1];
 static int staticOffset = 0;
 static ParsingState state;
-static int totalErrors = 0;
-static int warningCount = 0;
 
 static OperatorArgument argStack[MAX_ARG_STACK_SIZE];
 static int argStkPtr = 0;
@@ -854,18 +849,6 @@ static void defineType(Symbol *symbol) {
 static char *eatWsp(char *s) {
     while (isspace(*s)) s += 1;
     return s;
-}
-
-static void err(char *format, ...) {
-    va_list ap;
-    char buf[80];
-
-    va_start(ap, format);
-    vsprintf(buf, format, ap);
-    va_end(ap);
-    list(" *ERROR*   %s", buf);
-    fprintf(stderr, "ERROR line %d : %s\n", lineNo, buf);
-    errorCount += 1;
 }
 
 static void errArgType(OperatorId op, BaseType type) {
@@ -5058,7 +5041,7 @@ static void parseEQUIVALENCE(char *s) {
             }
             n += 1;
             if (lastSymbol != NULL) {
-                if (linkVariables(lastSymbol, symbol, lastOffset - offset) == FALSE) {
+                if (linkVariables(lastSymbol, lastOffset, symbol, offset) == FALSE) {
                     err("Invalid equivalence: %s, %s", lastSymbol->identifier, symbol->identifier);
                 }
             }
@@ -6234,18 +6217,6 @@ static void verifyEOS(char *s) {
             return;
         }
     }
-}
-
-static void warn(char *format, ...) {
-    va_list ap;
-    char buf[80];
-
-    va_start(ap, format);
-    vsprintf(buf, format, ap);
-    va_end(ap);
-    list(" *WARNING* %s", buf);
-    fprintf(stderr, "WARNING line %d : %s\n", lineNo, buf);
-    warningCount += 1;
 }
 
 static char *baseTypeToStr(BaseType type) {

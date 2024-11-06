@@ -22,9 +22,11 @@
 **--------------------------------------------------------------------------
 */
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "proto.h"
 
 #if defined(__APPLE__)
 #include <execinfo.h>
@@ -40,6 +42,18 @@ void *allocate(int size) {
     }
     memset(new, 0, (size_t)size);
     return new;
+}
+
+void err(char *format, ...) {
+    va_list ap;
+    char buf[80];
+
+    va_start(ap, format);
+    vsprintf(buf, format, ap);
+    va_end(ap);
+    list(" *ERROR*   %s", buf);
+    fprintf(stderr, "ERROR line %d : %s\n", lineNo, buf);
+    errorCount += 1;
 }
 
 void *reallocate(void *old, int oldSize, int newSize) {
@@ -70,3 +84,14 @@ void printStackTrace(FILE *fp) {
 #endif
 }
 
+void warn(char *format, ...) {
+    va_list ap;
+    char buf[80];
+
+    va_start(ap, format);
+    vsprintf(buf, format, ap);
+    va_end(ap);
+    list(" *WARNING* %s", buf);
+    fprintf(stderr, "WARNING line %d : %s\n", lineNo, buf);
+    warningCount += 1;
+}

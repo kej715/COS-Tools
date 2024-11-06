@@ -222,6 +222,7 @@ typedef union dataValue {
 typedef struct dataType {
     BaseType type;
     int constraint;
+    int firstChrOffset;
     int rank;
     Bounds bounds[7];
 } DataType;

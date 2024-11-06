@@ -46,7 +46,7 @@ static void resetHeaderLine(void);
 
 static char *cpuType = "Cray X-MP";
 static char *ftcName = "KFTC";
-static char *ftcVersion = "0.7";
+static char *ftcVersion = "0.8";
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = LINES_PER_PAGE;
 static int  pageNumber = 0;
@@ -184,7 +184,12 @@ static void listTree(Symbol *symbol) {
             case SymClass_Static:
             case SymClass_Global:
             case SymClass_Argument:
-                fprintf(listingFile, " %8d", symbol->details.variable.offset);
+                if (symbol->details.variable.dt.type == BaseType_Character && symbol->details.variable.dt.firstChrOffset != 0) {
+                    fprintf(listingFile, " %6d:%d", symbol->details.variable.offset, symbol->details.variable.dt.firstChrOffset);
+                }
+                else {
+                    fprintf(listingFile, " %8d", symbol->details.variable.offset);
+                }
                 break;
             case SymClass_Function:
                 if (symbol->details.progUnit.offset != 0)

@@ -408,6 +408,10 @@ void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
                 emit("         S1        %d\n", sym->details.progUnit.dt.constraint);
                 emit("         S1        S1<32\n");
                 emit("         S7        S7!S1\n");
+                if (sym->details.progUnit.dt.firstChrOffset != 0) {
+                    emit("         S1        %d\n", sym->details.progUnit.dt.firstChrOffset);
+                    emit("         S7        S7+S1\n");
+                }
             }
         }
         emit("         A7        A6\n");
@@ -779,6 +783,10 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             emit("         S7        A6\n");
             emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
             emit("         S%o        S%o<3\n", subject->reg, subject->reg);
+            if (dt->firstChrOffset != 0) {
+                emit("         S7        %d\n", dt->firstChrOffset);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+            }
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 /* do nothing */
@@ -800,6 +808,10 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
         case SymClass_Static:
             emit("         S%o        %s+%d\n", subject->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
             emit("         S%o        S%o<3\n", subject->reg, subject->reg);
+            if (dt->firstChrOffset != 0) {
+                emit("         S7        %d\n", dt->firstChrOffset);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+            }
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 /* do nothing */
@@ -861,6 +873,10 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S7        A6\n");
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 emit("         S%o        S%o<3\n", subject->reg, subject->reg);
+                if (dt->firstChrOffset != 0) {
+                    emit("         S7        %d\n", dt->firstChrOffset);
+                    emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                }
             }
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
@@ -883,6 +899,10 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
         case SymClass_Global:
             emit("         S%o        %s+%d\n", subject->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset);
             emit("         S%o        S%o<3\n", subject->reg, subject->reg);
+            if (dt->firstChrOffset != 0) {
+                emit("         S7        %d\n", dt->firstChrOffset);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+            }
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 /* do nothing */
