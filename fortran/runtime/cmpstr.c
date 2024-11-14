@@ -40,11 +40,13 @@ int _cmpstr(unsigned long s1, unsigned long s2) {
         s1Len -= 1;
         s2Len -= 1;
     }
-    if (res == 0) {
-        if (s1Len == 0)
-            res = -1;
-        else if (s2Len == 0)
-            res = 1;
+    while (res == 0 && s1Len > 0) {
+        res = *s1p++ - ' ';
+        s1Len -= 1;
+    }
+    while (res == 0 && s2Len > 0) {
+        res = ' ' - *s2p++;;
+        s2Len -= 1;
     }
     return res;
 }
