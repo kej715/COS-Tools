@@ -6,9 +6,9 @@ double _rmax(int count, ...) {
     double res;
 
     va_start(ap, count);
-    res = va_arg(ap, double);
+    res = *va_arg(ap, double *);
     while (--count > 0) {
-        item = va_arg(ap, double);
+        item = *va_arg(ap, double *);
         if (item > res) res = item;
     }
     va_end(ap);

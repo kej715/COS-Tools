@@ -6,9 +6,9 @@ double _amax0(int count, ...) {
     long res;
 
     va_start(ap, count);
-    res = va_arg(ap, long);
+    res = *va_arg(ap, long *);
     while (--count > 0) {
-        item = va_arg(ap, long);
+        item = *va_arg(ap, long *);
         if (item > res) res = item;
     }
     va_end(ap);
