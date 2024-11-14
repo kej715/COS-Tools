@@ -117,6 +117,10 @@ static void emit(char *format, ...) {
     }
 }
 
+void emitActivateQualifier(char *name) {
+    emit("         QUAL      %s\n", name);
+}
+
 void emitActivateSection(char *name, char *type) {
     emit("%-8s SECTION   %s\n", name, type);
 }
@@ -218,10 +222,10 @@ void emitBranch3Way(Register reg, char *label1, char *label2, char *label3) {
     }
 }
 
-void emitBranchIfEndTrips(char *label) {
-    emit("         S0        1,A7\n");
-    emit("         JSZ       %s\n", label);
-    emit("         JSM       %s\n", label);
+void emitBranchIfEndTrips(DoStackEntry *entry) {
+    emit("         A0        %d,A6\n", entry->frameOffset + DO_TRIP_COUNT);
+    emit("         JAZ       %s\n", entry->endLabel);
+    emit("         JAM       %s\n", entry->endLabel);
 }
 
 void emitBranchIndexed(char *tableLabel, int tableSize, Register reg) {
@@ -267,24 +271,35 @@ static void emitBranchTarget(char *label) {
  *
  *  Result returned in incr
  */
-void emitCalcTrip(Register init, Register lim, Register incr, BaseType type) {
+void emitCalcTrip(DoStackEntry *entry, BaseType type) {
+    Register r1;
+    Register r2;
+
+    r1 = emitLoadFrame(entry->frameOffset + DO_TRIP_COUNT);
+    r2 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
     switch (type) {
     case BaseType_Integer:
-        emit("         S%o        S%o-S%o\n", lim, lim, init);
-        emit("         S%o        S%o+S%o\n", lim, lim, incr);
-        emitDivIntReg(lim, incr);
+        emit("         S%o        S%o-S%o\n", r1, r1, r2);
+        emit("         S%o        %d,A6\n", r2, entry->frameOffset + DO_INCREMENT);
+        emit("         S%o        S%o+S%o\n", r1, r1, r2);
+        emitDivIntReg(r1, r2);
+        freeRegister(r1);
         break;
     case BaseType_Double:
     case BaseType_Real:
-        emit("         S%o        S%o-FS%o\n", lim, lim, init);
-        emit("         S%o        S%o+FS%o\n", lim, lim, incr);
-        emitDivRealReg(lim, incr);
-        emitRealToIntReg(incr);
+        emit("         S%o        S%o-FS%o\n", r1, r1, r2);
+        emit("         S%o        %d,A6\n", r2, entry->frameOffset + DO_INCREMENT);
+        emit("         S%o        S%o+FS%o\n", r1, r1, r2);
+        emitDivRealReg(r1, r2);
+        freeRegister(r1);
+        emitRealToIntReg(r2);
         break;
     default:
        fprintf(stderr, "emitCalcTrip unexpected type: %d\n", type);
        exit(1);
     }
+    emitStoreFrame(r2, entry->frameOffset + DO_TRIP_COUNT);
+    freeRegister(r2);
 }
 
 /*
@@ -296,24 +311,72 @@ void emitCalcTrip(Register init, Register lim, Register incr, BaseType type) {
  *
  *  Result returned in lim
  */
-void emitCalcTrip1(Register init, Register lim, BaseType type) {
+void emitCalcTrip1(DoStackEntry *entry, BaseType type) {
+    Register r1;
+    Register r2;
+
+    r1 = emitLoadFrame(entry->frameOffset + DO_TRIP_COUNT);
+    r2 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
     switch (type) {
     case BaseType_Integer:
-        emit("         S%o        S%o-S%o\n", lim, lim, init);
-        emit("         S%o        1\n", init);
-        emit("         S%o        S%o+S%o\n", lim, lim, init);
+        emit("         S%o        S%o-S%o\n", r1, r1, r2);
+        emit("         S%o        1\n", r2);
+        emit("         S%o        S%o+S%o\n", r1, r1, r2);
+        freeRegister(r2);
         break;
     case BaseType_Double:
     case BaseType_Real:
-        emit("         S%o        S%o-FS%o\n", lim, lim, init);
-        emit("         S%o        =1.0,\n", init);
-        emit("         S%o        S%o+FS%o\n", lim, lim, init);
-        emitRealToIntReg(lim);
+        emit("         S%o        S%o-FS%o\n", r1, r1, r2);
+        emit("         S%o        =1.0,\n", r2);
+        emit("         S%o        S%o+FS%o\n", r1, r1, r2);
+        freeRegister(r2);
+        emitRealToIntReg(r1);
         break;
     default:
        fprintf(stderr, "emitCalcTrip unexpected type: %d\n", type);
        exit(1);
     }
+    emitStoreFrame(r1, entry->frameOffset + DO_TRIP_COUNT);
+    freeRegister(r1);
+}
+
+/*
+ *  emitCalcTripNeg1 - emit code to calculate initial trip count for DO loop
+ *                     when increment is -1
+ *
+ *  The formula for trip count is:
+ *    (lim - init + incr) / incr
+ *
+ *  Result returned in lim
+ */
+void emitCalcTripNeg1(DoStackEntry *entry, BaseType type) {
+    Register r1;
+    Register r2;
+
+    r1 = emitLoadFrame(entry->frameOffset + DO_TRIP_COUNT);
+    r2 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
+    switch (type) {
+    case BaseType_Integer:
+        emit("         S%o        S%o-S%o\n", r1, r1, r2);
+        emit("         S%o        1\n", r2);
+        emit("         S%o        S%o-S%o\n", r1, r1, r2);
+        freeRegister(r2);
+        break;
+    case BaseType_Double:
+    case BaseType_Real:
+        emit("         S%o        S%o-FS%o\n", r1, r1, r2);
+        emit("         S%o        =1.0,\n", r2);
+        emit("         S%o        S%o-FS%o\n", r1, r1, r2);
+        freeRegister(r2);
+        emitRealToIntReg(r1);
+        break;
+    default:
+       fprintf(stderr, "emitCalcTrip unexpected type: %d\n", type);
+       exit(1);
+    }
+    emit("         S%o        -S%o\n", r1, r1);
+    emitStoreFrame(r1, entry->frameOffset + DO_TRIP_COUNT);
+    freeRegister(r1);
 }
 
 void emitCatChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -341,14 +404,21 @@ void emitCopyToOffset(Register r1, Register r2) {
     emit("         A%o        S%o\n", r1, r2);
 }
 
+void emitDeactivateQualifier(char *name) {
+    emit("         QUAL      *\n");
+}
+
 void emitDeactivateSection(char *name) {
     emit("         SECTION   *\n");
 }
 
-void emitDecrTrip(void) {
-    emit("         A1        1,A7\n");
+void emitDecrTrip(DoStackEntry *entry) {
+    char buf[16];
+
+    sprintf(buf, "%d,A6", entry->frameOffset + DO_TRIP_COUNT);
+    emit("         A1        %s\n", buf);
     emit("         A1        A1-1\n");
-    emit("         1,A7      A1\n");
+    emit("         %-9s A1\n", buf);
 }
 
 void emitDivInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
@@ -396,7 +466,7 @@ void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
             emitPrimCall("@_endfio");
             emit("         S7        0\n");
         }
-        else if (sym->class == SymClass_Function) {
+        else if (sym->class == SymClass_Function || sym->class == SymClass_StmtFunction) {
             if (sym->details.progUnit.dt.type != BaseType_Character || sym->details.progUnit.dt.constraint == -1) {
                 emit("         S7        %d,A6\n", sym->details.progUnit.offset);
             }
@@ -763,6 +833,20 @@ void emitLoadConst(OperatorArgument *arg) {
     arg->details.calculation = dt;
 }
 
+void emitLoadConstOffset(OperatorArgument *arg) {
+    arg->reg = allocateAddrReg();
+    emit("         A%o        %d\n", arg->reg, arg->details.constant.value.integer);
+    arg->class = ArgClass_Calculation;
+}
+
+Register emitLoadFrame(int offset) {
+    Register reg;
+
+    reg = allocateRegister();
+    emit("         S%o        %d,A6\n", reg, offset);
+    return reg;
+}
+
 void emitLoadNullPtr(OperatorArgument *arg) {
     arg->reg = allocateRegister();
     emit("         S%o        0\n", arg->reg);
@@ -770,6 +854,7 @@ void emitLoadNullPtr(OperatorArgument *arg) {
 
 void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
     DataType *dt;
+    char *label;
     u16 mask;
     Symbol *sym;
 
@@ -780,7 +865,12 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
         switch (sym->class) {
         case SymClass_Auto:
             emit("         S%o        %d\n", subject->reg, sym->details.variable.offset);
-            emit("         S7        A6\n");
+            if (progUnitSym->class != SymClass_StmtFunction) {
+                emit("         S7        A6\n");
+            }
+            else {
+                emit("         S7        1,A6\n");
+            }
             emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
             emit("         S%o        S%o<3\n", subject->reg, subject->reg);
             if (dt->firstChrOffset != 0) {
@@ -806,7 +896,8 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Static:
-            emit("         S%o        %s+%d\n", subject->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
+            label = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym->details.progUnit.staticDataLabel : progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel;
+            emit("         S%o        %s+%d\n", subject->reg, label, sym->details.variable.offset);
             emit("         S%o        S%o<3\n", subject->reg, subject->reg);
             if (dt->firstChrOffset != 0) {
                 emit("         S7        %d\n", dt->firstChrOffset);
@@ -870,7 +961,12 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             else {
                 emit("         S%o        %d\n", subject->reg, sym->details.progUnit.offset);
-                emit("         S7        A6\n");
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S7        A6\n");
+                }
+                else {
+                    emit("         S7        1,A6\n");
+                }
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 emit("         S%o        S%o<3\n", subject->reg, subject->reg);
                 if (dt->firstChrOffset != 0) {
@@ -937,17 +1033,33 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
         case SymClass_Auto:
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
-                emit("         S7        A6\n");
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S7        A6\n");
+                }
+                else {
+                    emit("         S7        1,A6\n");
+                }
                 emit("         S%o        %d\n", subject->reg, sym->details.variable.offset);
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Constant:
-                emit("         S7        A6\n");
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S7        A6\n");
+                }
+                else {
+                    emit("         S7        1,A6\n");
+                }
                 emit("         S%o        %d\n", subject->reg, sym->details.variable.offset + subject->details.reference.offset.constant);
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         A%o        A%o+A6\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         A%o        A%o+A6\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         A%o        A%o+A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
                 if (sym->details.variable.offset == 1) {
                     emit("         A%o        A%o+1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
                 }
@@ -971,15 +1083,16 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Static:
+            label = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym->details.progUnit.staticDataLabel : progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel;
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
-                emit("         S%o        %s+%d\n", subject->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
+                emit("         S%o        %s+%d\n", subject->reg, label, sym->details.variable.offset);
                 break;
             case ArgClass_Constant:
-                emit("         S%o        %s+%d\n", subject->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset + subject->details.reference.offset.constant);
+                emit("         S%o        %s+%d\n", subject->reg, label, sym->details.variable.offset + subject->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         A1        %s+%d\n", progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
+                emit("         A1        %s+%d\n", label, sym->details.variable.offset);
                 emit("         A%o        A%o+A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
                 emit("         S%o        A%o\n", subject->reg, subject->details.reference.offset.reg);
                 freeAddrReg(subject->details.reference.offset.reg);
@@ -1012,17 +1125,33 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
         case SymClass_Function:
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
-                emit("         S7        A6\n");
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S7        A6\n");
+                }
+                else {
+                    emit("         S7        1,A6\n");
+                }
                 emit("         S%o        %d\n", subject->reg, sym->details.progUnit.offset);
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Constant:
-                emit("         S7        A6\n");
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S7        A6\n");
+                }
+                else {
+                    emit("         S7        1,A6\n");
+                }
                 emit("         S%o        %d\n", subject->reg, sym->details.progUnit.offset + subject->details.reference.offset.constant);
                 emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
                 break;
             case ArgClass_Calculation:
-                emit("         A%o        A%o+A6\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         A%o        A%o+A6\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         A%o        A%o+A1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
+                }
                 if (sym->details.progUnit.offset == 1) {
                     emit("         A%o        A%o+1\n", subject->details.reference.offset.reg, subject->details.reference.offset.reg);
                 }
@@ -1109,6 +1238,7 @@ Register emitLoadStackByteAddr(int offset) {
 
 void emitLoadValue(OperatorArgument *arg) {
     DataType *dt;
+    char *label;
     Symbol *sym;
 
     sym = arg->details.reference.symbol;
@@ -1122,13 +1252,33 @@ void emitLoadValue(OperatorArgument *arg) {
         case SymClass_Auto:
             switch (arg->details.reference.offsetClass) {
             case ArgClass_Undefined:
-                emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.variable.offset);
+                }
                 break;
             case ArgClass_Constant:
-                emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset + arg->details.reference.offset.constant);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S%o        %d,A6\n", arg->reg, sym->details.variable.offset + arg->details.reference.offset.constant);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.variable.offset + arg->details.reference.offset.constant);
+                }
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        %d,A%o\n", arg->reg, sym->details.variable.offset, arg->details.reference.offset.reg);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         A1        A%o+A6\n", arg->details.reference.offset.reg);
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.variable.offset);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.variable.offset);
+                }
                 freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
@@ -1137,15 +1287,16 @@ void emitLoadValue(OperatorArgument *arg) {
             }
             break;
         case SymClass_Static:
+            label = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym->details.progUnit.staticDataLabel : progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel;
             switch (arg->details.reference.offsetClass) {
             case ArgClass_Undefined:
-                emit("         S%o        %s+%d,\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset);
+                emit("         S%o        %s+%d,\n", arg->reg, label, sym->details.variable.offset);
                 break;
             case ArgClass_Constant:
-                emit("         S%o        %s+%d,\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset + arg->details.reference.offset.constant);
+                emit("         S%o        %s+%d,\n", arg->reg, label, sym->details.variable.offset + arg->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
-                emit("         S%o        %s+%d,A%o\n", arg->reg, progUnitSym->details.progUnit.staticDataLabel, sym->details.variable.offset, arg->details.reference.offset.reg);
+                emit("         S%o        %s+%d,A%o\n", arg->reg, label, sym->details.variable.offset, arg->details.reference.offset.reg);
                 freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
@@ -1175,14 +1326,33 @@ void emitLoadValue(OperatorArgument *arg) {
         case SymClass_Function:
             switch (arg->details.reference.offsetClass) {
             case ArgClass_Undefined:
-                emit("         S%o        %d,A6\n", arg->reg, sym->details.progUnit.offset);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S%o        %d,A6\n", arg->reg, sym->details.progUnit.offset);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.progUnit.offset);
+                }
                 break;
             case ArgClass_Constant:
-                emit("         S%o        %d,A6\n", arg->reg, sym->details.progUnit.offset + arg->details.reference.offset.constant);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         S%o        %d,A6\n", arg->reg, sym->details.progUnit.offset + arg->details.reference.offset.constant);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.progUnit.offset + arg->details.reference.offset.constant);
+                }
                 break;
             case ArgClass_Calculation:
-                emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
-                emit("         S%o        %d,A1\n", arg->reg, sym->details.progUnit.offset);
+                if (progUnitSym->class != SymClass_StmtFunction) {
+                    emit("         A1        A%o+A6\n", arg->details.reference.offset.reg);
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.progUnit.offset);
+                }
+                else {
+                    emit("         A1        1,A6\n");
+                    emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
+                    emit("         S%o        %d,A1\n", arg->reg, sym->details.progUnit.offset);
+                }
                 freeAddrReg(arg->details.reference.offset.reg);
                 break;
             default:
@@ -1290,6 +1460,13 @@ void emitMulReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o*FS%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
+void emitMulSize(Register reg, Symbol *sym) {
+    emit("         S7        %d,A6\n", sym->details.variable.offset);
+    emit("         S7        S7>32\n");
+    emit("         A1        S7\n");
+    emit("         A%o        A%o*A1\n", reg, reg);
+}
+
 void emitNeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     u16 mask;
 
@@ -1385,17 +1562,25 @@ void emitProlog(Symbol *sym) {
     char buf[32];
 
     generateLabel(sym->details.progUnit.staticDataLabel);
-    if (sym->class == SymClass_BlockData) {
+    switch (sym->class) {
+    case SymClass_BlockData:
         return;
-    }
-    else if (sym->class == SymClass_Program) {
+    case SymClass_Program:
         emit("         ENTRY     @main\n");
         emit("@main    BSS       0\n");
-    }
-    else {
+        break;
+    case SymClass_Function:
+    case SymClass_Subroutine:
         normalizeLabel(sym->identifier, buf);
         emit("         ENTRY     %s\n", buf);
         emit("%-8s BSS       0\n", buf);
+        break;
+    case SymClass_StmtFunction:
+        normalizeLabel(sym->identifier, buf);
+        emit("%-8s BSS       0\n", buf);
+        break;
+    default:
+        break;
     }
     generateLabel(sym->details.progUnit.exitLabel);
     generateLabel(sym->details.progUnit.frameSizeLabel);
@@ -1596,6 +1781,13 @@ void emitStoreByReference(OperatorArgument *target, OperatorArgument *value) {
     }
 }
 
+void emitStoreFrame(Register reg, int offset) {
+    char buf[16];
+
+    sprintf(buf, "%d,A6", offset);
+    emit("         %-9s S%o\n", buf, reg);
+}
+
 void emitStoreReg(Symbol *sym, Register reg) {
     char buf[32];
 
@@ -1613,6 +1805,7 @@ void emitStoreReg(Symbol *sym, Register reg) {
         emit("         ,A1       S%o\n", reg);
         break;
     case SymClass_Function:
+    case SymClass_StmtFunction:
         sprintf(buf, "%d,A6", sym->details.progUnit.offset);
         emit("         %-9s S%o\n", buf, reg);
         break;
@@ -1674,11 +1867,18 @@ void emitSubInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        S%o-S%o\n", rightArg->reg, leftArg->reg, rightArg->reg);
 }
 
-void emitSubprogramCall(char *id) {
+void emitSubprogramCall(char *id, char *qualifier) {
     char buf[32];
+    char normalizedId[16];
 
-    normalizeLabel(id, buf);
-    emitPrimCall(buf);
+    normalizeLabel(id, normalizedId);
+    if (qualifier == NULL) {
+        emitPrimCall(normalizedId);
+    }
+    else {
+        sprintf(buf, "/%s/%s", qualifier, normalizedId);
+        emitPrimCall(buf);
+    }
 }
 
 void emitSubReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {

@@ -168,6 +168,7 @@ typedef enum symbolClass {
     SymClass_Program,
     SymClass_Subroutine,
     SymClass_Function,
+    SymClass_StmtFunction,
     SymClass_Intrinsic,
     SymClass_BlockData,
     SymClass_NamedCommon,
@@ -293,7 +294,7 @@ typedef struct commonBlockDetails {
 #define MAX_INTRINSIC_ARGS 2
 
 typedef struct intrinsicDetails {
-    bool isGeneric;
+    int isGeneric;
     char *externName;
     BaseType resultType;
     int argc;
@@ -302,7 +303,7 @@ typedef struct intrinsicDetails {
 
 typedef struct labelDetails {
     StatementClass class;
-    bool forwardRef;
+    int forwardRef;
     char label[8];
 } LabelDetails;
 
@@ -314,7 +315,8 @@ typedef struct pointeeDetails {
 typedef struct progUnitDetails {
     DataType dt;
     int offset;
-    bool isStorageAssigned;
+    int isStorageAssigned;
+    struct symbol *parentUnit;
     char exitLabel[8];
     char frameSizeLabel[8];
     char staticDataLabel[8];
@@ -323,8 +325,8 @@ typedef struct progUnitDetails {
 typedef struct variableDetails {
     DataType dt;
     int offset;
-    bool isStorageAssigned;
-    bool isSubordinate;
+    int isStorageAssigned;
+    int isSubordinate;
     struct symbol *staticBlock;
     struct symbol *nextInStorage;
     int nextOffset;
@@ -332,9 +334,9 @@ typedef struct variableDetails {
 
 typedef union symbolDetails {
     CommonBlockDetails common;
+    ConstantDetails param;
     IntrinsicDetails intrinsic;
     LabelDetails label;
-    ConstantDetails param;
     PointeeDetails pointee;
     ProgUnitDetails progUnit;
     VariableDetails variable;
@@ -344,8 +346,12 @@ typedef struct symbol {
     struct symbol *left;
     struct symbol *right;
     struct symbol *next;
+    struct symbol *shadow;
     char *identifier;
     SymbolClass class;
+    int isDeleted;
+    int isShadow;
+    int isFnRef;
     int size;
     SymbolDetails details;
 } Symbol;
@@ -380,6 +386,25 @@ typedef struct operatorArgument {
     ArgumentDetails details;
     Register reg;
 } OperatorArgument;
+
+#define DO_CURRENT    0
+#define DO_TRIP_COUNT 1
+#define DO_INCREMENT  2
+#define DO_FRAME_SIZE (DO_INCREMENT+1)
+
+typedef struct doStackEntry {
+    char startLabel[8];
+    char endLabel[8];
+    Symbol *termLabelSym;
+    Symbol *loopVariable;
+    BaseType loopVariableType;
+    int frameOffset;
+} DoStackEntry;
+
+typedef struct ifStackEntry {
+    char blockEndLabel[8];
+    char ifEndLabel[8];
+} IfStackEntry;
 
 typedef enum fileStatus {
     FileStatus_Unknown = 0,
@@ -455,8 +480,7 @@ typedef struct dataInitializerItem {
 
 #define isCalculation(arg) ((arg).class == ArgClass_Calculation)
 #define isConstant(arg) ((arg).class == ArgClass_Constant)
-#define isFunction(arg) ((arg).class == ArgClass_Function)
-#define isLoadable(arg) ((arg).class > ArgClass_Function)
+#define isLoadable(arg) ((arg).class >= ArgClass_Function)
 
 #define isIntegerConstant(arg) ((arg).class == ArgClass_Constant && (arg).details.constant.dt.type == BaseType_Integer)
 #define isRealConstant(arg) ((arg).class == ArgClass_Constant && (arg).details.constant.dt.type == BaseType_Real)

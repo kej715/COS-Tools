@@ -32,23 +32,11 @@
 #include "codegen.h"
 #include "coercion.h"
 #include "const.h"
+#include "fnv.h"
 #include "proto.h"
 #include "types.h"
 
 #define DEBUG 1
-
-typedef struct doStackEntry {
-    char startLabel[8];
-    char endLabel[8];
-    Symbol *termLabelSym;
-    Symbol *loopVariable;
-    BaseType loopVariableType;
-} DoStackEntry;
-
-typedef struct ifStackEntry {
-    char blockEndLabel[8];
-    char ifEndLabel[8];
-} IfStackEntry;
 
 typedef enum parsingState {
     STATE_PROG_UNIT = 0,
@@ -60,6 +48,7 @@ typedef enum parsingState {
 
 static void adjustDataInitializers(void);
 static char *appendLine(char *sp, char *lp);
+static void assignStorage(void);
 static char *baseTypeToStr(BaseType type);
 static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList);
 static char *collectStmt(void);
@@ -95,12 +84,13 @@ static void freeTokenList(TokenListItem *item);
 static DataType *getDataType(OperatorArgument *arg);
 static char *getIntValue(char *s, int *value);
 static char *getLabel(char *s, char *label);
+static char *getProgUnitQualifier(void);
 static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx);
 static char *getStorageReference(char *s, char *paramName, BaseType type, StorageReference *reference);
 static void inputCheckIostat(ControlInfoList *ciList);
 static void inputFini(ControlInfoList *ciList);
 static void inputInit(ControlInfoList *ciList);
-static bool isAssignment(char *s, bool *hasError);
+static bool isAssignment(char *s, bool *isDefn, bool *hasError);
 static void loadValue(OperatorArgument *value);
 static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic);
 static void notSupported(char *s);
@@ -120,12 +110,13 @@ static void parseDirective(char *s, int lineNo);
 static char *parseExpression(char *s, Token **expression);
 static char *parseExpressionList(char *s, TokenListItem **list);
 static char *parseFmtSpec(char *s, ControlInfoList *ciList);
-static char *parseFormalArguments(char *s);
+static char *parseFormalArguments(char *s, bool isStmtFn);
 static void parseInputList(char *s, ControlInfoList *ciList);
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf);
 static char *parseOpenInfoList(char *s, OpenInfoList **oiList);
 static void parseOutputList(char *s, ControlInfoList *ciList);
 static void parseOutputStmt(char *s, int unitNum);
+static void parseStmtFunction(char *s, Token *id);
 static char *parseStorageReference(char *s, Token *id, StorageReference *reference);
 static char *parseStringRange(char *s, StringRange **range);
 static char *parseTypeDecl(char *s, DataType *dt);
@@ -187,23 +178,24 @@ static char *tokenTypeToStr(TokenType type);
 #endif
 
 static ArgumentClass argClassForSymClass[] = {
-    ArgClass_Undefined,  /* SymClass_Undefined   */
-    ArgClass_Undefined,  /* SymClass_Program     */
-    ArgClass_Undefined,  /* SymClass_Subroutine  */
-    ArgClass_Function,   /* SymClass_Function    */
-    ArgClass_Undefined,  /* SymClass_Intrinsic   */
-    ArgClass_Undefined,  /* SymClass_BlockData   */
-    ArgClass_Undefined,  /* SymClass_NamedCommon */
-    ArgClass_Auto,       /* SymClass_Auto        */
-    ArgClass_Static,     /* SymClass_Static      */
-    ArgClass_Global,     /* SymClass_Global      */
-    ArgClass_Argument,   /* SymClass_Argument    */
-    ArgClass_Constant,   /* SymClass_Parameter   */
-    ArgClass_Pointee,    /* SymClass_Pointee     */
-    ArgClass_Undefined   /* SymClass_Label       */
+    ArgClass_Undefined,  /* SymClass_Undefined    */
+    ArgClass_Undefined,  /* SymClass_Program      */
+    ArgClass_Undefined,  /* SymClass_Subroutine   */
+    ArgClass_Function,   /* SymClass_Function     */
+    ArgClass_Function,   /* SymClass_StmtFunction */
+    ArgClass_Undefined,  /* SymClass_Intrinsic    */
+    ArgClass_Undefined,  /* SymClass_BlockData    */
+    ArgClass_Undefined,  /* SymClass_NamedCommon  */
+    ArgClass_Auto,       /* SymClass_Auto         */
+    ArgClass_Static,     /* SymClass_Static       */
+    ArgClass_Global,     /* SymClass_Global       */
+    ArgClass_Argument,   /* SymClass_Argument     */
+    ArgClass_Constant,   /* SymClass_Parameter    */
+    ArgClass_Pointee,    /* SymClass_Pointee      */
+    ArgClass_Undefined   /* SymClass_Label        */
 };
 static Symbol defaultProgSym = {
-    NULL, NULL, NULL, "MAIN", SymClass_Program
+    NULL, NULL, NULL, NULL, "MAIN", SymClass_Program
 };
 static int autoOffset = 0;
 static Symbol *currentLabel;
@@ -265,6 +257,14 @@ static char *appendLine(char *sp, char *lp) {
     *sp = '\0';
 
     return sp;
+}
+
+static void assignStorage(void) {
+    presetOffsetCalculation();
+    autoOffset = -calculateAutoOffsets();
+    staticOffset = calculateStaticOffsets();
+    calculateCommonOffsets();
+    adjustDataInitializers();
 }
 
 static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList) {
@@ -392,6 +392,7 @@ void compile(char *name) {
     bool hasError;
     int i;
     bool isAsgn;
+    bool isDefn;
     char lineLabel[6];
     char *lp;
     Register reg1, reg2;
@@ -420,6 +421,16 @@ void compile(char *name) {
         checkRegisterMap();
         freeAllRegisters();
 #endif
+        if (errorCount > MAX_ERRS_PER_UNIT) {
+            list(" Too many errors, compilation terminated");
+            if (progUnitSym != NULL) {
+                fprintf(stderr, "Too many errors in %s\n", progUnitSym->identifier);
+            }
+            else {
+                fputs("Too many errors\n", stderr);
+            }
+            exit(1);
+        }
         start = s = collectStmt();
         if (s == NULL) {
             emitCommonBlocks();
@@ -447,11 +458,18 @@ void compile(char *name) {
             }
         }
         *lp = '\0';
-        isAsgn = isAssignment(s, &hasError);
+        isAsgn = isAssignment(s, &isDefn, &hasError);
         if (hasError) continue;
-        s = getNextToken(s + 1, &token, isAsgn == FALSE);
-        if (isAsgn) {
+        s = getNextToken(s + 1, &token, isAsgn == FALSE && isDefn == FALSE);
+        if (isDefn) {
+            if (state < STATE_DEFINITION) assignStorage();
+            stmtClass = StmtClass_Nonexecutable;
+            state = STATE_DEFINITION;
+        }
+        else if (isAsgn) {
+            if (state < STATE_DEFINITION) assignStorage();
             stmtClass = StmtClass_Executable;
+            state = STATE_EXECUTABLE;
         }
         else if (token.type == TokenType_Keyword) {
             stmtClass = token.details.keyword.class;
@@ -489,7 +507,6 @@ void compile(char *name) {
 
         switch (state) {
         case STATE_PROG_UNIT:
-            presetImplicit();
             state = STATE_IMPLICIT;
             if (token.type == TokenType_Keyword) {
                 switch (token.details.keyword.id) {
@@ -637,22 +654,11 @@ void compile(char *name) {
                 continue;
             }
             /*
-             *  Token is not a specification statement, so fall through to process
-             *  possible definition statements.
+             *  Token is not a specification statement, so proceed to STATE_EXECUTABLE.
              */
-            state = STATE_DEFINITION;
-            presetOffsetCalculation();
-            autoOffset = -calculateAutoOffsets();
-            staticOffset = calculateStaticOffsets();
-            calculateCommonOffsets();
-            adjustDataInitializers();
-
-        case STATE_DEFINITION:
-            /*
-             *  Token is not a definition statement, so fall through to process
-             *  possible executable statements.
-             */
+            assignStorage();
             state = STATE_EXECUTABLE;
+            // fall through
 
         case STATE_EXECUTABLE:
             if (token.type == TokenType_Keyword) {
@@ -738,6 +744,9 @@ void compile(char *name) {
                 err("Invalid statement");
             }
             break;
+        case STATE_DEFINITION:
+            parseStmtFunction(s, &token);
+            break;
         default:
             fprintf(stderr, "Invalid compiler state: %d\n", state);
             break;
@@ -749,16 +758,15 @@ void compile(char *name) {
             }
             while (doStackPtr > 0 && currentLabel == doStack[doStackPtr - 1].termLabelSym) {
                 entry = &doStack[--doStackPtr];
-                reg1 = emitLoadStack(0);
-                reg2 = emitLoadStack(2);
+                reg1 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
+                reg2 = emitLoadFrame(entry->frameOffset + DO_INCREMENT);
                 emitAddReg(reg1, reg2, entry->loopVariableType);
-                emitStoreStack(reg1, 0);
-                emitDecrTrip();
+                emitStoreFrame(reg1, entry->frameOffset + DO_CURRENT);
+                emitDecrTrip(entry);
                 freeRegister(reg1);
                 freeRegister(reg2);
                 emitBranch(entry->startLabel);
                 emitLabel(entry->endLabel);
-                emitAdjustSP(3);
             }
         }
     }
@@ -831,7 +839,7 @@ static void defineLocalVariable(Symbol *symbol) {
     if (doStaticLocals) {
         symbol->class = SymClass_Static;
         symbol->details.variable.offset = staticOffset;
-        symbol->details.variable.staticBlock = progUnitSym;
+        symbol->details.variable.staticBlock = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym : progUnitSym->details.progUnit.parentUnit;
         staticOffset += calculateSize(symbol);
     }
     else {
@@ -901,7 +909,11 @@ static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, Opera
         }
     }
     if (symbol->details.variable.dt.type == BaseType_Character) {
-        if (isConstant(sum)) {
+        if (symbol->details.variable.dt.constraint == -1) {
+            if (isConstant(sum)) emitLoadConstOffset(&sum);
+            emitMulSize(sum.reg, symbol);
+        }
+        else if (isConstant(sum)) {
             sum.details.constant.value.integer *= symbol->details.variable.dt.constraint;
         }
         else {
@@ -1146,7 +1158,15 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
         }
     }
     if (varArgIncr != 0) emitStoreStackInt(parmIdx - 1, 0);
-    emitSubprogramCall((intrinsic == NULL) ? fn->details.identifier.name : intrinsic->details.intrinsic.externName);
+    if (intrinsic != NULL) {
+        emitSubprogramCall(intrinsic->details.intrinsic.externName, NULL);
+    }
+    else if (symbol->class != SymClass_StmtFunction) {
+        emitSubprogramCall(fn->details.identifier.name, NULL);
+    }
+    else {
+        emitSubprogramCall(fn->details.identifier.name, getProgUnitQualifier());
+    }
     emitAdjustSP(frameSize);
     emitRestoreRegs(registerMap);
     reg = allocateRegister();
@@ -1180,7 +1200,8 @@ static bool evaluateIdentifier(Token *id) {
     if (symbol == NULL) {
         symbol = addSymbol(name, SymClass_Undefined);
     }
-    if (symbol->class == SymClass_Undefined) {
+    switch (symbol->class) {
+    case SymClass_Undefined:
         if (id->details.identifier.qualifiers == NULL) { // simple variable reference
             defineLocalVariable(symbol);
         }
@@ -1191,22 +1212,31 @@ static bool evaluateIdentifier(Token *id) {
             }
             else {
                 defineType(symbol);
+                symbol->isFnRef = TRUE;
             }
             return evaluateFunction(id, symbol, intrinsic);
         }
-    }
-    else if (symbol->class == SymClass_Argument && symbol->details.variable.dt.type == BaseType_Undefined) {
-        symbol->details.variable.dt = implicitTypes[toupper(name[0]) - 'A'];
-    }
-    else if (symbol->class == SymClass_Function && symbol->details.progUnit.dt.type == BaseType_Undefined) {
-        symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
-        autoOffset -= calculateSize(symbol);
-        symbol->details.progUnit.offset = autoOffset;
-    }
-    else if (symbol->class == SymClass_Intrinsic) {
+        break;
+    case SymClass_Argument:
+        if (symbol->details.variable.dt.type == BaseType_Undefined) {
+            symbol->details.variable.dt = implicitTypes[toupper(name[0]) - 'A'];
+        }
+        break;
+    case SymClass_Function:
+        if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
+            symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
+            autoOffset -= calculateSize(symbol);
+            symbol->details.progUnit.offset = autoOffset;
+        }
+        break;
+    case SymClass_StmtFunction:
+        return evaluateFunction(id, symbol, NULL);
+    case SymClass_Intrinsic:
         return evaluateFunction(id, symbol, findIntrinsicFunction(name));
+    default:
+        // do nothing
+        break;
     }
-
     arg.class = argClassForSymClass[symbol->class];
     switch (symbol->class) {
     case SymClass_Function:
@@ -1841,6 +1871,20 @@ static char *getLabel(char *s, char *label) {
     return NULL;
 }
 
+static char *getProgUnitQualifier(void) {
+    int hash;
+    int len;
+    static char qualifier[MAX_EXT_NAME_LENGTH + 1];
+
+    strcpy(qualifier, progUnitSym->identifier);
+    len = strlen(qualifier);
+    if (len > MAX_EXT_NAME_LENGTH) {
+        hash = fnv32a(qualifier, len, FNV1_32A_INIT);
+        sprintf(qualifier + 4, "%04x", hash & 0xffff);
+    }
+    return qualifier;
+}
+
 static TokenListItem *getQualifier(TokenListItem *qualifierList, int idx) {
     TokenListItem *qualifier;
 
@@ -1938,21 +1982,34 @@ static void inputInit(ControlInfoList *ciList) {
     }
 }
 
-static bool isAssignment(char *s, bool *hasError) {
+static bool isAssignment(char *s, bool *isDefn, bool *hasError) {
     Token *expression;
     TokenListItem *expressionList;
+    bool isId;
+    TokenListItem *member;
     StringRange *strRange;
     Token token;
 
+    *isDefn = FALSE;
     *hasError = FALSE;
     s = getNextToken(s, &token, FALSE);
     if (token.type != TokenType_Identifier) return FALSE;
     if (*s == '(') {
         s = parseExpressionList(s, &expressionList);
         if (s == NULL) return FALSE;
+        if (state < STATE_EXECUTABLE) {
+            isId = TRUE;
+            member = expressionList;
+            while (member != NULL && member->item != NULL && isId) {
+                isId = member->item->type == TokenType_Identifier;
+                member = member->next;
+            }
+            *isDefn = isId;
+        }
         freeTokenList(expressionList);
         s = eatWsp(s);
         if (*s == '(') {
+            *isDefn = FALSE;
             s = parseStringRange(s, &strRange);
             if (s == NULL) {
                 err("Invalid character range");
@@ -1963,7 +2020,10 @@ static bool isAssignment(char *s, bool *hasError) {
         }
     }
     s = eatWsp(s);
-    if (*s != '=') return FALSE;
+    if (*s != '=') {
+        *isDefn = FALSE;
+        return FALSE;
+    }
     s = parseExpression(s + 1, &expression);
     if (expression == NULL) {
         err("Expression syntax");
@@ -1972,14 +2032,19 @@ static bool isAssignment(char *s, bool *hasError) {
     }
     freeToken(expression);
     s = eatWsp(s);
-    return *s == '\0';
+    if (*s != '\0') {
+        *isDefn = FALSE;
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 static void loadValue(OperatorArgument *value) {
     if (value->class == ArgClass_Constant) {
         emitLoadConst(value);
     }
-    else if (value->class > ArgClass_Function) {
+    else if (value->class >= ArgClass_Function) {
         emitLoadValue(value);
     }
 }
@@ -3198,9 +3263,10 @@ static char *parseFmtSpec(char *s, ControlInfoList *ciList) {
     return s;
 }
 
-static char *parseFormalArguments(char *s) {
+static char *parseFormalArguments(char *s, bool isStmtFn) {
     int argIdx;
     char *id;
+    Symbol *shadow;
     Symbol *symbol;
     Token token;
 
@@ -3209,12 +3275,17 @@ static char *parseFormalArguments(char *s) {
         s = getNextToken(s + 1, &token, FALSE);
         if (token.type == TokenType_Identifier) {
             id = token.details.identifier.name;
-            symbol = addSymbol(id, SymClass_Argument);
+            symbol = findSymbol(id);
             if (symbol == NULL) {
-                err("Previously declared parameter name: %s", id);
+                symbol = addSymbol(id, SymClass_Argument);
+                symbol->isShadow = TRUE;
+                symbol->details.variable.offset = argIdx + 2; // base pointer offset after subprogram call
+            }
+            else if (isStmtFn && symbol->shadow == NULL) {
+                shadow = createShadow(symbol, SymClass_Argument);
             }
             else {
-                symbol->details.variable.offset = argIdx + 2; // base pointer offset after subprogram call
+                err("Previously declared parameter name: %s", id);
             }
         }
         else {
@@ -3261,7 +3332,7 @@ static void parseInputList(char *s, ControlInfoList *ciList) {
             return;
         }
         freeStorageReference(&reference);
-        emitLoadReference(&target, NULL);
+        if (isCalculation(target) == FALSE) emitLoadReference(&target, NULL);
         dt = getDataType(&target);
         if (dt->type != BaseType_Character) emitConvertToByteAddress(target.reg);
         emitStoreStack(target.reg, 1);
@@ -3579,10 +3650,11 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
     IfStackEntry *entry;
     bool hasError;
     bool isAsgn;
+    bool isDefn;
     char label[8];
     Token token;
 
-    isAsgn = isAssignment(s, &hasError);
+    isAsgn = isAssignment(s, &isDefn, &hasError);
     if (hasError) return;
     s = getNextToken(s, &token, isAsgn == FALSE);
     if (token.type == TokenType_Identifier && strcasecmp(token.details.identifier.name, "THEN") == 0) {
@@ -3904,6 +3976,85 @@ static void parseOutputList(char *s, ControlInfoList *ciList) {
             return;
         }
     }
+}
+
+static void parseStmtFunction(char *s, Token *id) {
+    DataType *dt;
+    Token *expression;
+    char *name;
+    char qualifier[MAX_ID_LENGTH + 1];
+    Symbol *parentUnitSym;
+    OperatorArgument result;
+    char *start;
+    Symbol *symbol;
+
+    name = id->details.identifier.name;
+    symbol = findSymbol(name);
+    if (symbol == NULL) {
+        symbol = addSymbol(name, SymClass_Undefined);
+    }
+    if (symbol->class == SymClass_Undefined) {
+        symbol->class = SymClass_StmtFunction;
+        symbol->details.progUnit.parentUnit = progUnitSym;
+    }
+    else {
+        err("Function name not unique");
+        return;
+    }
+    if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
+        symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
+        symbol->details.progUnit.offset = -1;
+    }
+    strcpy(qualifier, getProgUnitQualifier());
+    dt = &symbol->details.progUnit.dt;
+    start = s;
+    s = eatWsp(s + 1);
+    if (*s == ')') {
+        s += 1;
+    }
+    else {
+        s = parseFormalArguments(start, TRUE);
+    }
+    s = eatWsp(s);
+    if (*s != '=') {
+        err("Syntax");
+        removeAllShadows();
+        return;
+    }
+    s = parseExpression(s + 1, &expression);
+    if (expression == NULL) {
+        removeAllShadows();
+        err("Expression syntax");
+        return;
+    }
+    emitActivateQualifier(qualifier);
+    emitActivateSection("@STMTFN", "CODE");
+    emitProlog(symbol);
+    parentUnitSym = progUnitSym;
+    progUnitSym = symbol;
+    if (evaluateExpression(expression, &result)) {
+        progUnitSym = parentUnitSym;
+        freeToken(expression);
+        removeAllShadows();
+        emitDeactivateSection("@STMTFN");
+        emitDeactivateQualifier(qualifier);
+        return;
+    }
+    progUnitSym = parentUnitSym;
+    if (coerceArgument(&result, getDataType(&result)->type, dt->type) == BaseType_Undefined) {
+        err("Invalid type conversion");
+        removeAllShadows();
+        emitDeactivateSection("@STMTFN");
+        emitDeactivateQualifier(qualifier);
+        return;
+    }
+    loadValue(&result);
+    emitStoreReg(symbol, result.reg);
+    freeRegister(result.reg);
+    emitEpilog(symbol, 0, 0);
+    removeAllShadows();
+    emitDeactivateSection("@STMTFN");
+    emitDeactivateQualifier(qualifier);
 }
 
 static char *parseStorageReference(char *s, Token *id, StorageReference *reference) {
@@ -4245,7 +4396,7 @@ static void parseCALL(char *s) {
         err("Invalid CALL statement");
         return;
     }
-    emitSubprogramCall(name);
+    emitSubprogramCall(name, NULL);
     emitAdjustSP(frameSize);
 }
 
@@ -4695,9 +4846,10 @@ static void parseDO(char *s) {
     Token *expression;
     char *id;
     bool isIncr1;
+    bool isIncrNeg1;
     char lineLabel[8];
     int rank;
-    Register reg1, reg2;
+    Register reg;
     OperatorArgument result;
     Symbol *sym;
     Token token;
@@ -4768,9 +4920,6 @@ static void parseDO(char *s) {
         err("Invalid DO syntax");
         return;
     }
-
-    emitAdjustSP(-3);
-
     /*
      *  Parse initial value
      */
@@ -4779,7 +4928,6 @@ static void parseDO(char *s) {
         err("Expression syntax");
         return;
     }
-
     if (evaluateExpression(expression, &result)) {
         freeToken(expression);
         return;
@@ -4787,8 +4935,12 @@ static void parseDO(char *s) {
     if (coerceArgument(&result, getDataType(&result)->type, type) == BaseType_Undefined) {
         err("Invalid type conversion");
     }
+
+    autoOffset -= DO_FRAME_SIZE;
+    entry->frameOffset = autoOffset;
+
     loadValue(&result);
-    emitStoreStack(result.reg, 0);
+    emitStoreFrame(result.reg, entry->frameOffset + DO_CURRENT);
     freeRegister(result.reg);
     /*
      *  Parse limit value
@@ -4811,7 +4963,7 @@ static void parseDO(char *s) {
         err("Invalid type conversion");
     }
     loadValue(&result);
-    emitStoreStack(result.reg, 1);
+    emitStoreFrame(result.reg, entry->frameOffset + DO_TRIP_COUNT);
     freeRegister(result.reg);
     /*
      *  Parse increment value, if provided
@@ -4834,33 +4986,29 @@ static void parseDO(char *s) {
 
     isIncr1 = (isIntegerConstant(result) && result.details.constant.value.integer == 1)
         || (isRealConstant(result) && result.details.constant.value.real == 1.0);
+    isIncrNeg1 = (isIntegerConstant(result) && result.details.constant.value.integer == -1)
+        || (isRealConstant(result) && result.details.constant.value.real == -1.0);
 
     if (coerceArgument(&result, getDataType(&result)->type, type) == BaseType_Undefined) {
         err("Invalid type conversion");
     }
     loadValue(&result);
-    emitStoreStack(result.reg, 2);
-    reg1 = emitLoadStack(0);
-    reg2 = emitLoadStack(1);
+    emitStoreFrame(result.reg, entry->frameOffset + DO_INCREMENT);
+    freeRegister(result.reg);
     if (isIncr1) {
-        freeRegister(result.reg);
-        emitCalcTrip1(reg1, reg2, type);
-        emitStoreStack(reg2, 1);
-        freeRegister(reg1);
-        freeRegister(reg2);
+        emitCalcTrip1(entry, type);
+    }
+    else if (isIncrNeg1) {
+        emitCalcTripNeg1(entry, type);
     }
     else {
-        emitCalcTrip(reg1, reg2, result.reg, type);
-        emitStoreStack(result.reg, 1);
-        freeRegister(result.reg);
-        freeRegister(reg1);
-        freeRegister(reg2);
+        emitCalcTrip(entry, type);
     }
     emitLabel(entry->startLabel);
-    reg1 = emitLoadStack(0);
-    emitStoreReg(entry->loopVariable, reg1);
-    freeRegister(reg1);
-    emitBranchIfEndTrips(entry->endLabel);
+    reg = emitLoadFrame(entry->frameOffset + DO_CURRENT);
+    emitStoreReg(entry->loopVariable, reg);
+    freeRegister(reg);
+    emitBranchIfEndTrips(entry);
 
     doStackPtr += 1;
     verifyEOS(s);
@@ -4955,7 +5103,6 @@ static void parseEND(char *s) {
     listSymbols();
     listSetPageEnd();
     freeAllSymbols();
-    totalErrors += errorCount;
 }
 
 static void parseENDIF(char *s) {
@@ -5133,12 +5280,12 @@ static void parseFUNCTION(char *s, DataType *dt) {
             s += 1;
         }
         else {
-            s = parseFormalArguments(start);
+            s = parseFormalArguments(start, FALSE);
         }
         s = eatWsp(s);
     }
     if (*s != '\0') {
-        err("Subroutine declaration syntax");
+        err("Function declaration syntax");
     }
 }
 
@@ -5967,7 +6114,7 @@ static void parseSUBROUTINE(char *s) {
     }
     s = eatWsp(s);
     if (*s == '(') {
-        s = parseFormalArguments(s);
+        s = parseFormalArguments(s, FALSE);
         s = eatWsp(s);
     }
     if (*s != '\0') {
@@ -6020,9 +6167,9 @@ static void popOp(OperatorDetails *op) {
 static void presetImplicit(void) {
     char c;
 
-    for (c = 'A'; c < 'I'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
-    for (c = 'I'; c < 'O'; c++) implicitTypes[c - 'A'].type = BaseType_Integer;
-    for (c = 'O'; c < 'Z'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
+    for (c = 'A'; c <  'I'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
+    for (c = 'I'; c <  'O'; c++) implicitTypes[c - 'A'].type = BaseType_Integer;
+    for (c = 'O'; c <= 'Z'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
 }
 
 static void presetProgUnit(void) {
@@ -6036,6 +6183,7 @@ static void presetProgUnit(void) {
     autoOffset     = 0;
     staticOffset   = 0;
     resetCommonBlocks();
+    presetImplicit();
 }
 
 static void pushArg(OperatorArgument *arg) {

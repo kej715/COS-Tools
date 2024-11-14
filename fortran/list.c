@@ -26,10 +26,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "const.h"
 #include "proto.h"
 #include "types.h"
 
 static char *dataTypeToStr(DataType *dt);
+static void listSymbol(Symbol *symbol);
 static void listTree(Symbol *symbol);
 static void resetHeaderLine(void);
 
@@ -46,7 +48,7 @@ static void resetHeaderLine(void);
 
 static char *cpuType = "Cray X-MP";
 static char *ftcName = "KFTC";
-static char *ftcVersion = "0.8";
+static char *ftcVersion = "0.9";
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = LINES_PER_PAGE;
 static int  pageNumber = 0;
@@ -137,6 +139,61 @@ void listSetPageEnd(void) {
     lineNumber = LINES_PER_PAGE;
 }
 
+static void listSymbol(Symbol *symbol) {
+    int size;
+
+    fprintf(listingFile, "  %-31s", symbol->identifier);
+    if (symbol->class == SymClass_Undefined && symbol->isFnRef) {
+        fprintf(listingFile, " %-10s", symClassToStr(SymClass_Function));
+    }
+    else {
+        fprintf(listingFile, " %-10s", symClassToStr(symbol->class));
+    }
+    switch (symbol->class) {
+    case SymClass_Undefined:
+    case SymClass_Function:
+    case SymClass_StmtFunction:
+    case SymClass_Auto:
+    case SymClass_Static:
+    case SymClass_Global:
+    case SymClass_Argument:
+    case SymClass_Parameter:
+        fprintf(listingFile, " %-14s", dataTypeToStr(&symbol->details.variable.dt));
+        size = calculateSize(symbol);
+        if (size > 0)
+            fprintf(listingFile, " %-7d", size);
+        else
+            fputs("        ", listingFile);
+        switch (symbol->class) {
+        case SymClass_Auto:
+        case SymClass_Static:
+        case SymClass_Global:
+        case SymClass_Argument:
+            if (symbol->details.variable.dt.type == BaseType_Character && symbol->details.variable.dt.firstChrOffset != 0) {
+                fprintf(listingFile, " %6d:%d", symbol->details.variable.offset, symbol->details.variable.dt.firstChrOffset);
+            }
+            else {
+                fprintf(listingFile, " %8d", symbol->details.variable.offset);
+            }
+            break;
+        case SymClass_Function:
+            if (symbol->details.progUnit.offset != 0)
+                fprintf(listingFile, " %8d", symbol->details.progUnit.offset);
+            break;
+        default:
+            fputs("         ", listingFile);
+            break;
+        }
+        if (symbol->class == SymClass_Global) {
+            fprintf(listingFile, " /%s/", symbol->details.variable.staticBlock->identifier);
+        }
+        break;
+    default:
+        break;
+    }
+    fputc('\n', listingFile);
+}
+
 void listSymbols(void) {
 
     if (listingFile != NULL && doList) {
@@ -155,58 +212,15 @@ void listSymbols(void) {
 }
 
 static void listTree(Symbol *symbol) {
-    int size;
-
     if (symbol != NULL) {
         listTree(symbol->left);
-        if (++lineNumber > LINES_PER_PAGE) {
-            listEject();
-            lineNumber = 1;
-        }
-        fprintf(listingFile, "  %-31s", symbol->identifier);
-        fprintf(listingFile, " %-10s", symClassToStr(symbol->class));
-        switch (symbol->class) {
-        case SymClass_Undefined:
-        case SymClass_Function:
-        case SymClass_Auto:
-        case SymClass_Static:
-        case SymClass_Global:
-        case SymClass_Argument:
-        case SymClass_Parameter:
-            fprintf(listingFile, " %-14s", dataTypeToStr(&symbol->details.variable.dt));
-            size = calculateSize(symbol);
-            if (size > 0)
-                fprintf(listingFile, " %-7d", size);
-            else
-                fputs("        ", listingFile);
-            switch (symbol->class) {
-            case SymClass_Auto:
-            case SymClass_Static:
-            case SymClass_Global:
-            case SymClass_Argument:
-                if (symbol->details.variable.dt.type == BaseType_Character && symbol->details.variable.dt.firstChrOffset != 0) {
-                    fprintf(listingFile, " %6d:%d", symbol->details.variable.offset, symbol->details.variable.dt.firstChrOffset);
-                }
-                else {
-                    fprintf(listingFile, " %8d", symbol->details.variable.offset);
-                }
-                break;
-            case SymClass_Function:
-                if (symbol->details.progUnit.offset != 0)
-                    fprintf(listingFile, " %8d", symbol->details.progUnit.offset);
-                break;
-            default:
-                fputs("         ", listingFile);
-                break;
+        if (symbol->isDeleted == FALSE) {
+            if (++lineNumber > LINES_PER_PAGE) {
+                listEject();
+                lineNumber = 1;
             }
-            if (symbol->class == SymClass_Global) {
-                fprintf(listingFile, " /%s/", symbol->details.variable.staticBlock->identifier);
-            }
-            break;
-        default:
-            break;
+            listSymbol(symbol);
         }
-        fputc('\n', listingFile);
         listTree(symbol->right);
     }
 }
@@ -219,18 +233,19 @@ static void resetHeaderLine(void) {
 
 char *symClassToStr(SymbolClass class) {
     switch (class) {
-    case SymClass_Undefined:   return "Undefined";
-    case SymClass_Program:     return "Program";
-    case SymClass_BlockData:   return "Block Data";
-    case SymClass_Subroutine:  return "Subroutine";
-    case SymClass_Function:    return "Function";
-    case SymClass_Intrinsic:   return "Intrinsic";
-    case SymClass_NamedCommon: return "Common";
-    case SymClass_Auto:        return "Auto";
-    case SymClass_Static:      return "Static";
-    case SymClass_Global:      return "Common";
-    case SymClass_Argument:    return "Argument";
-    case SymClass_Parameter:   return "Parameter";
-    default:                   return "Unknown";
+    case SymClass_Undefined:    return "Undefined";
+    case SymClass_Program:      return "Program";
+    case SymClass_BlockData:    return "Block Data";
+    case SymClass_Subroutine:   return "Subroutine";
+    case SymClass_Function:     return "Function";
+    case SymClass_StmtFunction: return "Function";
+    case SymClass_Intrinsic:    return "Intrinsic";
+    case SymClass_NamedCommon:  return "Common";
+    case SymClass_Auto:         return "Auto";
+    case SymClass_Static:       return "Static";
+    case SymClass_Global:       return "Common";
+    case SymClass_Argument:     return "Argument";
+    case SymClass_Parameter:    return "Parameter";
+    default:                    return "Unknown";
     }
 }

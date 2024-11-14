@@ -31,7 +31,6 @@
 #include "types.h"
 
 static Symbol *addNode(char *identifier, SymbolClass class, Symbol **tree);
-static Symbol *allocNode(char *identifier, SymbolClass class);
 static void emitCommonTree(Symbol *symbol);
 static Symbol *findNode(char *label, Symbol *tree);
 static void freeNode(Symbol *symbol);
@@ -237,7 +236,7 @@ static Symbol *addNode(char *identifier, SymbolClass class, Symbol **tree) {
     Symbol *new;
     int valence;
 
-    new = allocNode(identifier, class);
+    new = allocSymbol(identifier, class);
     current = *tree;
     if (current == NULL) {
         *tree = new;
@@ -263,6 +262,15 @@ static Symbol *addNode(char *identifier, SymbolClass class, Symbol **tree) {
                 break;
             }
         }
+        else if (current->isDeleted) {
+            freeNode(new);
+            current->class = SymClass_Undefined;
+            current->isDeleted = FALSE;
+            current->isShadow = FALSE;
+            current->size = 0;
+            memset(&current->details, 0, sizeof(SymbolDetails));
+            return current;
+        }
         else {
             freeNode(new);
             new = NULL;
@@ -277,7 +285,7 @@ Symbol *addSymbol(char *identifier, SymbolClass class) {
     Symbol *new;
 
     new = addNode(identifier, class, &symbols);
-    if (new != NULL) {
+    if (new != NULL && new->next == NULL) {
         if (lastSymbol != NULL) {
             lastSymbol->next = new;
         }
@@ -287,7 +295,7 @@ Symbol *addSymbol(char *identifier, SymbolClass class) {
     return new;
 }
 
-static Symbol *allocNode(char *identifier, SymbolClass class) {
+Symbol *allocSymbol(char *identifier, SymbolClass class) {
     int len;
     Symbol *symbol;
     char *s;
@@ -536,6 +544,17 @@ int calculateStaticOffsets(void) {
     return offset >> 3;
 }
 
+Symbol *createShadow(Symbol *symbol, SymbolClass class) {
+    Symbol *shadow;
+
+    if (symbol->shadow != NULL) return NULL;
+    shadow = allocSymbol(symbol->identifier, class);
+    shadow->isShadow = TRUE;
+    symbol->shadow = shadow;
+
+    return shadow;
+}
+
 int countArrayElements(Symbol *symbol) {
     Bounds *bounds;
     int count;
@@ -588,6 +607,8 @@ static Symbol *findNode(char *label, Symbol *tree) {
             current = current->left;
         else if (valence < 0)
             current = current->right;
+        else if (current->isDeleted)
+            return NULL;
         else
             break;
     }
@@ -596,7 +617,10 @@ static Symbol *findNode(char *label, Symbol *tree) {
 }
 
 Symbol *findSymbol(char *identifier) {
-    return findNode(identifier, symbols);
+    Symbol *symbol;
+
+    symbol = findNode(identifier, symbols);
+    return (symbol != NULL && symbol->shadow != NULL) ? symbol->shadow : symbol;
 }
 
 void freeAllSymbols(void) {
@@ -608,6 +632,7 @@ void freeAllSymbols(void) {
 }
 
 static void freeNode(Symbol *symbol) {
+    if (symbol->shadow != NULL) freeNode(symbol->shadow);
     free(symbol->identifier);
     free(symbol);
 }
@@ -798,7 +823,7 @@ void registerIntrinsicFunctions(void) {
             generic = findNode(defn->generic, intrinsicFunctions);
             new = addNode(defn->identifier, SymClass_Function, &intrinsicFunctions);
             if (new == NULL) {
-                new = allocNode(defn->identifier, SymClass_Function);
+                new = allocSymbol(defn->identifier, SymClass_Function);
             }
             new->next = generic->next;
             generic->next = new;
@@ -815,6 +840,26 @@ void registerIntrinsicFunctions(void) {
         for (i = 0; i < n; i++) {
             new->details.intrinsic.argumentTypes[i] = defn->argumentTypes[i];
         }
+    }
+}
+
+void removeAllShadows(void) {
+    Symbol *symbol;
+
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        removeShadow(symbol);
+    }
+}
+
+void removeShadow(Symbol *symbol) {
+    if (symbol->shadow != NULL) {
+        freeNode(symbol->shadow);
+        symbol->shadow = NULL;
+    }
+    if (symbol->isShadow) {
+        symbol->isDeleted = TRUE;
+        symbol->isShadow = FALSE;
+        symbol->class = SymClass_Undefined;
     }
 }
 

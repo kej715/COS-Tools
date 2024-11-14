@@ -34,6 +34,7 @@ static char *getFloat(char *s, Token *token);
 static char *getInteger(char *s, i64 *value);
 static char *getLogicalOp(char *s, Token *token);
 static char *getNumber(char *s, Token *token);
+static char *getOctal(char *s, Token *token);
 static char *getString(char *s, Token *token);
 static char *matchKeyword(char *s, Token *token);
 static char *setInvalidToken(char *s, Token *token);
@@ -405,19 +406,64 @@ char *getNextChar(char *s) {
 }
 
 char *getNextToken(char *s, Token *token, bool doMatchKeywords) {
+    char *dp;
     char *start;
+    int value;
 
     memset(token, 0, sizeof(Token));
     s = getNextChar(s);
     if (*s == '\0') return s;
 
     switch (*s) {
+    case 'O': case 'o': // possible octal constant
+    case 'X': case 'x': // possible hexadecimal constant
+        start = s;
+        s = getNextChar(s + 1);
+        if (*s == '\'' || *s == '"') {
+            s = getString(s, token);
+            if (token->type == TokenType_Invalid) return s;
+            dp = token->details.constant.value.character.string;
+            value = 0;
+            if (*start == 'X' || *start == 'x') {
+                while (*dp != '\0') {
+                    if (*dp >= '0' && *dp <= '9')
+                        value = (value << 4) | (*dp - '0');
+                    else if (*dp >= 'A' && *dp <= 'F')
+                        value = (value << 4) | (*dp - 'A' + 10);
+                    else if (*dp >= 'a' && *dp <= 'f')
+                        value = (value << 4) | (*dp - 'a' + 10);
+                    else {
+                        free(token->details.constant.value.character.string);
+                        return setInvalidToken(start, token);
+                    }
+                    dp += 1;
+                }
+            }
+            else {
+                while (*dp != '\0') {
+                    if (*dp >= '0' && *dp <= '7')
+                        value = (value << 3) | (*dp - '0');
+                    else {
+                        free(token->details.constant.value.character.string);
+                        return setInvalidToken(start, token);
+                    }
+                    dp += 1;
+                }
+            }
+            free(token->details.constant.value.character.string);
+            token->type = TokenType_Constant;
+            token->details.constant.dt.type = BaseType_Integer;
+            token->details.constant.value.integer = value;
+            return s;
+        }
+        s = start;
+        // fall through
     case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G': case 'H': case 'I': case 'J':
-    case 'K': case 'L': case 'M': case 'N': case 'O': case 'P': case 'Q': case 'R': case 'S': case 'T':
-    case 'U': case 'V': case 'W': case 'X': case 'Y': case 'Z':
+    case 'K': case 'L': case 'M': case 'N': case 'P': case 'Q': case 'R': case 'S': case 'T': case 'U':
+    case 'V': case 'W': case 'Y': case 'Z':
     case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i': case 'j':
-    case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r': case 's': case 't':
-    case 'u': case 'v': case 'w': case 'x': case 'y': case 'z':
+    case 'k': case 'l': case 'm': case 'n': case 'p': case 'q': case 'r': case 's': case 't': case 'u':
+    case 'v': case 'w': case 'y': case 'z':
         if (doMatchKeywords) {
             s = matchKeyword(s, token);
             if (token->type == TokenType_Invalid) {
@@ -511,6 +557,9 @@ static char *getNumber(char *s, Token *token) {
             s = getFloat(start, token);
         }
     }
+    else if (*s == 'B' || *s == 'b') {
+        s = getOctal(start, token);
+    }
     else if (*s == 'E' || *s == 'e' || *s == 'D' || *s == 'd') {
         s = getFloat(start, token);
     }
@@ -532,6 +581,45 @@ static char *getNumber(char *s, Token *token) {
         token->details.constant.dt.type = BaseType_Integer;
         token->details.constant.value.integer = value;
     }
+
+    return s;
+}
+
+static char *getOctal(char *s, Token *token) {
+    bool isNegative;
+    char *start;
+    i64 val;
+
+    val = 0;
+    isNegative = FALSE;
+    s = getNextChar(s);
+    start = s;
+    if (*s == '-') {
+        isNegative = TRUE;
+        s += 1;
+    }
+    else if (*s == '+') {
+        s += 1;
+    }
+    for (;;) {
+        if (*s >= '0' && *s <= '7') {
+            val = (val << 3) | (*s - '0');
+            s += 1;
+        }
+        else if (*s == 'B' || *s == 'b') {
+            s += 1;
+            break;
+        }
+        else if (isspace(*s)) {
+            s += 1;
+        }
+        else {
+            return setInvalidToken(start, token);
+        }
+    }
+    token->type = TokenType_Constant;
+    token->details.constant.dt.type = BaseType_Integer;
+    token->details.constant.value.integer = isNegative ? -val : val;
 
     return s;
 }

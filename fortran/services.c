@@ -53,7 +53,8 @@ void err(char *format, ...) {
     va_end(ap);
     list(" *ERROR*   %s", buf);
     fprintf(stderr, "ERROR line %d : %s\n", lineNo, buf);
-    errorCount += 1;
+    errorCount  += 1;
+    totalErrors += 1;
 }
 
 void *reallocate(void *old, int oldSize, int newSize) {
