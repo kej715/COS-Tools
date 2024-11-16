@@ -548,9 +548,6 @@ void compile(char *name) {
                         s = start;
                     }
                     break;
-                case POINTER:
-                    parsePOINTER(s);
-                    break;
                 default:
                     break;
                 }
@@ -3288,6 +3285,28 @@ static char *parseFormalArguments(char *s, bool isStmtFn) {
             }
             else if (isStmtFn && symbol->shadow == NULL) {
                 shadow = createShadow(symbol, SymClass_Argument);
+                switch (symbol->class) {
+                case SymClass_Auto:
+                case SymClass_Static:
+                case SymClass_Global:
+                case SymClass_Argument:
+                case SymClass_Undefined:
+                    shadow->details.variable.dt = symbol->details.variable.dt;
+                    break;
+                case SymClass_Function:
+                case SymClass_StmtFunction:
+                    shadow->details.variable.dt = symbol->details.progUnit.dt;
+                    break;
+                case SymClass_Parameter:
+                    shadow->details.variable.dt = symbol->details.param.dt;
+                    break;
+                case SymClass_Pointee:
+                    shadow->details.variable.dt = symbol->details.pointee.dt;
+                    break;
+                default:
+                    // do nothing
+                    break;
+                }
             }
             else {
                 err("Previously declared parameter name: %s", id);
