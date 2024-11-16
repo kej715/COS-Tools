@@ -50,7 +50,6 @@ FORTRAN 77 features not yet implemented by _KFTC_ include:
 - EXTERNAL
 - ENTRY
 - INTRINSIC
-- POINTER, a language extension provided by Cray FORTRAN
 - DOUBLE PRECISION is handled the same as REAL
 - COMPLEX
 
