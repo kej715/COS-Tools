@@ -3280,7 +3280,7 @@ static char *parseFormalArguments(char *s, bool isStmtFn) {
             symbol = findSymbol(id);
             if (symbol == NULL) {
                 symbol = addSymbol(id, SymClass_Argument);
-                symbol->isShadow = TRUE;
+                symbol->isShadow = isStmtFn;
                 symbol->details.variable.offset = argIdx + 2; // base pointer offset after subprogram call
             }
             else if (isStmtFn && symbol->shadow == NULL) {
@@ -3307,6 +3307,7 @@ static char *parseFormalArguments(char *s, bool isStmtFn) {
                     // do nothing
                     break;
                 }
+                shadow->details.variable.offset = argIdx + 2; // base pointer offset after subprogram call
             }
             else {
                 err("Previously declared parameter name: %s", id);
