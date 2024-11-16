@@ -162,6 +162,7 @@ static void parseIMPLICIT(char *s);
 static void parseIMPLICITNONE(char *s);
 static void parseOPEN(char *s);
 static void parsePARAMETER(char *s);
+static void parsePOINTER(char *s);
 static void parsePRINT(char *s);
 static void parsePROGRAM(char *s);
 static void parsePUNCH(char *s);
@@ -472,9 +473,11 @@ void compile(char *name) {
             state = STATE_EXECUTABLE;
         }
         else if (token.type == TokenType_Keyword) {
+            if (state == STATE_DEFINITION) state = STATE_EXECUTABLE;
             stmtClass = token.details.keyword.class;
         }
         else {
+            if (state == STATE_DEFINITION) state = STATE_EXECUTABLE;
             stmtClass = StmtClass_None;
         }
         if (lineLabel[0] != '\0') {
@@ -533,7 +536,6 @@ void compile(char *name) {
                 case INTEGER:
                 case LOGICAL:
                 case DOUBLEPRECISION:
-                case POINTER:
                 case REAL:
                     start = s;
                     s = parseDataType(s, &token, &dt);
@@ -545,6 +547,9 @@ void compile(char *name) {
                     else {
                         s = start;
                     }
+                    break;
+                case POINTER:
+                    parsePOINTER(s);
                     break;
                 default:
                     break;
@@ -601,12 +606,14 @@ void compile(char *name) {
                 case DOUBLEPRECISION:
                 case INTEGER:
                 case LOGICAL:
-                case POINTER:
                 case REAL:
                     s = parseDataType(s, &token, &dt);
                     if (dt.type != BaseType_Undefined) {
                         s = parseTypeDecl(s, &dt);
                     }
+                    continue;
+                case POINTER:
+                    parsePOINTER(s);
                     continue;
                 case COMMON:
                     parseCOMMON(s);
@@ -1209,6 +1216,7 @@ static bool evaluateIdentifier(Token *id) {
             intrinsic = findIntrinsicFunction(name);
             if (intrinsic != NULL) {
                 symbol->class = SymClass_Intrinsic;
+                symbol->details.intrinsic.resultType = intrinsic->details.intrinsic.resultType;
             }
             else {
                 defineType(symbol);
@@ -2806,9 +2814,6 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
         case LOGICAL:
             dt->type = BaseType_Logical;
             break;
-        case POINTER:
-            dt->type = BaseType_Pointer;
-            break;
         case REAL:
             dt->type = BaseType_Real;
             break;
@@ -4082,8 +4087,10 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
     case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
-    case SymClass_Pointee:
         dt = &symbol->details.variable.dt;
+        break;
+    case SymClass_Pointee:
+        dt = &symbol->details.pointee.dt;
         break;
     case SymClass_Function:
         if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
@@ -4800,8 +4807,13 @@ static void parseDIMENSION(char *s) {
         case SymClass_Auto:
         case SymClass_Static:
         case SymClass_Global:
-        case SymClass_Pointee:
             if (symbol->details.variable.dt.rank != 0) {
+                err("Duplicate declaration of %s", id);
+                return;
+            }
+            break;
+        case SymClass_Pointee:
+            if (symbol->details.pointee.dt.rank != 0) {
                 err("Duplicate declaration of %s", id);
                 return;
             }
@@ -5923,6 +5935,55 @@ static void parseOPEN(char *s) {
 
 static void parsePAUSE(char *s) {
     // do nothing
+}
+
+static void parsePOINTER(char *s) {
+    Symbol *pteeSym;
+    Symbol *ptrSym;
+    Token token;
+
+    for (;;) {
+        s = eatWsp(s);
+        if (*s != '(') break;
+        s = getNextToken(s + 1, &token, FALSE);
+        if (token.type != TokenType_Identifier) break;
+        ptrSym = addSymbol(token.details.identifier.name, SymClass_Undefined);
+        if (ptrSym == NULL) {
+            err("Pointer name not unique: ", token.details.identifier.name);
+            return;
+        }
+        defineLocalVariable(ptrSym);
+        ptrSym->details.variable.dt.type = BaseType_Pointer;
+        if (*s != ',') break;
+        s = getNextToken(s + 1, &token, FALSE);
+        if (token.type != TokenType_Identifier) break;
+        pteeSym = findSymbol(token.details.identifier.name);
+        if (pteeSym == NULL) {
+            pteeSym = addSymbol(token.details.identifier.name, SymClass_Undefined);
+            defineType(pteeSym);
+        }
+        switch (pteeSym->class) {
+        case SymClass_Undefined:
+        case SymClass_Auto:
+        case SymClass_Static:
+            pteeSym->class = SymClass_Pointee;
+            pteeSym->details.pointee.pointer = ptrSym;
+            break;
+        default:
+            err("Pointee name not unique: ", token.details.identifier.name);
+            return;
+        }
+        if (*s != ')') break;
+        s = eatWsp(s + 1);
+        if (*s == '\0') {
+            return;
+        }
+        else if (*s != ',') {
+            break;
+        }
+        s += 1;
+    }
+    err("Syntax");
 }
 
 static void parsePRINT(char *s) {

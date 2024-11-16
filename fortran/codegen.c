@@ -37,6 +37,7 @@
 
 static void emit(char *format, ...);
 static void emitBranchTarget(char *label);
+static void emitLoadPointer(Symbol *pointee, char *regName);
 static void emitPopAddrReg(Register reg);
 static void emitPushAddrReg(Register reg);
 static void normalizeLabel(char *label, char *result);
@@ -852,10 +853,42 @@ void emitLoadNullPtr(OperatorArgument *arg) {
     emit("         S%o        0\n", arg->reg);
 }
 
+static void emitLoadPointer(Symbol *pointee, char *regName) {
+    Symbol *ptrSym;
+
+    ptrSym = pointee->details.pointee.pointer;
+    switch (ptrSym->class) {
+    case SymClass_Auto:
+        if (progUnitSym->class != SymClass_StmtFunction) {
+            emit("         %s        %d,A6\n", regName, ptrSym->details.variable.offset);
+        }
+        else {
+            emit("         A1        1,A6\n");
+            emit("         %s        %d,A1\n", regName, ptrSym->details.variable.offset);
+        }
+        break;
+    case SymClass_Static:
+        if (progUnitSym->class != SymClass_StmtFunction) {
+            emit("         %s        %s+%d,\n", regName, progUnitSym->details.progUnit.staticDataLabel, ptrSym->details.variable.offset);
+        }
+        else {
+            emit("         %s        %s+%d,\n", regName, progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel, ptrSym->details.variable.offset);
+        }
+        break;
+    case SymClass_Global:
+        emit("         %s        %s+%d,\n", regName, ptrSym->details.variable.staticBlock->details.common.label, ptrSym->details.variable.offset);
+        break;
+    default:
+        fprintf(stderr, "Invalid class for pointer variable %s: %d\n", ptrSym->identifier, ptrSym->class);
+        exit(1);
+    }
+}
+
 void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
     DataType *dt;
     char *label;
     u16 mask;
+    char regName[3];
     Symbol *sym;
 
     subject->reg = allocateRegister();
@@ -1018,6 +1051,26 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Pointee:
+            sprintf(regName, "S%o", subject->reg);
+            emitLoadPointer(sym, regName);
+            switch (subject->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", subject->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
         default:
             fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
             exit(1);
@@ -1195,6 +1248,26 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Pointee:
+            sprintf(regName, "S%o", subject->reg);
+            emitLoadPointer(sym, regName);
+            switch (subject->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", subject->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
         default:
             fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
             exit(1);
@@ -1378,6 +1451,24 @@ void emitLoadValue(OperatorArgument *arg) {
             }
             break;
         case SymClass_Pointee:
+            emitLoadPointer(sym, "A1");
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        ,A1\n", arg->reg);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %d,A1\n", arg->reg, arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
+                emit("         S%o        ,A1\n", arg->reg);
+                freeAddrReg(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
+            break;
         default:
             fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
             exit(1);
@@ -1818,6 +1909,9 @@ void emitStoreReg(Symbol *sym, Register reg) {
         emit("         %-9s S%o\n", buf, reg);
         break;
     case SymClass_Pointee:
+        emitLoadPointer(sym, "A1");
+        emit("         ,A1       S%o\n", reg);
+        break;
     default:
         fprintf(stderr, "Invalid class for store request: %d\n", sym->class);
         exit(1);

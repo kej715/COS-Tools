@@ -213,6 +213,11 @@ static IntrinsicFnDefn intrinsicFnDefns[] = {
     {"AMIN1",  "MIN",   "_rmin",    BaseType_Real,    -1, {BaseType_Real}},
     {"AMIN0",  NULL,    "_amin0",   BaseType_Real,    -1, {BaseType_Integer}},
 
+    {"LOC",    NULL,    "_wloc",    BaseType_Pointer,  1, {BaseType_Integer}},
+    {"LOC",   "LOC",    "_wloc",    BaseType_Pointer,  1, {BaseType_Real}},
+    {"LOC",   "LOC",    "_wloc",    BaseType_Pointer,  1, {BaseType_Double}},
+    {"LOC",   "LOC",    "_cloc",    BaseType_Pointer,  1, {BaseType_Character}},
+
     {NULL}
 };
 
@@ -821,9 +826,9 @@ void registerIntrinsicFunctions(void) {
     for (defn = intrinsicFnDefns; defn->identifier != NULL; defn++) {
         if (defn->generic != NULL) {
             generic = findNode(defn->generic, intrinsicFunctions);
-            new = addNode(defn->identifier, SymClass_Function, &intrinsicFunctions);
+            new = addNode(defn->identifier, SymClass_Intrinsic, &intrinsicFunctions);
             if (new == NULL) {
-                new = allocSymbol(defn->identifier, SymClass_Function);
+                new = allocSymbol(defn->identifier, SymClass_Intrinsic);
             }
             new->next = generic->next;
             generic->next = new;

@@ -30,6 +30,7 @@
 #include "proto.h"
 #include "types.h"
 
+static char *baseTypeToStr(BaseType type);
 static char *dataTypeToStr(DataType *dt);
 static void listSymbol(Symbol *symbol);
 static void listTree(Symbol *symbol);
@@ -48,34 +49,45 @@ static void resetHeaderLine(void);
 
 static char *cpuType = "Cray X-MP";
 static char *ftcName = "KFTC";
-static char *ftcVersion = "0.9";
+static char *ftcVersion = "1.0";
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = LINES_PER_PAGE;
 static int  pageNumber = 0;
 
-static char *dataTypeToStr(DataType *dt) {
-    static char buf[32];
-
-    switch (dt->type) {
+static char *baseTypeToStr(BaseType type) {
+    switch (type) {
     case BaseType_Undefined: return "Undefined";
     case BaseType_Logical:   return "Logical";
     case BaseType_Integer:   return "Integer";
     case BaseType_Real:      return "Real";
     case BaseType_Double:    return "Double";
     case BaseType_Complex:   return "Complex";
+    case BaseType_Character: return "Character";
     case BaseType_Label:     return "Label";
     case BaseType_Pointer:   return "Pointer";
     default:                 return "Unknown";
-    case BaseType_Character:
+    }
+}
+
+static char *dataTypeToStr(DataType *dt) {
+    static char buf[32];
+    char *name;
+
+    name = baseTypeToStr(dt->type);
+    if (dt->type != BaseType_Character) {
+        return name;
+    }
+    else {
         if (dt->constraint > 0) {
-            sprintf(buf, "Character*%d", dt->constraint);
+            sprintf(buf, "%s*%d", name, dt->constraint);
             return buf;
         }
         else if (dt->constraint == 0) {
-            return "Character";
+            return name;
         }
         else {
-            return "Character*(*)";
+            sprintf(buf, "%s*(*)", name);
+            return buf;
         }
     }
 }
@@ -157,6 +169,7 @@ static void listSymbol(Symbol *symbol) {
     case SymClass_Static:
     case SymClass_Global:
     case SymClass_Argument:
+    case SymClass_Pointee:
     case SymClass_Parameter:
         fprintf(listingFile, " %-14s", dataTypeToStr(&symbol->details.variable.dt));
         size = calculateSize(symbol);
@@ -176,6 +189,9 @@ static void listSymbol(Symbol *symbol) {
                 fprintf(listingFile, " %8d", symbol->details.variable.offset);
             }
             break;
+        case SymClass_Pointee:
+            fprintf(listingFile, " %8s", symbol->details.pointee.pointer->identifier);
+            break;
         case SymClass_Function:
             if (symbol->details.progUnit.offset != 0)
                 fprintf(listingFile, " %8d", symbol->details.progUnit.offset);
@@ -187,6 +203,9 @@ static void listSymbol(Symbol *symbol) {
         if (symbol->class == SymClass_Global) {
             fprintf(listingFile, " /%s/", symbol->details.variable.staticBlock->identifier);
         }
+        break;
+    case SymClass_Intrinsic:
+        fprintf(listingFile, " %-14s", baseTypeToStr(symbol->details.intrinsic.resultType));
         break;
     default:
         break;
@@ -245,6 +264,7 @@ char *symClassToStr(SymbolClass class) {
     case SymClass_Static:       return "Static";
     case SymClass_Global:       return "Common";
     case SymClass_Argument:     return "Argument";
+    case SymClass_Pointee:      return "Pointee";
     case SymClass_Parameter:    return "Parameter";
     default:                    return "Unknown";
     }
