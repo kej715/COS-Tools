@@ -98,7 +98,6 @@ Register emitLoadFrame(int offset);
 void emitLoadNullPtr(OperatorArgument *arg);
 void emitLoadReference(OperatorArgument *subject, OperatorArgument *object);
 Register emitLoadStack(int offset);
-Register emitLoadStackAddr(int offset);
 Register emitLoadStackByteAddr(int offset);
 void emitLoadValue(OperatorArgument *arg);
 Register emitLoadZStrAddr(char *label);
@@ -131,6 +130,7 @@ void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList)
 void emitStoreArg(Symbol *sym, OperatorArgument *arg);
 void emitStoreByReference(OperatorArgument *target, OperatorArgument *value);
 void emitStoreFrame(Register reg, int offset);
+void emitStoreParmAddr(int tempIdx, int parmIdx);
 void emitStoreReg(Symbol *sym, Register reg);
 void emitStoreRegByReference(OperatorArgument *target, Register reg);
 void emitStoreStack(Register reg, int offset);

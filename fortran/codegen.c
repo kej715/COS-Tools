@@ -38,6 +38,7 @@
 static void emit(char *format, ...);
 static void emitBranchTarget(char *label);
 static void emitLoadPointer(Symbol *pointee, char *regName);
+static Register emitLoadStackAddr(int offset);
 static void emitPopAddrReg(Register reg);
 static void emitPushAddrReg(Register reg);
 static void normalizeLabel(char *label, char *result);
@@ -763,10 +764,13 @@ void emitLoadByteReference(OperatorArgument *subject, OperatorArgument *object) 
 void emitLoadConst(OperatorArgument *arg) {
     char buf[32];
     char *cp;
+    char *dp;
     DataType dt;
+    char *ep;
     f64 f;
     i64 i;
     u64 l;
+    char *nzp;
 
     arg->reg = allocateRegister();
     dt = arg->details.constant.dt;
@@ -812,13 +816,39 @@ void emitLoadConst(OperatorArgument *arg) {
     case BaseType_Double:
     case BaseType_Real:
         f = arg->details.constant.value.real;
-        if (f >= 1.0E-5 && f <= 1.0E+9) {
-            sprintf(buf, "%f", f);
-        }
-        else {
-            sprintf(buf, "%g", f);
-        }
+        sprintf(buf, "%.14G", f);
         emit("         S%o        =", arg->reg);
+        cp = nzp = buf;
+        dp = ep = NULL;
+        while (*cp != '\0') {
+            switch (*cp) {
+            case 'E': case 'e':
+                ep = cp;
+                break;
+            case '.':
+                dp = cp;
+            case '0':
+                nzp = cp;
+                break;
+            default:
+                break;
+            }
+            cp += 1;
+        }
+        if (ep == NULL) {
+            if (dp == NULL) {
+                *cp++ = '.';
+                *cp++ = '0';
+                *cp   = '\0';
+            }
+            else {
+                if (*nzp == '.') {
+                    *(nzp + 1) = '0';
+                    nzp += 1;
+                }
+                *(nzp + 1) = '\0';
+            }
+        }
         for (cp = buf; *cp == ' '; cp++)
              ;
         emit("%s,\n", cp);
@@ -955,7 +985,13 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Argument:
-            emit("         S%o        %d,A6\n", subject->reg, sym->details.variable.offset);
+            if (progUnitSym->class != SymClass_StmtFunction || sym->isShadow) {
+                emit("         S%o        %d,A6\n", subject->reg, sym->details.variable.offset);
+            }
+            else {
+                emit("         A1        1,A6\n");
+                emit("         S%o        %d,A1\n", subject->reg, sym->details.variable.offset);
+            }
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 /* do nothing */
@@ -1156,7 +1192,13 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Argument:
-            emit("         S%o        %d,A6\n", subject->reg, sym->details.variable.offset);
+            if (progUnitSym->class != SymClass_StmtFunction || sym->isShadow) {
+                emit("         S%o        %d,A6\n", subject->reg, sym->details.variable.offset);
+            }
+            else {
+                emit("         A1        1,A6\n");
+                emit("         S%o        %d,A1\n", subject->reg, sym->details.variable.offset);
+            }
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 /* do nothing */
@@ -1285,7 +1327,7 @@ Register emitLoadStack(int offset) {
     return reg;
 }
 
-Register emitLoadStackAddr(int offset) {
+static Register emitLoadStackAddr(int offset) {
     Register reg;
 
     reg = allocateRegister();
@@ -1378,7 +1420,13 @@ void emitLoadValue(OperatorArgument *arg) {
             }
             break;
         case SymClass_Argument:
-            emit("         A1        %d,A6\n", sym->details.variable.offset);
+            if (progUnitSym->class != SymClass_StmtFunction || sym->isShadow) {
+                emit("         A1        %d,A6\n", sym->details.variable.offset);
+            }
+            else {
+                emit("         A1        1,A6\n");
+                emit("         A1        %d,A1\n", sym->details.variable.offset);
+            }
             switch (arg->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 emit("         S%o        ,A1\n", arg->reg);
@@ -1877,6 +1925,26 @@ void emitStoreFrame(Register reg, int offset) {
 
     sprintf(buf, "%d,A6", offset);
     emit("         %-9s S%o\n", buf, reg);
+}
+
+void emitStoreParmAddr(int tempIdx, int parmIdx) {
+    char buf[16];
+
+    sprintf(buf, "%d,A7", parmIdx);
+    if (tempIdx == 0) {
+        emit("         %-9s A7\n", buf);
+    }
+    else {
+        if (tempIdx > 0) {
+            emit("         A1        %d\n", tempIdx);
+            emit("         A1        A7+A1\n");
+        }
+        else {
+            emit("         A1        %d\n", -tempIdx);
+            emit("         A1        A7-A1\n");
+        }
+        emit("         %-9s A1\n", buf);
+    }
 }
 
 void emitStoreReg(Symbol *sym, Register reg) {

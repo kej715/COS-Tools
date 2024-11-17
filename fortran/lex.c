@@ -250,10 +250,10 @@ static char *getFloat(char *s, Token *token) {
     s = getNextChar(s);
     if (*s == '-') {
         isNegative = TRUE;
-        s += 1;
+        s = getNextChar(s + 1);
     }
     else if (*s == '+') {
-        s += 1;
+        s = getNextChar(s + 1);
     }
     /*
      *  Process whole number part

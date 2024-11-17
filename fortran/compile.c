@@ -1113,9 +1113,14 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
                         emitLoadConst(&result);
                         emitStoreStack(result.reg, tempIdx);
                         freeRegister(result.reg);
-                        reg = (intrinsic == NULL) ? emitLoadStackAddr(tempIdx) : emitLoadStackByteAddr(tempIdx);
-                        emitStoreStack(reg, parmIdx);
-                        freeRegister(reg);
+                        if (intrinsic == NULL) {
+                            emitStoreParmAddr(tempIdx, parmIdx);
+                        }
+                        else {
+                            reg = emitLoadStackByteAddr(tempIdx);
+                            emitStoreStack(reg, parmIdx);
+                            freeRegister(reg);
+                        }
                         tempIdx += 1;
                     }
                 }
@@ -1152,9 +1157,14 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
                 else {
                     emitStoreStack(result.reg, tempIdx);
                     freeRegister(result.reg);
-                    reg = (intrinsic == NULL) ? emitLoadStackAddr(tempIdx) : emitLoadStackByteAddr(tempIdx);
-                    emitStoreStack(reg, parmIdx);
-                    freeRegister(reg);
+                    if (intrinsic == NULL) {
+                        emitStoreParmAddr(tempIdx, parmIdx);
+                    }
+                    else {
+                        reg = emitLoadStackByteAddr(tempIdx);
+                        emitStoreStack(reg, parmIdx);
+                        freeRegister(reg);
+                    }
                     tempIdx += 1;
                 }
             }
@@ -2323,10 +2333,8 @@ static char *parseActualArguments(char *s, int *frameSize) {
                         else {
                             emitLoadConst(&result);
                             emitStoreStack(result.reg, tempIdx);
-                            reg = emitLoadStackAddr(tempIdx);
-                            emitStoreStack(reg, parmIdx);
-                            freeRegister(reg);
                             freeRegister(result.reg);
+                            emitStoreParmAddr(tempIdx, parmIdx);
                             tempIdx += 1;
                         }
                     }
@@ -2359,10 +2367,8 @@ static char *parseActualArguments(char *s, int *frameSize) {
                     }
                     else {
                         emitStoreStack(result.reg, tempIdx);
-                        reg = emitLoadStackAddr(tempIdx);
-                        emitStoreStack(reg, parmIdx);
-                        freeRegister(reg);
                         freeRegister(result.reg);
+                        emitStoreParmAddr(tempIdx, parmIdx);
                         tempIdx += 1;
                     }
                 }
