@@ -122,7 +122,12 @@ void cstNeqvInt(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstEqChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) == 0];
+    char *rightStr;
+
+    rightStr = right->details.constant.value.character.string;
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, rightStr) == 0];
+    free(left->details.constant.value.character.string);
+    free(rightStr);
 }
 
 void cstEqLog(OperatorArgument *left, OperatorArgument *right) {
@@ -138,7 +143,12 @@ void cstEqReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstGeChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) >= 0];
+    char *rightStr;
+
+    rightStr = right->details.constant.value.character.string;
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, rightStr) >= 0];
+    free(left->details.constant.value.character.string);
+    free(rightStr);
 }
 
 void cstGeLog(OperatorArgument *left, OperatorArgument *right) {
@@ -154,7 +164,12 @@ void cstGeReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstGtChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) > 0];
+    char *rightStr;
+
+    rightStr = right->details.constant.value.character.string;
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, rightStr) > 0];
+    free(left->details.constant.value.character.string);
+    free(rightStr);
 }
 
 void cstGtLog(OperatorArgument *left, OperatorArgument *right) {
@@ -170,7 +185,13 @@ void cstGtReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstLeChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) <= 0];
+    char *rightStr;
+
+    rightStr = right->details.constant.value.character.string;
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, rightStr) <= 0];
+    free(left->details.constant.value.character.string);
+    free(rightStr);
+
 }
 
 void cstLeLog(OperatorArgument *left, OperatorArgument *right) {
@@ -186,7 +207,12 @@ void cstLeReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstLtChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) < 0];
+    char *rightStr;
+
+    rightStr = right->details.constant.value.character.string;
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, rightStr) < 0];
+    free(left->details.constant.value.character.string);
+    free(rightStr);
 }
 
 void cstLtLog(OperatorArgument *left, OperatorArgument *right) {
@@ -202,7 +228,12 @@ void cstLtReal(OperatorArgument *left, OperatorArgument *right) {
 }
 
 void cstNeChar(OperatorArgument *left, OperatorArgument *right) {
-    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, right->details.constant.value.character.string) != 0];
+    char *rightStr;
+
+    rightStr = right->details.constant.value.character.string;
+    right->details.constant.value.logical = truth[strcmp(left->details.constant.value.character.string, rightStr) != 0];
+    free(left->details.constant.value.character.string);
+    free(rightStr);
 }
 
 void cstNeLog(OperatorArgument *left, OperatorArgument *right) {
@@ -231,6 +262,7 @@ void cstCatChar(OperatorArgument *left, OperatorArgument *right) {
     cp = right->details.constant.value.character.string;
     while (*cp != '\0') *dp++ = *cp++;
     *dp = '\0';
+    free(left->details.constant.value.character.string);
     free(right->details.constant.value.character.string);
     right->details.constant.value.character.string = s;
     right->details.constant.value.character.length = len;

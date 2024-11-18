@@ -37,6 +37,7 @@
 
 static void emit(char *format, ...);
 static void emitBranchTarget(char *label);
+static void emitFloat(double f);
 static void emitLoadPointer(Symbol *pointee, char *regName);
 static Register emitLoadStackAddr(int offset);
 static void emitPopAddrReg(Register reg);
@@ -587,6 +588,50 @@ void emitExpReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emitRestoreRegs(mask);
 }
 
+static void emitFloat(double f) {
+    char buf[32];
+    char *cp;
+    char *dp;
+    char *ep;
+    char *nzp;
+
+    sprintf(buf, "%.14G", f);
+    cp = nzp = buf;
+    dp = ep = NULL;
+    while (*cp != '\0') {
+        switch (*cp) {
+        case 'E': case 'e':
+            ep = cp;
+            break;
+        case '0':
+            break;
+        case '.':
+            dp = cp;
+        default:
+            nzp = cp;
+            break;
+        }
+        cp += 1;
+    }
+    if (ep == NULL) {
+        if (dp == NULL) {
+            *cp++ = '.';
+            *cp++ = '0';
+            *cp   = '\0';
+        }
+        else {
+            if (*nzp == '.') {
+                *(nzp + 1) = '0';
+                nzp += 1;
+            }
+            *(nzp + 1) = '\0';
+        }
+    }
+    for (cp = buf; *cp == ' '; cp++)
+         ;
+    emit("%s", cp);
+}
+
 void emitGeChar(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     u16 mask;
 
@@ -763,20 +808,15 @@ void emitLoadByteReference(OperatorArgument *subject, OperatorArgument *object) 
 
 void emitLoadConst(OperatorArgument *arg) {
     char buf[32];
-    char *cp;
-    char *dp;
     DataType dt;
-    char *ep;
-    f64 f;
     i64 i;
     u64 l;
-    char *nzp;
 
     arg->reg = allocateRegister();
     dt = arg->details.constant.dt;
     switch (arg->details.constant.dt.type) {
     case BaseType_Character:
-        if (arg->details.constant.value.character.length <= 40) {
+        if (arg->details.constant.value.character.length <= 16) {
             emit("         S%o        =", arg->reg);
             emitString(&arg->details.constant.value.character, FALSE);
             emit("\n");
@@ -815,43 +855,9 @@ void emitLoadConst(OperatorArgument *arg) {
         break;
     case BaseType_Double:
     case BaseType_Real:
-        f = arg->details.constant.value.real;
-        sprintf(buf, "%.14G", f);
         emit("         S%o        =", arg->reg);
-        cp = nzp = buf;
-        dp = ep = NULL;
-        while (*cp != '\0') {
-            switch (*cp) {
-            case 'E': case 'e':
-                ep = cp;
-                break;
-            case '.':
-                dp = cp;
-            case '0':
-                nzp = cp;
-                break;
-            default:
-                break;
-            }
-            cp += 1;
-        }
-        if (ep == NULL) {
-            if (dp == NULL) {
-                *cp++ = '.';
-                *cp++ = '0';
-                *cp   = '\0';
-            }
-            else {
-                if (*nzp == '.') {
-                    *(nzp + 1) = '0';
-                    nzp += 1;
-                }
-                *(nzp + 1) = '\0';
-            }
-        }
-        for (cp = buf; *cp == ' '; cp++)
-             ;
-        emit("%s,\n", cp);
+        emitFloat(arg->details.constant.value.real);
+        emit(",\n");
         break;
     case BaseType_Pointer:
         emit("         S%o        O'%lo\n", arg->reg, arg->details.constant.value.integer);
@@ -1887,7 +1893,9 @@ void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList)
                 break;
             case BaseType_Double:
             case BaseType_Real:
-                emit("         CON       %f\n", cListItem->details.value.real);
+                emit("         CON       ");
+                emitFloat(cListItem->details.value.real);
+                emit("\n");
                 break;
             case BaseType_Complex:
             default:

@@ -52,12 +52,13 @@ static void assignStorage(void);
 static char *baseTypeToStr(BaseType type);
 static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList);
 static char *collectStmt(void);
+static void copyCharValue(DataValue *to, DataValue *from);
 static Token *copyToken(Token *token);
 static Token *createIntegerConstant(int value);
 static void defineLocalVariable(Symbol *symbol);
 static void defineType(Symbol *symbol);
 static char *eatWsp(char *s);
-static void errArgType(OperatorId op, BaseType type);
+static void errArgType(OperatorId op, BaseType type, OperatorArgument *arg);
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset);
 static bool evaluateExpression(Token *expression, OperatorArgument *result);
 static bool evaluateExprHelper(Token *expression);
@@ -70,6 +71,7 @@ static bool evaluateStringIndex(Token *expression, OperatorArgument *index);
 static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgument *offset, OperatorArgument *length);
 static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int idx, OperatorArgument *subscript);
 static bool executeOperator(OperatorId op);
+static void freeCharValue(DataValue *charValue);
 static void freeCloseInfoList(CloseInfoList *ciList);
 static void freeConstantList(ConstantListItem *list);
 static void freeControlInfoList(ControlInfoList *list);
@@ -127,8 +129,8 @@ static void presetProgUnit(void);
 static void pushArg(OperatorArgument *arg);
 static void pushOp(OperatorDetails *op);
 static char *readLine(void);
-static void setCharArg(OperatorArgument *arg, char *s);
 static void setIntegerArg(OperatorArgument *arg, int value);
+static void transferCharValue(DataValue *to, DataValue *from);
 static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList);
 static void verifyEOS(char *s);
 
@@ -777,6 +779,21 @@ void compile(char *name) {
     if (totalErrors > 0) exit(1);
 }
 
+static void copyCharValue(DataValue *to, DataValue *from) {
+    int len;
+
+    len = from->character.length;
+    if (from->character.string != NULL) {
+        to->character.length = len;
+        to->character.string = (char *)allocate(len + 1);
+        memcpy(to->character.string, from->character.string, len);
+    }
+    else {
+        to->character.length = 0;
+        to->character.string = NULL;
+    }
+}
+
 static Token *copyToken(Token *token) {
     int len;
     Token *new;
@@ -812,9 +829,7 @@ static Token *copyToken(Token *token) {
         break;
     case TokenType_Constant:
         if (token->details.constant.dt.type == BaseType_Character) {
-            len = strlen(token->details.constant.value.character.string);
-            new->details.constant.value.character.string = (char *)allocate(len + 1);
-            memcpy(new->details.constant.value.character.string, token->details.constant.value.character.string, len);
+            copyCharValue(&new->details.constant.value, &token->details.constant.value);
         }
         break;
     case TokenType_Operator:
@@ -863,8 +878,11 @@ static char *eatWsp(char *s) {
     return s;
 }
 
-static void errArgType(OperatorId op, BaseType type) {
+static void errArgType(OperatorId op, BaseType type, OperatorArgument *arg) {
     err("Invalid argument type %s to '%s'", baseTypeToStr(type), op);
+    if (arg != NULL && arg->class == ArgClass_Constant && arg->details.constant.dt.type == BaseType_Character) {
+        freeCharValue(&arg->details.constant.value);
+    }
 }
 
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset) {
@@ -963,6 +981,9 @@ static bool evaluateExprHelper(Token *expression) {
     case TokenType_Constant:
         arg.class = ArgClass_Constant;
         arg.details.constant = expression->details.constant;
+        if (expression->details.constant.dt.type == BaseType_Character) {
+            transferCharValue(&arg.details.constant.value, &expression->details.constant.value);
+        }
         pushArg(&arg);
         break;
     case TokenType_Operator:
@@ -1101,6 +1122,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
                     }
                     else {
                         emitLoadConst(&result);
+                        freeCharValue(&result.details.constant.value);
                         emitStoreStack(result.reg, parmIdx);
                         freeRegister(result.reg);
                     }
@@ -1303,6 +1325,9 @@ static bool evaluateIdentifier(Token *id) {
         break;
     case SymClass_Parameter:
         arg.details.constant = symbol->details.param;
+        if (symbol->details.param.dt.type == BaseType_Character) {
+            copyCharValue(&arg.details.constant.value, &symbol->details.param.value);
+        }
         break;
     default:
         err("Invalid symbol reference");
@@ -1541,8 +1566,14 @@ static bool executeOperator(OperatorId op) {
         if (leftType  != argType) leftType  = coerceArgument(&leftArg,  leftType,  argType);
         if (rightType != argType) rightType = coerceArgument(&rightArg, rightType, argType);
         if (!isConstResult) {
-            if (isConstant(leftArg)) emitLoadConst(&leftArg);
-            if (isConstant(rightArg)) emitLoadConst(&rightArg);
+            if (isConstant(leftArg)) {
+                emitLoadConst(&leftArg);
+                if (leftArg.details.constant.dt.type == BaseType_Character) freeCharValue(&leftArg.details.constant.value);
+            }
+            if (isConstant(rightArg)) {
+                emitLoadConst(&rightArg);
+                if (rightArg.details.constant.dt.type == BaseType_Character) freeCharValue(&rightArg.details.constant.value);
+            }
         }
     }
     switch (op) {
@@ -1565,7 +1596,7 @@ static bool executeOperator(OperatorId op) {
                 break;
             case BaseType_Complex:
             default:
-                errArgType(op, rightType);
+                errArgType(op, rightType, &rightArg);
                 return TRUE;
             }
         }
@@ -1578,7 +1609,7 @@ static bool executeOperator(OperatorId op) {
                 emitNegReg(rightArg.reg, rightType);
                 break;
             default:
-                errArgType(op, rightType);
+                errArgType(op, rightType, &rightArg);
                 return TRUE;
             }
         }
@@ -1592,7 +1623,7 @@ static bool executeOperator(OperatorId op) {
                 rightArg.details.constant.value.logical = ~rightArg.details.constant.value.logical;
                 break;
             default:
-                errArgType(op, rightType);
+                errArgType(op, rightType, &rightArg);
                 return TRUE;
             }
         }
@@ -1604,7 +1635,7 @@ static bool executeOperator(OperatorId op) {
                 emitNotReg(rightArg.reg, rightType);
                 break;
             default:
-                errArgType(op, rightType);
+                errArgType(op, rightType, &rightArg);
                 return TRUE;
             }
         }
@@ -1619,7 +1650,7 @@ static bool executeOperator(OperatorId op) {
         case BaseType_Complex:
             break;
         default:
-            errArgType(op, rightType);
+            errArgType(op, rightType, &rightArg);
             return TRUE;
         }
         break;
@@ -1656,7 +1687,13 @@ static bool executeOperator(OperatorId op) {
             (*binop)(&leftArg, &rightArg);
         }
         else {
-            errArgType(op, argType);
+            errArgType(op, argType, NULL);
+            if (leftArg.class == ArgClass_Constant && leftArg.details.constant.dt.type == BaseType_Character) {
+                freeCharValue(&leftArg.details.constant.value);
+            }
+            if (rightArg.class == ArgClass_Constant && rightArg.details.constant.dt.type == BaseType_Character) {
+                freeCharValue(&rightArg.details.constant.value);
+            }
             return TRUE;
         }
         break;
@@ -1664,7 +1701,6 @@ static bool executeOperator(OperatorId op) {
         err("Unrecognized operator");
         return TRUE;
     }
-
     if (isConstResult) {
         if (op >= OP_EQ && op <= OP_NE) {
             rightArg.details.constant.dt.type = BaseType_Logical;
@@ -1685,6 +1721,14 @@ static bool executeOperator(OperatorId op) {
     pushArg(&rightArg);
 
     return FALSE;
+}
+
+static void freeCharValue(DataValue *charValue) {
+    if (charValue->character.string != NULL) {
+        free(charValue->character.string);
+    }
+    charValue->character.string = NULL;
+    charValue->character.length = 0;
 }
 
 static void freeConstantList(ConstantListItem *list) {
@@ -1796,7 +1840,8 @@ static void freeToken(Token *token) {
             freeStringRange(token->details.identifier.range);
             break;
         case TokenType_Constant:
-            if (token->details.constant.dt.type == BaseType_Character) {
+            if (token->details.constant.dt.type == BaseType_Character
+                && token->details.constant.value.character.string != NULL) {
                 free(token->details.constant.value.character.string);
             }
             break;
@@ -2058,6 +2103,7 @@ static bool isAssignment(char *s, bool *isDefn, bool *hasError) {
 static void loadValue(OperatorArgument *value) {
     if (value->class == ArgClass_Constant) {
         emitLoadConst(value);
+        if (value->details.constant.dt.type == BaseType_Character) freeCharValue(&value->details.constant.value);
     }
     else if (value->class >= ArgClass_Function) {
         emitLoadValue(value);
@@ -2322,6 +2368,7 @@ static char *parseActualArguments(char *s, int *frameSize) {
                         }
                         else {
                             emitLoadConst(&result);
+                            freeCharValue(&result.details.constant.value);
                             emitStoreStack(result.reg, parmIdx);
                             freeRegister(result.reg);
                         }
@@ -3045,6 +3092,12 @@ static char *parseExpression(char *s, Token **expression) {
          *  Fall through
          */
     case TokenType_Constant:
+        if (tp == NULL) {
+            tp = copyToken(&token);
+            if (token.details.constant.dt.type == BaseType_Character && token.details.constant.value.character.string != NULL) {
+                free(token.details.constant.value.character.string);
+            }
+        }
         if (leftArg != NULL) {
             freeTokenList(expressionList);
             freeToken(tp);
@@ -3052,7 +3105,6 @@ static char *parseExpression(char *s, Token **expression) {
             *expression = NULL;
             return s;
         }
-        if (tp == NULL) tp = copyToken(&token);
         s = eatWsp(s);
         if (*s == '\0' || *s == ',' || *s == ')' || *s == ':') {
             if (tp->type == TokenType_Identifier) {
@@ -5753,7 +5805,7 @@ static void parsePARAMETER(char *s) {
             symbol->class = SymClass_Parameter;
         }
         else {
-            err("Duplicate parameter: %s", name);
+            err("Parameter name not unique: %s", name);
             return;
         }
         s = eatWsp(s);
@@ -5770,18 +5822,23 @@ static void parsePARAMETER(char *s) {
             freeToken(expression);
             return;
         }
-        freeToken(expression);
         if (coerceArgument(&result, getDataType(&result)->type, symbol->details.variable.dt.type) == BaseType_Undefined) {
             err("Invalid type conversion");
+            freeToken(expression);
             if (isCalculation(result)) freeRegister(result.reg);
             return;
         }
         if (!isConstant(result)) {
             err("Non-constant expression in declaration of %s", symbol->identifier);
+            freeToken(expression);
             if (isCalculation(result)) freeRegister(result.reg);
             return;
         }
         symbol->details.param = result.details.constant;
+        if (result.details.constant.dt.type == BaseType_Character) {
+            transferCharValue(&symbol->details.param.value, &result.details.constant.value);
+        }
+        freeToken(expression);
         s = eatWsp(s);
         if (*s == ')') {
             s += 1;
@@ -6337,15 +6394,6 @@ static char *readLine(void) {
     return lineBuf;
 }
 
-static void setCharArg(OperatorArgument *arg, char *s) {
-    memset(arg, 0, sizeof(OperatorArgument));
-    arg->class = ArgClass_Constant;
-    arg->details.constant.dt.type = BaseType_Character;
-    arg->details.constant.dt.rank = 0;
-    arg->details.constant.value.character.length = strlen(s);
-    arg->details.constant.value.character.string = s;
-}
-
 static void setIntegerArg(OperatorArgument *arg, int value) {
     memset(arg, 0, sizeof(OperatorArgument));
     arg->class = ArgClass_Constant;
@@ -6353,6 +6401,13 @@ static void setIntegerArg(OperatorArgument *arg, int value) {
     arg->details.constant.dt.rank = 0;
     arg->details.constant.value.integer = value;
 
+}
+
+static void transferCharValue(DataValue *to, DataValue *from) {
+    to->character.length = from->character.length;
+    to->character.string = from->character.string;
+    from->character.length = 0;
+    from->character.string = NULL;
 }
 
 static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList) {

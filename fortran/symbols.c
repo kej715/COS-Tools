@@ -638,6 +638,11 @@ void freeAllSymbols(void) {
 
 static void freeNode(Symbol *symbol) {
     if (symbol->shadow != NULL) freeNode(symbol->shadow);
+    if (symbol->class == SymClass_Parameter
+        && symbol->details.param.dt.type == BaseType_Character
+        && symbol->details.param.value.character.string != NULL) {
+        free(symbol->details.param.value.character.string);
+    }
     free(symbol->identifier);
     free(symbol);
 }
@@ -825,7 +830,7 @@ void registerIntrinsicFunctions(void) {
 
     for (defn = intrinsicFnDefns; defn->identifier != NULL; defn++) {
         if (defn->generic != NULL) {
-            generic = findNode(defn->generic, intrinsicFunctions);
+            generic = findIntrinsicFunction(defn->generic);
             new = addNode(defn->identifier, SymClass_Intrinsic, &intrinsicFunctions);
             if (new == NULL) {
                 new = allocSymbol(defn->identifier, SymClass_Intrinsic);
