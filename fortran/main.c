@@ -57,7 +57,8 @@ int main(int argc, char *argv[]) {
     if (dp == NULL) dp = cp;
     len = 0;
     cp = name;
-    while (sp < dp && len < 8) {
+    *cp++ = '%';
+    while (sp < dp && len < 7) {
         if (isalnum(*sp)) {
             *cp++ = toupper(*sp);
             len += 1;
