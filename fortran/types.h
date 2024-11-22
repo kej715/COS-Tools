@@ -291,12 +291,13 @@ typedef struct commonBlockDetails {
     int limit;
 } CommonBlockDetails;
 
-#define MAX_INTRINSIC_ARGS 2
+#define MAX_INTRINSIC_ARGS 3
 
 typedef struct intrinsicDetails {
     int isGeneric;
     char *externName;
     BaseType resultType;
+    int hasCifc;
     int argc;
     BaseType argumentTypes[MAX_INTRINSIC_ARGS];
 } IntrinsicDetails;

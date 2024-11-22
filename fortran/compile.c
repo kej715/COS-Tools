@@ -5,7 +5,8 @@
 **  Name: compile.c
 **
 **  Description:
-**      This file implements the parser for the FORTRAN language.
+**      This file implements a single pass, recursive descent parser for
+**      the FORTRAN 77 language.
 **
 **  Licensed under the Apache License, Version 2.0 (the "License");
 **  you may not use this file except in compliance with the License.
@@ -1135,7 +1136,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
                         emitLoadConst(&result);
                         emitStoreStack(result.reg, tempIdx);
                         freeRegister(result.reg);
-                        if (intrinsic == NULL) {
+                        if (intrinsic == NULL || intrinsic->details.intrinsic.hasCifc == FALSE) {
                             emitStoreParmAddr(tempIdx, parmIdx);
                         }
                         else {
@@ -1153,7 +1154,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
                     freeAllRegisters();
                 }
                 else {
-                    if (intrinsic != NULL && dt->type != BaseType_Character)
+                    if (intrinsic != NULL && intrinsic->details.intrinsic.hasCifc && dt->type != BaseType_Character)
                         emitLoadByteReference(&result, NULL);
                     else
                         emitLoadReference(&result, NULL);
@@ -1179,7 +1180,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
                 else {
                     emitStoreStack(result.reg, tempIdx);
                     freeRegister(result.reg);
-                    if (intrinsic == NULL) {
+                    if (intrinsic == NULL || intrinsic->details.intrinsic.hasCifc == FALSE) {
                         emitStoreParmAddr(tempIdx, parmIdx);
                     }
                     else {
@@ -5844,10 +5845,7 @@ static void parsePARAMETER(char *s) {
             s += 1;
             break;
         }
-        else if (*s == ',') {
-            s += 1;
-        }
-        else {
+        else if (*s != ',') {
             err("PARAMETER statement syntax");
             return;
         }
