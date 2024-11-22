@@ -29,21 +29,24 @@ ARFLAGS ?= -r
 PREFIX = /usr/local
 BINDIR = /usr/local/bin
 
-OBJS =	aint.o amax0.o amin0.o anint.o chari.o ichar.o imax.o imax1.o imin.o imin1.o index.o len.o lge.o lgt.o lle.o llt.o nint.o rmax.o rmin.o \
+COBJS =	aint.o amax0.o amin0.o anint.o chari.o ichar.o imax.o imax1.o imin.o imin1.o index.o len.o lge.o lgt.o lle.o llt.o nint.o rmax.o rmin.o \
         iabs.o iacos.o iasin.o iatan.o iatan2.o icos.o icosh.o idim.o iexp.o iint.o ilog.o ilog10.o imod.o ireal.o isign.o isin.o isinh.o isqrt.o itan.o itanh.o \
 	rabs.o racos.o rasin.o ratan.o ratan2.o rcos.o rcosh.o rdim.o rexp.o rint.o rlog.o rlog10.o rmod.o rreal.o rsign.o rsin.o rsinh.o rsqrt.o rtan.o rtanh.o \
-	cloc.o wloc.o
+	rtc.o
+
+CALOBJS = cosclk.o date.o jdate.o irtc.o loc.o mask.o shift.o shiftl.o shiftr.o \
+	  vlen.o vload.o vsaddi.o vsaddr.o vsdivr.o vsmulr.o vssubi.o vssubr.o vstore.o vvaddi.o vvaddr.o vvdivr.o vvmulr.o vvsubi.o vvsubr.o
 
 all: libintf.lib
 
 cos:
 	CC=ack AR=lib ARFLAGS="-o" $(MAKE)
 
-libintf.lib: $(OBJS)
+libintf.lib: $(COBJS) $(CALOBJS)
 	$(AR) $(ARFLAGS) $@ $+
 
 clean:
-	rm -f *.o *.a *.lib
+	rm -f *.o *.a *.lib *.lst
 
 aint.o: aint.c
 	$(CC) $(CFLAGS) -c $<
@@ -58,9 +61,6 @@ anint.o: anint.c
 	$(CC) $(CFLAGS) -c $<
 
 chari.o: chari.c
-	$(CC) $(CFLAGS) -c $<
-
-cloc.o: cloc.c
 	$(CC) $(CFLAGS) -c $<
 
 iabs.o: iabs.c
@@ -156,6 +156,33 @@ lle.o: lle.c
 llt.o: llt.c
 	$(CC) $(CFLAGS) -c $<
 
+cosclk.o: cosclk.cal
+	$(BINDIR)/cal -o cosclk.o $<
+
+date.o: date.cal
+	$(BINDIR)/cal -o date.o $<
+
+irtc.o: irtc.cal
+	$(BINDIR)/cal -o irtc.o $<
+
+jdate.o: jdate.cal
+	$(BINDIR)/cal -o jdate.o $<
+
+loc.o: loc.cal
+	$(BINDIR)/cal -o loc.o $<
+
+mask.o: mask.cal
+	$(BINDIR)/cal -o mask.o $<
+
+shift.o: shift.cal
+	$(BINDIR)/cal -o shift.o $<
+
+shiftl.o: shiftl.cal
+	$(BINDIR)/cal -o shiftl.o $<
+
+shiftr.o: shiftr.cal
+	$(BINDIR)/cal -o shiftr.o $<
+
 nint.o: nint.c
 	$(CC) $(CFLAGS) -c $<
 
@@ -225,7 +252,52 @@ rtan.o: rtan.c
 rtanh.o: rtanh.c
 	$(CC) $(CFLAGS) -c $<
 
-wloc.o: wloc.c
+rtc.o: rtc.c
 	$(CC) $(CFLAGS) -c $<
+
+vlen.o: vlen.cal
+	$(BINDIR)/cal -o vlen.o $<
+
+vload.o: vload.cal
+	$(BINDIR)/cal -o vload.o $<
+
+vsaddi.o: vsaddi.cal
+	$(BINDIR)/cal -o vsaddi.o $<
+
+vsaddr.o: vsaddr.cal
+	$(BINDIR)/cal -o vsaddr.o $<
+
+vsdivr.o: vsdivr.cal
+	$(BINDIR)/cal -o vsdivr.o $<
+
+vsmulr.o: vsmulr.cal
+	$(BINDIR)/cal -o vsmulr.o $<
+
+vssubi.o: vssubi.cal
+	$(BINDIR)/cal -o vssubi.o $<
+
+vssubr.o: vssubr.cal
+	$(BINDIR)/cal -o vssubr.o $<
+
+vstore.o: vstore.cal
+	$(BINDIR)/cal -o vstore.o $<
+
+vvaddi.o: vvaddi.cal
+	$(BINDIR)/cal -o vvaddi.o $<
+
+vvaddr.o: vvaddr.cal
+	$(BINDIR)/cal -o vvaddr.o $<
+
+vvdivr.o: vvdivr.cal
+	$(BINDIR)/cal -o vvdivr.o $<
+
+vvmulr.o: vvmulr.cal
+	$(BINDIR)/cal -o vvmulr.o $<
+
+vvsubi.o: vvsubi.cal
+	$(BINDIR)/cal -o vvsubi.o $<
+
+vvsubr.o: vvsubr.cal
+	$(BINDIR)/cal -o vvsubr.o $<
 
 #---------------------------  End Of File  --------------------------------
