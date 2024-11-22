@@ -1,0 +1,27 @@
+         TITLE     'DATE'
+         SUBTITLE  'Return Current Date'
+         IDENT     DATE
+         COMMENT   'DATE - Return Current Date'
+
+TEXT     SECTION   CODE
+
+F$DAT    =         O'002          ; Get current date
+
+**
+*  @%date - return current date as ASCII-encoded integer
+*
+         ENTRY     @%date
+@%date  BSS       0
+         S0        F$DAT
+         S1        date
+         EX 
+         S7        date,
+         J         B00
+
+         SECTION   *
+
+DATA     SECTION   DATA
+date     BSSZ      1
+         SECTION   *
+
+         END

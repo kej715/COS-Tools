@@ -1,0 +1,21 @@
+         TITLE     'LOC'
+         SUBTITLE  'Return Location of Parameter'
+         IDENT     LOC
+         COMMENT   'LOC - Return Location of Parameter'
+
+TEXT     SECTION   CODE
+
+**
+*  @%loc - return location of parameter
+*
+*  Entry:
+*    (A7+0) - address of parameter
+*
+         ENTRY     @%loc
+@%loc    BSS       0
+         S7        0,A7
+         J         B00
+
+         SECTION   *
+
+         END

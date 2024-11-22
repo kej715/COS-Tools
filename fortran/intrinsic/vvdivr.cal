@@ -1,0 +1,86 @@
+         TITLE     'VVDIVR'
+         SUBTITLE  'Vector-Vector Real Divide'
+         IDENT     VVDIVR
+         COMMENT   'VVDIVR - Vector-Vector Real Divide'
+
+VECTOR   SECTION   MIXED
+
+**
+*  @%vvdivr - vector-vector real divide
+*
+*  Entry:
+*    (A7+0) - address of integer identifying result register
+*    (A7+1) - address of integer identifying first operand register
+*    (A7+2) - address of integer identifying second operand register
+*
+*  Exit:
+*    S7 - integer identifying result register
+*
+         ENTRY     @%vvdivr
+@%vvdivr BSS       0
+         S4        OPCODES+2,     ; Vi /HVj
+         S5        OPCODES+1,     ; Vi Vj*IVk
+         S6        OPCODES+0,     ; Vi Vj*FVk
+         S7        S6             ; Vi Vj*FVk
+         S1        <3             ; mask for register number
+
+         A1        0,A7           ; get result register number
+         S2        ,A1
+         S2        S2&S1
+         S5        S5!S2          ; merge into "k" position of instructions 2 - 4
+         S6        S6!S2
+         S7        S7!S2
+
+         S2        S2<6           ; shift into "i" position
+         S4        S4!S2          ; merge into "i" position of instructions 1, 3, 4
+         S6        S6!S2
+         S7        S7!S2
+
+         A1        1,A7           ; get first operand register number (dividend)
+         S2        ,A1
+         S2        S2&S1
+         S2        S2<3           ; shift into "j" position
+         S6        S6!S2          ; merge into "j" position of instruction 3
+
+         A1        2,A7           ; get second operand register number (divisor)
+         S2        ,A1
+         S2        S2&S1
+         S2        S2<3           ; shift into "j" position
+         S4        S4!S2          ; merge into "j" position of instructions 1, 2, 4
+         S5        S5!S2
+         S7        S7!S2
+
+         S2        S2<3           ; shift into "i" position
+         S5        S5!S2          ; shift into "i" position of instruction 2
+
+         S6        S6<16          ; merge parcel c into final word
+         S7        S7!S6
+         S5        S5<32          ; merge parcel b into final word
+         S7        S7!S5
+         S4        S4<48          ; merge parcel a into final word
+         S7        S7!S4
+
+         INSTR,    S7             ; store instruction seequence, and fall into it
+*
+*  Template for vector-vector divide: V3 = V1 / V2
+*  The four instructions, below will be replaced
+*
+INSTR    BSS       0
+         V3        /HV2           ; 1. approximate reciprocal
+         V2        V2*IV3         ; 2. correction factor
+         V3        V1*FV3         ; 3. approximate quotient
+         V3        V2*FV3         ; 4. full precision quotient
+
+         A1        0,A7           ; get result register number
+         S2        ,A1
+         S7        S2&S1          ; and return it
+         J         B00
+
+OPCODES  BSS       0
+         CON       O'161000       ; Vi Vj*FVk
+         CON       O'167000       ; Vi Vj*IVk
+         CON       O'174000       ; Vi /HVj
+
+         SECTION   *
+
+         END

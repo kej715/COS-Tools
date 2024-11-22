@@ -1,0 +1,164 @@
+         TITLE     'MASK'
+         SUBTITLE  'Circular Left Shift'
+         IDENT     MASK
+         COMMENT   'MASK - Circular Left Shift'
+
+TEXT     SECTION   CODE
+
+**
+*  @%mask - generate mask
+*
+*  Entry:
+*    (A7+0) - address of integer specifying mask length
+*              0 <= n <=  63 : number of left-justified 1-bits
+*             64 <= n <= 128 : number of right-justified 1-bits (128-n)
+*
+*  Exit:
+*    S7 - result
+*
+         ENTRY     @%mask
+@%mask   BSS       0
+         A1        0,A7           ; get mask length
+         S1        <7             ; ensure 0 <= n <= 127
+         S2        ,A1
+         S2        S2&S1
+         A2        S2
+         S7        table,A2       ; get mask value
+         J         B00
+
+         SECTION   *
+
+DATA     SECTION   DATA
+table    BSS       0
+         CON       X'0000000000000000
+         CON       X'8000000000000000
+         CON       X'C000000000000000
+         CON       X'E000000000000000
+         CON       X'F000000000000000
+         CON       X'F800000000000000
+         CON       X'FC00000000000000
+         CON       X'FE00000000000000
+         CON       X'FF00000000000000
+         CON       X'FF80000000000000
+         CON       X'FFC0000000000000
+         CON       X'FFE0000000000000
+         CON       X'FFF0000000000000
+         CON       X'FFF8000000000000
+         CON       X'FFFC000000000000
+         CON       X'FFFE000000000000
+         CON       X'FFFF000000000000
+         CON       X'FFFF800000000000
+         CON       X'FFFFC00000000000
+         CON       X'FFFFE00000000000
+         CON       X'FFFFF00000000000
+         CON       X'FFFFF80000000000
+         CON       X'FFFFFC0000000000
+         CON       X'FFFFFE0000000000
+         CON       X'FFFFFF0000000000
+         CON       X'FFFFFF8000000000
+         CON       X'FFFFFFC000000000
+         CON       X'FFFFFFE000000000
+         CON       X'FFFFFFF000000000
+         CON       X'FFFFFFF800000000
+         CON       X'FFFFFFFC00000000
+         CON       X'FFFFFFFE00000000
+         CON       X'FFFFFFFF00000000
+         CON       X'FFFFFFFF80000000
+         CON       X'FFFFFFFFC0000000
+         CON       X'FFFFFFFFE0000000
+         CON       X'FFFFFFFFF0000000
+         CON       X'FFFFFFFFF8000000
+         CON       X'FFFFFFFFFC000000
+         CON       X'FFFFFFFFFE000000
+         CON       X'FFFFFFFFFF000000
+         CON       X'FFFFFFFFFF800000
+         CON       X'FFFFFFFFFFC00000
+         CON       X'FFFFFFFFFFE00000
+         CON       X'FFFFFFFFFFF00000
+         CON       X'FFFFFFFFFFF80000
+         CON       X'FFFFFFFFFFFC0000
+         CON       X'FFFFFFFFFFFE0000
+         CON       X'FFFFFFFFFFFF0000
+         CON       X'FFFFFFFFFFFF8000
+         CON       X'FFFFFFFFFFFFC000
+         CON       X'FFFFFFFFFFFFE000
+         CON       X'FFFFFFFFFFFFF000
+         CON       X'FFFFFFFFFFFFF800
+         CON       X'FFFFFFFFFFFFFC00
+         CON       X'FFFFFFFFFFFFFE00
+         CON       X'FFFFFFFFFFFFFF00
+         CON       X'FFFFFFFFFFFFFF80
+         CON       X'FFFFFFFFFFFFFFC0
+         CON       X'FFFFFFFFFFFFFFE0
+         CON       X'FFFFFFFFFFFFFFF0
+         CON       X'FFFFFFFFFFFFFFF8
+         CON       X'FFFFFFFFFFFFFFFC
+         CON       X'FFFFFFFFFFFFFFFE
+
+         CON       X'FFFFFFFFFFFFFFFF
+         CON       X'7FFFFFFFFFFFFFFF
+         CON       X'3FFFFFFFFFFFFFFF
+         CON       X'1FFFFFFFFFFFFFFF
+         CON       X'0FFFFFFFFFFFFFFF
+         CON       X'07FFFFFFFFFFFFFF
+         CON       X'03FFFFFFFFFFFFFF
+         CON       X'01FFFFFFFFFFFFFF
+         CON       X'00FFFFFFFFFFFFFF
+         CON       X'007FFFFFFFFFFFFF
+         CON       X'003FFFFFFFFFFFFF
+         CON       X'001FFFFFFFFFFFFF
+         CON       X'000FFFFFFFFFFFFF
+         CON       X'0007FFFFFFFFFFFF
+         CON       X'0003FFFFFFFFFFFF
+         CON       X'0001FFFFFFFFFFFF
+         CON       X'0000FFFFFFFFFFFF
+         CON       X'00007FFFFFFFFFFF
+         CON       X'00003FFFFFFFFFFF
+         CON       X'00001FFFFFFFFFFF
+         CON       X'00000FFFFFFFFFFF
+         CON       X'000007FFFFFFFFFF
+         CON       X'000003FFFFFFFFFF
+         CON       X'000001FFFFFFFFFF
+         CON       X'000000FFFFFFFFFF
+         CON       X'0000007FFFFFFFFF
+         CON       X'0000003FFFFFFFFF
+         CON       X'0000001FFFFFFFFF
+         CON       X'0000000FFFFFFFFF
+         CON       X'00000007FFFFFFFF
+         CON       X'00000003FFFFFFFF
+         CON       X'00000001FFFFFFFF
+         CON       X'00000000FFFFFFFF
+         CON       X'000000007FFFFFFF
+         CON       X'000000003FFFFFFF
+         CON       X'000000001FFFFFFF
+         CON       X'000000000FFFFFFF
+         CON       X'0000000007FFFFFF
+         CON       X'0000000003FFFFFF
+         CON       X'0000000001FFFFFF
+         CON       X'0000000000FFFFFF
+         CON       X'00000000007FFFFF
+         CON       X'00000000003FFFFF
+         CON       X'00000000001FFFFF
+         CON       X'00000000000FFFFF
+         CON       X'000000000007FFFF
+         CON       X'000000000003FFFF
+         CON       X'000000000001FFFF
+         CON       X'000000000000FFFF
+         CON       X'0000000000007FFF
+         CON       X'0000000000003FFF
+         CON       X'0000000000001FFF
+         CON       X'0000000000000FFF
+         CON       X'00000000000007FF
+         CON       X'00000000000003FF
+         CON       X'00000000000001FF
+         CON       X'00000000000000FF
+         CON       X'000000000000007F
+         CON       X'000000000000003F
+         CON       X'000000000000001F
+         CON       X'000000000000000F
+         CON       X'0000000000000007
+         CON       X'0000000000000003
+         CON       X'0000000000000001
+         SECTION   *
+
+         END

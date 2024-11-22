@@ -1,0 +1,27 @@
+         TITLE     'JDATE'
+         SUBTITLE  'Return Current Julian Date'
+         IDENT     JDATE
+         COMMENT   'JDATE - Return Current Julian Date'
+
+TEXT     SECTION   CODE
+
+F$JDA    =         O'026          ; Get current Julian date
+
+**
+*  @%jdate - return current Julian date as ASCII-encoded integer
+*
+         ENTRY     @%jdate
+@%jdate  BSS       0
+         S0        F$JDA
+         S1        date
+         EX 
+         S7        date,
+         J         B00
+
+         SECTION   *
+
+DATA     SECTION   DATA
+date     BSSZ      1
+         SECTION   *
+
+         END

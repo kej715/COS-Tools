@@ -1,0 +1,26 @@
+         TITLE     'VLEN'
+         SUBTITLE  'Set Current Vector Length'
+         IDENT     VLEN
+         COMMENT   'VLEN - Set Current Vector Length'
+
+TEXT     SECTION   CODE
+
+**
+*  @%vlen - set current vector length
+*
+*  Entry:
+*    (A7+0) - address of integer specifying register length
+*
+         ENTRY     @VLEN
+@VLEN    BSS       0
+         S1        <6             ; mask for vector length value
+         A1        0,A7           ; get vector length value
+         S2        ,A1
+         S2        S2&S1
+         A2        S2
+         VL        A2             ; set vector length
+         J         B00
+
+         SECTION   *
+
+         END

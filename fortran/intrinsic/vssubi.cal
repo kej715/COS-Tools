@@ -1,0 +1,46 @@
+         TITLE     'VSSUBI'
+         SUBTITLE  'Vector-Scalar Integer Subtract'
+         IDENT     VSSUBI
+         COMMENT   'VSSUBI - Vector-Scalar Integer Subtract'
+
+VECTOR   SECTION   MIXED
+
+**
+*  @%vssubi - vector-scalar integer subtract
+*
+*  Entry:
+*    (A7+0) - address of integer identifying vector result register
+*    (A7+1) - address of scalar operand value
+*    (A7+2) - address of integer identifying vector operand register
+*
+*  Exit:
+*    S7 - integer identifying vector result register
+*
+         ENTRY     @%vssubi
+@%vssubi BSS       0
+         S2        INSTR,         ; template instruction
+         S1        O'707          ; mask to clear register numbers
+         S1        S1<48
+         S2        #S1&S2
+         S1        <3             ; mask for register number
+         A1        0,A7           ; get result register number
+         S3        ,A1
+         S3        S3&S1
+         S7        S3             ; result to be returned
+         S3        S3<(6+48)      ; position and merge it into instruction
+         S2        S2!S3
+         A1        2,A7           ; get vector operand register number
+         S3        ,A1
+         S3        S3&S1
+         S3        S3<48
+         S2        S2!S3          ; merge it into instruction
+         INSTR,    S2             ; store constructed instruction
+         A1        1,A7           ; get scalar operand value
+         S1        ,A1
+INSTR    BSS       0
+         V1        S1-V1          ; replaced with constructed instruction
+         J         B00
+
+         SECTION   *
+
+         END

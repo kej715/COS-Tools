@@ -1,0 +1,29 @@
+         TITLE     'SHIFTR'
+         SUBTITLE  'End-Off Right Shift'
+         IDENT     SHIFTR
+         COMMENT   'SHIFTR - End-Off Right Shift'
+
+TEXT     SECTION   CODE
+
+**
+*  @%shiftr - end-off right shift
+*
+*  Entry:
+*    (A7+0) - address of operand to be shifted
+*    (A7+1) - address of integer specifying shift count
+*
+*  Exit:
+*    S7 - result
+*
+         ENTRY     @%shiftr
+@%shiftr BSS       0
+         A1        0,A7           ; get operand to be shifted
+         S7        ,A1
+         A2        1,A7           ; get shift count
+         A1        ,A2
+         S7        S7>A1
+         J         B00
+
+         SECTION   *
+
+         END

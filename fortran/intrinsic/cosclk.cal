@@ -1,0 +1,27 @@
+         TITLE     'COSCLK'
+         SUBTITLE  'Return Current Time'
+         IDENT     COSCLK
+         COMMENT   'COSCLK - Return Current Time'
+
+TEXT     SECTION   CODE
+
+F$TIM    =         O'003          ; Get current time
+
+**
+*  @%clock - return current time as ASCII-encoded integer
+*
+         ENTRY     @%cosclk
+@%cosclk BSS       0
+         S0        F$TIM
+         S1        time
+         EX 
+         S7        time,
+         J         B00
+
+         SECTION   *
+
+DATA     SECTION   DATA
+time     BSSZ      1
+         SECTION   *
+
+         END

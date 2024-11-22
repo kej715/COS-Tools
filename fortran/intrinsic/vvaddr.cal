@@ -1,0 +1,49 @@
+         TITLE     'VVADDR'
+         SUBTITLE  'Vector-Vector Real Add'
+         IDENT     VVADDR
+         COMMENT   'VVADDR - Vector-Vector Real Add'
+
+VECTOR   SECTION   MIXED
+
+**
+*  @%vvaddr - vector-vector real add
+*
+*  Entry:
+*    (A7+0) - address of integer identifying result register
+*    (A7+1) - address of integer identifying first operand register
+*    (A7+2) - address of integer identifying second operand register
+*
+*  Exit:
+*    S7 - integer identifying result register
+*
+         ENTRY     @%vvaddr
+@%vvaddr BSS       0
+         S2        INSTR,         ; template instruction
+         S1        <9             ; mask to clear register numbers
+         S1        S1<48
+         S2        #S1&S2
+         S1        <3             ; mask for register number
+         A1        0,A7           ; get result register number
+         S3        ,A1
+         S3        S3&S1
+         S7        S3             ; result to be returned
+         S3        S3<(6+48)      ; position and merge it into instruction
+         S2        S2!S3
+         A1        1,A7           ; get first operand register number
+         S3        ,A1
+         S3        S3&S1
+         S3        S3<(3+48)      ; position and merge it into instruction
+         S2        S2!S3
+         A1        2,A7           ; get second operand register number
+         S3        ,A1
+         S3        S3&S1
+         S3        S3<48
+         S2        S2!S3          ; merge it into instruction
+         INSTR,    S2             ; store constructed instruction
+INSTR    BSS       0
+         V1        V1+FV1          ; replaced with constructed instruction
+         J         B00
+
+         SECTION   *
+
+         END

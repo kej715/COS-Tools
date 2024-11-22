@@ -1,0 +1,18 @@
+         TITLE     'IRTC'
+         SUBTITLE  'Return Real-Time Cirtck as Integer'
+         IDENT     IRTC
+         COMMENT   'IRTC - Return Real-Time Cirtck as Integer'
+
+TEXT     SECTION   CODE
+
+**
+*  @%irtc - return real-time clock as integer
+*
+         ENTRY     @%irtc
+@%irtc   BSS       0
+         S7        RT
+         J         B00
+
+         SECTION   *
+
+         END
