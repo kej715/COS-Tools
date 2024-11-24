@@ -41,7 +41,7 @@ VECTOR   SECTION   MIXED
          S2        S2!S3          ; merge it into instruction
          INSTR,    S2             ; store constructed instruction
 INSTR    BSS       0
-         V1        V1+FV1          ; replaced with constructed instruction
+         V1        V1+FV1         ; replaced with constructed instruction
          J         B00
 
          SECTION   *
