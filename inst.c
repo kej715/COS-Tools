@@ -4914,7 +4914,7 @@ static void forceInstWordBoundary(void) {
     savedListControl = currentListControl;
     currentListControl = 0;
     while ((currentSection->locationCounter & 0x03) != 0) {
-        emit_gh_ijk(currentSection, 001, 0);
+        emit_gh_i_j_k(currentSection, 051, 1, 0, 1);
     }
     currentListControl = savedListControl;
 }
