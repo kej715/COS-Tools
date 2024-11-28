@@ -27,6 +27,8 @@
 
 #include "../basetypes.h"
 
+#define MAX_DIMENSIONS       7
+
 typedef enum tokenId {
     UNDEFINED = 0,
     ASSIGN,
@@ -225,7 +227,7 @@ typedef struct dataType {
     int constraint;
     int firstChrOffset;
     int rank;
-    Bounds bounds[7];
+    Bounds bounds[MAX_DIMENSIONS];
 } DataType;
 
 typedef struct invalidDetails {

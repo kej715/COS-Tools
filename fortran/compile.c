@@ -2072,11 +2072,7 @@ static bool isAssignment(char *s, bool *isDefn, bool *hasError) {
         if (*s == '(') {
             *isDefn = FALSE;
             s = parseStringRange(s, &strRange);
-            if (s == NULL) {
-                err("Invalid character range");
-                *hasError = TRUE;
-                return TRUE;
-            }
+            if (s == NULL) return FALSE;
             freeStringRange(strRange);
         }
     }
@@ -2896,7 +2892,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
                 err("Invalid assumed-size array declaration");
                 break;
             }
-            if (dt->rank >= 7) {
+            if (dt->rank >= MAX_DIMENSIONS) {
                 err("Too many dimensions");
                 break;
             }
@@ -2945,7 +2941,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
                 err("Lower bound greater than upper bound in dimension declaration");
                 break;
             }
-            if (dt->rank >= 7) {
+            if (dt->rank >= MAX_DIMENSIONS) {
                 err("Too many dimensions");
                 break;
             }
@@ -4604,23 +4600,32 @@ static void parseCOMMON(char *s) {
             if (symbol == NULL) {
                 symbol = addSymbol(name, SymClass_Undefined);
             }
-            else if (symbol->class != SymClass_Undefined) {
+            switch (symbol->class) {
+            case SymClass_Undefined:
+            case SymClass_Auto:
+            case SymClass_Static:
+                symbol->class = SymClass_Global;
+                symbol->details.variable.staticBlock = commonBlock;
+                defineType(symbol);
+                symbol->details.variable.offset = commonBlock->details.common.offset;
+                s = eatWsp(s);
+                if (*s == '(') {
+                    if (symbol->details.variable.dt.rank != 0) {
+                        err("Duplicate declaration of %s", name);
+                    }
+                    s = parseDimDecl(s + 1, symbol);
+                    s = eatWsp(s);
+                }
+                size = calculateSize(symbol);
+                commonBlock->details.common.offset += size;
+                if (commonBlock->details.common.offset > commonBlock->details.common.limit) {
+                    commonBlock->details.common.limit = commonBlock->details.common.offset;
+                }
+                break;
+            default:
                 err("Duplicate declaration of %s", name);
                 return;
             }
-            symbol->class = SymClass_Global;
-            symbol->details.variable.staticBlock = commonBlock;
-            defineType(symbol);
-            symbol->details.variable.offset = commonBlock->details.common.offset;
-            symbol->details.variable.dt.rank = 0;
-            s = eatWsp(s);
-            if (*s == '(') {
-                s = parseDimDecl(s + 1, symbol);
-                s = eatWsp(s);
-            }
-            size = calculateSize(symbol);
-            commonBlock->details.common.offset += size;
-            if (commonBlock->details.common.offset > commonBlock->details.common.limit) commonBlock->details.common.limit = commonBlock->details.common.offset;
             if (*s == '\0') {
                 break;
             }
