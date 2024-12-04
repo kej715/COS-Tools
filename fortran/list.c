@@ -49,7 +49,7 @@ static void resetHeaderLine(void);
 
 static char *cpuType = "Cray X-MP";
 static char *ftcName = "KFTC";
-static char *ftcVersion = "1.3";
+static char *ftcVersion = "1.4";
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = LINES_PER_PAGE;
 static int  pageNumber = 0;
@@ -167,6 +167,7 @@ static void listSymbol(Symbol *symbol) {
     case SymClass_StmtFunction:
     case SymClass_Auto:
     case SymClass_Static:
+    case SymClass_Adjustable:
     case SymClass_Global:
     case SymClass_Argument:
     case SymClass_Pointee:
@@ -180,6 +181,7 @@ static void listSymbol(Symbol *symbol) {
         switch (symbol->class) {
         case SymClass_Auto:
         case SymClass_Static:
+        case SymClass_Adjustable:
         case SymClass_Global:
         case SymClass_Argument:
             if (symbol->details.variable.dt.type == BaseType_Character && symbol->details.variable.dt.firstChrOffset != 0) {
@@ -262,6 +264,7 @@ char *symClassToStr(SymbolClass class) {
     case SymClass_NamedCommon:  return "Common";
     case SymClass_Auto:         return "Auto";
     case SymClass_Static:       return "Static";
+    case SymClass_Adjustable:   return "Adjustable";
     case SymClass_Global:       return "Common";
     case SymClass_Argument:     return "Argument";
     case SymClass_Pointee:      return "Pointee";

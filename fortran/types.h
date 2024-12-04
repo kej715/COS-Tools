@@ -47,6 +47,7 @@ typedef enum tokenId {
     ELSE,
     ELSEIF,
     END,
+    ENDDO,
     ENDFILE,
     ENDIF,
     ENTRY,
@@ -148,6 +149,7 @@ typedef enum argumentClass {
     ArgClass_Function,
     ArgClass_Auto,
     ArgClass_Static,
+    ArgClass_Adjustable,
     ArgClass_Global,
     ArgClass_Argument,
     ArgClass_Pointee
@@ -176,6 +178,7 @@ typedef enum symbolClass {
     SymClass_NamedCommon,
     SymClass_Auto,
     SymClass_Static,
+    SymClass_Adjustable,
     SymClass_Global,
     SymClass_Argument,
     SymClass_Parameter,
@@ -335,11 +338,19 @@ typedef struct variableDetails {
     int nextOffset;
 } VariableDetails;
 
+typedef struct adjustableDetails {
+    DataType dt;
+    int offset;
+    int isStorageAssigned;
+    int argOffset;
+} AdjustableDetails;
+
 typedef union symbolDetails {
+    AdjustableDetails adjustable;
     CommonBlockDetails common;
-    ConstantDetails param;
     IntrinsicDetails intrinsic;
     LabelDetails label;
+    ConstantDetails param;
     PointeeDetails pointee;
     ProgUnitDetails progUnit;
     VariableDetails variable;

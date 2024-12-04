@@ -56,6 +56,7 @@ static Keyword keywordTable[] = {
     {"ELSE", ELSE, StmtClass_Executable},
     {"ELSEIF", ELSEIF, StmtClass_Executable},
     {"END", END, StmtClass_Nonexecutable},
+    {"ENDDO", ENDDO, StmtClass_Executable},
     {"ENDFILE", ENDFILE, StmtClass_Executable},
     {"ENDIF", ENDIF, StmtClass_Executable},
     {"ENTRY", ENTRY, StmtClass_Nonexecutable},
@@ -89,7 +90,7 @@ static Keyword keywordTable[] = {
     {"WRITE", WRITE, StmtClass_Executable}
 };
 
-#define KEYWORD_TBL_LEN 47
+#define KEYWORD_TBL_LEN 48
 
 /*
  *  DOUBLEPRECISION is the longest keyword, and

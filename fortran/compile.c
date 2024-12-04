@@ -146,6 +146,7 @@ static void parseDO(char *s);
 static void parseELSE(char *s);
 static void parseELSEIF(char *s);
 static void parseEND(char *s);
+static void parseENDDO(char *s);
 static void parseENDIF(char *s);
 static void parseENTRY(char *s);
 static void parseEQUIVALENCE(char *s);
@@ -192,6 +193,7 @@ static ArgumentClass argClassForSymClass[] = {
     ArgClass_Undefined,  /* SymClass_NamedCommon  */
     ArgClass_Auto,       /* SymClass_Auto         */
     ArgClass_Static,     /* SymClass_Static       */
+    ArgClass_Adjustable, /* SymClass_Adjustable   */
     ArgClass_Global,     /* SymClass_Global       */
     ArgClass_Argument,   /* SymClass_Argument     */
     ArgClass_Constant,   /* SymClass_Parameter    */
@@ -696,6 +698,9 @@ void compile(char *name) {
                     parseEND(s);
                     presetProgUnit();
                     continue;
+                case ENDDO:
+                    parseENDDO(s);
+                    break;
                 case ENDFILE:
                     break;
                 case ENDIF:
@@ -887,60 +892,112 @@ static void errArgType(OperatorId op, BaseType type, OperatorArgument *arg) {
 }
 
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset) {
+    BaseType coercedType;
+    int constraint;
     int d;
     int dim;
+    DataType *dt;
+    TokenListItem *qualifier;
     int rank;
+    Register reg;
+    u16 registerMap;
     OperatorArgument subscript;
     OperatorArgument sum;
+    BaseType type;
 
-    /*
-     *  Initialize sum with last subscript
-     */
-    rank = symbol->details.variable.dt.rank;
-    if (evaluateSubscript(symbol, subscriptList, rank - 1, &sum)) return TRUE;
+    dt = getSymbolType(symbol);
+    type = dt->type;
+    rank = dt->rank;
+    constraint = dt->constraint;
 
-    if (rank > 1) { // 2 or more dimensional array
-        for (d = rank - 2; d >= 0; d--) {
-            dim = (symbol->details.variable.dt.bounds[d].upper - symbol->details.variable.dt.bounds[d].lower) + 1;
-            if (isConstant(sum)) {
-                sum.details.constant.value.integer *= dim;
-            }
-            else {
-                emitMulOffset(sum.reg, dim);
-            }
-            if (evaluateSubscript(symbol, subscriptList, d, &subscript)) {
-                if (isCalculation(sum)) freeAddrReg(sum.reg);
+    if (symbol->class == SymClass_Adjustable) {
+        registerMap = getRegisterMap();
+        emitSaveRegs(registerMap);
+        for (d = rank - 1; d >= 0; d--) {
+            qualifier = getQualifier(subscriptList, d);
+            if (qualifier == NULL || qualifier->item == NULL || evaluateExpression(qualifier->item, &subscript)) {
+                err("Incorrect array index");
                 return TRUE;
             }
-            if (isConstant(sum)) {
-                if (isConstant(subscript)) {
-                    sum.details.constant.value.integer += subscript.details.constant.value.integer;
-                }
-                else {
-                    emitAddOffset(subscript.reg, sum.details.constant.value.integer);
-                    sum.reg = subscript.reg;
-                    sum.class = ArgClass_Calculation;
+            dt = getDataType(&subscript);
+            if (dt->type != BaseType_Integer) {
+                coercedType = coerceArgument(&subscript, dt->type, BaseType_Integer);
+                if (coercedType == BaseType_Undefined) {
+                    err("Incorrect subscript type");
+                    if (isCalculation(subscript)) freeRegister(subscript.reg);
+                    return TRUE;
                 }
             }
-            else if (isConstant(subscript)) {
-                emitAddOffset(sum.reg, subscript.details.constant.value.integer);
+            if (isConstant(subscript)) {
+                emitPushInt(subscript.details.constant.value.integer);
             }
             else {
-                emitAddOffsets(subscript.reg, sum.reg);
-                freeAddrReg(subscript.reg);
+                loadValue(&subscript);
+                emitPushReg(subscript.reg);
+                freeRegister(subscript.reg);
+            }
+        }
+        emitPushInt(rank);
+        reg = emitLoadAdjBoundsRef(symbol);
+        emitPushAddrReg(reg);
+        freeAddrReg(reg);
+        emitPrimCall("@_daryof");
+        reg = allocateAddrReg();
+        emitCopyAddrReg(reg, ADDR_RESULT_REG);
+        emitAdjustSP(rank + 2);
+        emitRestoreRegs(registerMap);
+        sum.class = ArgClass_Calculation;
+        sum.reg = reg;
+    }
+    else {
+        /*
+         *  Initialize sum with last subscript
+         */
+        if (evaluateSubscript(symbol, subscriptList, rank - 1, &sum)) return TRUE;
+
+        if (rank > 1) { // 2 or more dimensional array
+            for (d = rank - 2; d >= 0; d--) {
+                dim = (dt->bounds[d].upper - dt->bounds[d].lower) + 1;
+                if (isConstant(sum)) {
+                    sum.details.constant.value.integer *= dim;
+                }
+                else {
+                    emitMulOffset(sum.reg, dim);
+                }
+                if (evaluateSubscript(symbol, subscriptList, d, &subscript)) {
+                    if (isCalculation(sum)) freeAddrReg(sum.reg);
+                    return TRUE;
+                }
+                if (isConstant(sum)) {
+                    if (isConstant(subscript)) {
+                        sum.details.constant.value.integer += subscript.details.constant.value.integer;
+                    }
+                    else {
+                        emitAddOffset(subscript.reg, sum.details.constant.value.integer);
+                        sum.class = ArgClass_Calculation;
+                        sum.reg = subscript.reg;
+                    }
+                }
+                else if (isConstant(subscript)) {
+                    emitAddOffset(sum.reg, subscript.details.constant.value.integer);
+                }
+                else {
+                    emitAddOffsets(subscript.reg, sum.reg);
+                    freeAddrReg(subscript.reg);
+                }
             }
         }
     }
-    if (symbol->details.variable.dt.type == BaseType_Character) {
-        if (symbol->details.variable.dt.constraint == -1) {
+    if (type == BaseType_Character) {
+        if (constraint == -1) {
             if (isConstant(sum)) emitLoadConstOffset(&sum);
             emitMulSize(sum.reg, symbol);
         }
         else if (isConstant(sum)) {
-            sum.details.constant.value.integer *= symbol->details.variable.dt.constraint;
+            sum.details.constant.value.integer *= dt->constraint;
         }
         else {
-            emitMulOffset(sum.reg, symbol->details.variable.dt.constraint);
+            emitMulOffset(sum.reg, dt->constraint);
         }
     }
     *offset = sum;
@@ -983,7 +1040,7 @@ static bool evaluateExprHelper(Token *expression) {
         arg.class = ArgClass_Constant;
         arg.details.constant = expression->details.constant;
         if (expression->details.constant.dt.type == BaseType_Character) {
-            transferCharValue(&arg.details.constant.value, &expression->details.constant.value);
+            copyCharValue(&arg.details.constant.value, &expression->details.constant.value);
         }
         pushArg(&arg);
         break;
@@ -1224,6 +1281,7 @@ static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic) {
 
 static bool evaluateIdentifier(Token *id) {
     OperatorArgument arg;
+    DataType *dt;
     Symbol *intrinsic;
     char *name;
     OperatorArgument offset;
@@ -1284,9 +1342,11 @@ static bool evaluateIdentifier(Token *id) {
         }
     case SymClass_Auto:
     case SymClass_Static:
+    case SymClass_Adjustable:
     case SymClass_Global:
     case SymClass_Argument:
     case SymClass_Pointee:
+        dt = getSymbolType(symbol);
         arg.details.reference.symbol = symbol;
         if (id->details.identifier.qualifiers == NULL) {
             arg.details.reference.offsetClass = ArgClass_Undefined;
@@ -1296,7 +1356,7 @@ static bool evaluateIdentifier(Token *id) {
                 emitUpdateStringRef(&arg, &strOffset, &strLength);
             }
         }
-        else if (symbol->details.variable.dt.rank > 0) {
+        else if (dt->rank > 0) {
             if (evaluateArrayRef(symbol, id->details.identifier.qualifiers, &offset)) return TRUE;
             arg.details.reference.offsetClass = offset.class;
             switch (offset.class) {
@@ -1874,6 +1934,7 @@ static DataType *getDataType(OperatorArgument *arg) {
         return &arg->details.constant.dt;
     case ArgClass_Auto:
     case ArgClass_Static:
+    case ArgClass_Adjustable:
     case ArgClass_Global:
     case ArgClass_Argument:
     case ArgClass_Pointee:
@@ -2340,7 +2401,8 @@ static char *parseActualArguments(char *s, int *frameSize) {
 
     *frameSize = 0;
     tempIdx = 0;
-    start = s + 1;
+    start = eatWsp(s + 1);
+    if (*start == ')') return start + 1;
     enableEmission(FALSE);
     for (pass = 1; pass <= 2; pass++) {
         if (pass == 2) {
@@ -2872,15 +2934,28 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
 }
 
 static char *parseDimDecl(char *s, Symbol *symbol) {
+    DataType *bdt;
     DataType *dt;
+    int ec;
     Token *expression;
-    int lowerBound;
+    bool isAdjustable;
+    OperatorArgument lowerBound;
+    int rank;
     OperatorArgument result;
-    int upperBound;
+    char *start;
+    Token token;
+    OperatorArgument upperBound;
 
     dt = getSymbolType(symbol);
-    dt->rank = 0;
 
+    /*
+     *  Pass 1. Calculate rank and determine whether any bounds are adjustable
+     */
+    start = s;
+    rank = 0;
+    isAdjustable = FALSE;
+    ec = errorCount;
+    enableEmission(FALSE);
     for (;;) {
         if (*s == '*') {
             s = eatWsp(s + 1);
@@ -2896,10 +2971,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
                 err("Too many dimensions");
                 break;
             }
-            dt->bounds[dt->rank].lower = 1;
-            dt->bounds[dt->rank].upper = 0;
-            dt->rank += 1;
-            s += 1;
+            rank += 1;
             break;
         }
         s = parseExpression(s, &expression);
@@ -2907,63 +2979,146 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
             err("Invalid expression in dimension declaration");
             break;
         }
-        if (evaluateExpression(expression, &result) == FALSE) {
-            if (!isConstant(result) || result.details.constant.dt.type != BaseType_Integer) {
-                err("Dimension expression is not an integer constant");
+        if (evaluateExpression(expression, &result)) break;
+        if (!isConstant(result)) isAdjustable = TRUE;
+        if (isCalculation(result)) freeRegister(result.reg);
+        freeToken(expression);
+        s = eatWsp(s);
+        if (*s == ':') {
+            s = parseExpression(s + 1, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in dimension declaration");
+                break;
+            }
+            if (evaluateExpression(expression, &result)) break;
+            if (!isConstant(result)) isAdjustable = TRUE;
+            if (isCalculation(result)) freeRegister(result.reg);
+            freeToken(expression);
+        }
+        if (rank >= MAX_DIMENSIONS) {
+            err("Too many dimensions");
+            break;
+        }
+        rank += 1;
+        if (*s == ',') {
+            s = eatWsp(s + 1);
+        }
+        else if (*s == ')') {
+            break;
+        }
+        else {
+            err("Incorrect dimension declaration");
+            break;
+        }
+    }
+    enableEmission(TRUE);
+    freeAllRegisters();
+    if (errorCount > ec) return s;
+
+    if (isAdjustable) {
+        switch (symbol->class) {
+        case SymClass_Argument:
+            symbol->details.adjustable.argOffset = symbol->details.adjustable.offset;
+            // fall through
+        case SymClass_Undefined:
+        case SymClass_Auto:
+        case SymClass_Static:
+            symbol->class = SymClass_Adjustable;
+            break;
+        default:
+            err("Invalid adjustable array declaration: %s", symbol->identifier);
+            return s;
+        }
+        autoOffset -= (rank * 2) + 1;
+        symbol->details.adjustable.offset = autoOffset;
+    }
+
+    s = start;
+
+    /*
+     *  Pass 2. Evaluate bounds
+     */
+    dt->rank = rank;
+    rank = 0;
+    for (;;) {
+        if (*s == '*') {
+            s = eatWsp(s + 1);
+            if (*s == ')') s += 1;
+            if (isAdjustable) {
+                setIntegerArg(&lowerBound, 1);
+                loadValue(&lowerBound);
+                emitStoreFrame(lowerBound.reg, autoOffset + (rank * 2) + 1);
+                freeRegister(lowerBound.reg);
+                setIntegerArg(&upperBound, 0);
+                loadValue(&upperBound);
+                emitStoreFrame(upperBound.reg, autoOffset + (rank * 2) + 2);
+                freeRegister(upperBound.reg);
+            }
+            else {
+                dt->bounds[rank].lower = 1;
+                dt->bounds[rank].upper = 0;
+            }
+            break;
+        }
+        s = parseExpression(s, &expression);
+        if (evaluateExpression(expression, &upperBound)) {
+            freeToken(expression);
+            break;
+        }
+        freeToken(expression);
+        bdt = getDataType(&upperBound);
+        if (bdt->type != BaseType_Integer) {
+            err("Dimension expression is not integer");
+            if (isCalculation(upperBound)) freeRegister(upperBound.reg);
+            break;
+        }
+        s = eatWsp(s);
+        if (*s == ':') {
+            lowerBound = upperBound;
+            s = parseExpression(s + 1, &expression);
+            if (evaluateExpression(expression, &upperBound)) {
                 freeToken(expression);
                 break;
             }
-            lowerBound = 1;
-            upperBound = result.details.constant.value.integer;
             freeToken(expression);
-            s = eatWsp(s);
-            if (*s == ':') {
-                s = parseExpression(s + 1, &expression);
-                if (expression == NULL) {
-                    err("Invalid expression in dimension declaration");
-                    break;
-                }
-                if (evaluateExpression(expression, &result) == FALSE) {
-                    if (!isConstant(result) || result.details.constant.dt.type != BaseType_Integer) {
-                        err("Dimension expression is not an integer constant");
-                        freeToken(expression);
-                        break;
-                    }
-                    lowerBound = upperBound;
-                    upperBound = result.details.constant.value.integer;
-                    freeToken(expression);
-                }
-                else {
-                    break;
-                }
-            }
-            if (lowerBound > upperBound) {
-                err("Lower bound greater than upper bound in dimension declaration");
-                break;
-            }
-            if (dt->rank >= MAX_DIMENSIONS) {
-                err("Too many dimensions");
-                break;
-            }
-            dt->bounds[dt->rank].lower = lowerBound;
-            dt->bounds[dt->rank].upper = upperBound;
-            dt->rank += 1;
-            if (*s == ',') {
-                s = eatWsp(s + 1);
-            }
-            else if (*s == ')') {
-                s += 1;
-                break;
-            }
-            else {
-                err("Incorrect dimension declaration");
+            bdt = getDataType(&upperBound);
+            if (bdt->type != BaseType_Integer) {
+                err("Dimension expression is not an integer constant");
+                if (isCalculation(lowerBound)) freeRegister(lowerBound.reg);
+                if (isCalculation(upperBound)) freeRegister(upperBound.reg);
                 break;
             }
         }
         else {
-            freeToken(expression);
+            setIntegerArg(&lowerBound, 1);
+        }
+        if (isAdjustable) {
+            loadValue(&lowerBound);
+            emitStoreFrame(lowerBound.reg, autoOffset + (rank * 2) + 1);
+            freeRegister(lowerBound.reg);
+            loadValue(&upperBound);
+            emitStoreFrame(upperBound.reg, autoOffset + (rank * 2) + 2);
+            freeRegister(upperBound.reg);
+        }
+        else {
+            if (lowerBound.details.constant.value.integer > upperBound.details.constant.value.integer) {
+                err("Lower bound greater than upper bound in dimension declaration");
+                break;
+            }
+            dt->bounds[rank].lower = lowerBound.details.constant.value.integer;
+            dt->bounds[rank].upper = upperBound.details.constant.value.integer;
+        }
+        rank += 1;
+        if (*s == ',') {
+            s = eatWsp(s + 1);
+        }
+        else if (*s == ')') {
+            s += 1;
             break;
         }
+    }
+    if (isAdjustable) {
+        emitInitAdjustableRef(symbol);
     }
 
     return s;
@@ -3324,10 +3479,17 @@ static char *parseFormalArguments(char *s, bool isStmtFn) {
     int argIdx;
     char *id;
     Symbol *shadow;
+    char *start;
     Symbol *symbol;
     Token token;
 
     argIdx = 0;
+    s = eatWsp(s);
+    if (*s != '(') return s;
+    start = s;
+    s = eatWsp(s + 1);
+    if (*s == ')') return s + 1;
+    s = start;
     for (;;) {
         s = getNextToken(s + 1, &token, FALSE);
         if (token.type == TokenType_Identifier) {
@@ -4065,7 +4227,6 @@ static void parseStmtFunction(char *s, Token *id) {
     char qualifier[MAX_ID_LENGTH + 1];
     Symbol *parentUnitSym;
     OperatorArgument result;
-    char *start;
     Symbol *symbol;
 
     name = id->details.identifier.name;
@@ -4087,14 +4248,7 @@ static void parseStmtFunction(char *s, Token *id) {
     }
     strcpy(qualifier, getProgUnitQualifier());
     dt = &symbol->details.progUnit.dt;
-    start = s;
-    s = eatWsp(s + 1);
-    if (*s == ')') {
-        s += 1;
-    }
-    else {
-        s = parseFormalArguments(start, TRUE);
-    }
+    s = parseFormalArguments(s, TRUE);
     s = eatWsp(s);
     if (*s != '=') {
         err("Syntax");
@@ -4163,6 +4317,9 @@ static char *parseStorageReference(char *s, Token *id, StorageReference *referen
     case SymClass_Global:
     case SymClass_Argument:
         dt = &symbol->details.variable.dt;
+        break;
+    case SymClass_Adjustable:
+        dt = &symbol->details.adjustable.dt;
         break;
     case SymClass_Pointee:
         dt = &symbol->details.pointee.dt;
@@ -4473,8 +4630,9 @@ static void parseCALL(char *s) {
     s = eatWsp(s);
     if (*s == '(') {
         s = parseActualArguments(s, &frameSize);
+        s = eatWsp(s);
     }
-    else if (*s != '\0') {
+    if (*s != '\0') {
         err("Invalid CALL statement");
         return;
     }
@@ -4947,30 +5105,35 @@ static void parseDO(char *s) {
     int rank;
     Register reg;
     OperatorArgument result;
+    char *start;
     Symbol *sym;
     Token token;
     BaseType type;
 
+    start = s;
     s = getLabel(s, lineLabel);
-    if (s == NULL) {
-        err("Missing or invalid DO termination label");
-        return;
+    if (s != NULL) {
+        sym = findLabel(lineLabel);
+        if (sym == NULL) {
+            sym = addLabel(lineLabel);
+            sym->details.label.class = StmtClass_Do_Term;
+            sym->details.label.forwardRef = TRUE;
+        }
+        else if (sym->details.label.forwardRef == FALSE || sym->details.label.class != StmtClass_Do_Term) {
+            err("Invalid DO termination label");
+            return;
+        }
     }
-    sym = findLabel(lineLabel);
-    if (sym == NULL) {
-        sym = addLabel(lineLabel);
-        sym->details.label.class = StmtClass_Do_Term;
-        sym->details.label.forwardRef = TRUE;
-    }
-    else if (sym->details.label.forwardRef == FALSE || sym->details.label.class != StmtClass_Do_Term) {
-        err("Invalid DO termination label");
-        return;
+    else {
+        s = start;
+        sym = NULL;
     }
     if (doStackPtr >= MAX_DO_STACK_SIZE) {
         err("DO nested too deeply");
         return;
     }
     entry = &doStack[doStackPtr];
+    memset(entry, 0, sizeof(DoStackEntry));
     entry->termLabelSym = sym;
     generateLabel(entry->startLabel);
     generateLabel(entry->endLabel);
@@ -5180,11 +5343,20 @@ static void parseELSEIF(char *s) {
 }
 
 static void parseEND(char *s) {
+    DoStackEntry *entry;
 
     emitEpilog(progUnitSym, -autoOffset, staticOffset);
 
     if (ifStackPtr > 0) err("Missing ENDIF");
-    if (doStackPtr > 0) err("Missing DO termination label %s", doStack[doStackPtr - 1].termLabelSym->identifier);
+    if (doStackPtr > 0) {
+        entry = &doStack[doStackPtr - 1];
+        if (entry->termLabelSym != NULL) {
+            err("Missing DO termination label %s", entry->termLabelSym->identifier);
+        }
+        else {
+            err("Missing ENDDO");
+        }
+    }
 
     if (errorCount + warningCount > 0 && listingFile != NULL) fputs("\n\n", listingFile);
 
@@ -5199,6 +5371,33 @@ static void parseEND(char *s) {
     listSymbols();
     listSetPageEnd();
     freeAllSymbols();
+}
+
+static void parseENDDO(char *s) {
+    DoStackEntry *entry;
+    Register reg1;
+    Register reg2;
+
+    if (doStackPtr < 1) {
+        err("ENDDO without DO");
+        return;
+    }
+    for (;;) {
+        entry = &doStack[--doStackPtr];
+        if (entry->termLabelSym == NULL) break;
+        err("Missing DO termination label %s", entry->termLabelSym->identifier);
+        if (doStackPtr < 1) return;
+    }
+    reg1 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
+    reg2 = emitLoadFrame(entry->frameOffset + DO_INCREMENT);
+    emitAddReg(reg1, reg2, entry->loopVariableType);
+    emitStoreFrame(reg1, entry->frameOffset + DO_CURRENT);
+    emitDecrTrip(entry);
+    freeRegister(reg1);
+    freeRegister(reg2);
+    emitBranch(entry->startLabel);
+    emitLabel(entry->endLabel);
+    verifyEOS(s);
 }
 
 static void parseENDIF(char *s) {
@@ -5350,7 +5549,6 @@ static void parseFORMAT(char *s) {
 }
 
 static void parseFUNCTION(char *s, DataType *dt) {
-    char *start;
     Symbol *symbol;
     Token token;
 
@@ -5370,16 +5568,9 @@ static void parseFUNCTION(char *s, DataType *dt) {
     }
     s = eatWsp(s);
     if (*s == '(') {
-        start = s;
-        s = eatWsp(s + 1);
-        if (*s == ')') {
-            s += 1;
-        }
-        else {
-            s = parseFormalArguments(start, FALSE);
-        }
-        s = eatWsp(s);
+        s = parseFormalArguments(s, FALSE);
     }
+    s = eatWsp(s);
     if (*s != '\0') {
         err("Function declaration syntax");
     }
@@ -6262,8 +6453,8 @@ static void parseSUBROUTINE(char *s) {
     s = eatWsp(s);
     if (*s == '(') {
         s = parseFormalArguments(s, FALSE);
-        s = eatWsp(s);
     }
+    s = eatWsp(s);
     if (*s != '\0') {
         err("Subroutine declaration syntax");
     }
@@ -6403,7 +6594,6 @@ static void setIntegerArg(OperatorArgument *arg, int value) {
     arg->details.constant.dt.type = BaseType_Integer;
     arg->details.constant.dt.rank = 0;
     arg->details.constant.value.integer = value;
-
 }
 
 static void transferCharValue(DataValue *to, DataValue *from) {
@@ -6637,6 +6827,7 @@ static char *argClassToStr(ArgumentClass class) {
     case ArgClass_Function:    return "Function";
     case ArgClass_Auto:        return "Auto";
     case ArgClass_Static:      return "Static";
+    case ArgClass_Adjustable:  return "Adjustable";
     case ArgClass_Global:      return "Global";
     case ArgClass_Argument:    return "Argument";
     case ArgClass_Pointee:     return "Pointee";

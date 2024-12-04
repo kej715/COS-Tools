@@ -372,6 +372,13 @@ int calculateAutoOffsets(void) {
      */
     offset = 0;
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        if (symbol->class == SymClass_Adjustable && symbol->details.adjustable.isStorageAssigned == FALSE) {
+            symbol->details.adjustable.isStorageAssigned = TRUE;
+            offset += (symbol->details.adjustable.dt.rank * 2) + 1;
+        }
+    }
+    offset = offset << 3;
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
         if (symbol->class == SymClass_Auto
             && symbol->details.variable.isStorageAssigned == FALSE
             && symbol->details.variable.isSubordinate == FALSE) {
@@ -711,6 +718,7 @@ DataType *getSymbolType(Symbol *symbol) {
     case SymClass_Undefined:
     case SymClass_Auto:
     case SymClass_Static:
+    case SymClass_Adjustable:
     case SymClass_Global:
     case SymClass_Argument:
         return &symbol->details.variable.dt;

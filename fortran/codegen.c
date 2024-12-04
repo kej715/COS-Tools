@@ -41,7 +41,6 @@ static void emitFloat(double f);
 static void emitLoadPointer(Symbol *pointee, char *regName);
 static Register emitLoadStackAddr(int offset);
 static void emitPopAddrReg(Register reg);
-static void emitPushAddrReg(Register reg);
 static void normalizeLabel(char *label, char *result);
 
 static u8 addrRegMap = 0xE3;
@@ -399,6 +398,10 @@ void emitConvertToByteAddress(Register reg) {
     emit("         S%o        S%o<3\n", reg, reg);
 }
 
+void emitCopyAddrReg(Register r1, Register r2) {
+    emit("         A%o        A%o\n", r1, r2);
+}
+
 void emitCopyRegister(Register r1, Register r2) {
     emit("         S%o        S%o\n", r1, r2);
 }
@@ -706,6 +709,50 @@ void emitGtReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        0\n", rightArg->reg);
 }
 
+void emitInitAdjustableRef(Symbol *symbol) {
+    char buf[16];
+
+    sprintf(buf, "%d,A6", symbol->details.adjustable.offset);
+    if (symbol->details.adjustable.argOffset > 0) { // subprogram argument
+        emit("         S7        %d,A6\n", symbol->details.adjustable.argOffset);
+        emit("         %-9s S7\n", buf);
+    }
+    else { // dynamically allocated, local array
+        /*
+         *  Call runtime library function @_darysz to calculate array size.
+         *    Arguments:
+         *      A1 = address lower bound of first dimension
+         *      A2 = rank of array (number of dimensions)
+         *    Returns:
+         *      A1 = size of array (number of elements)
+         */
+        emit("         A1        %d\n", (-symbol->details.adjustable.offset) - 1);
+        emit("         A1        A6-A1\n");
+        emit("         A2        %d\n", symbol->details.adjustable.dt.rank);
+        emitPrimCall("@_darysz");
+        if (symbol->details.adjustable.dt.type == BaseType_Character) {
+            emit("         A2        %d\n", symbol->details.adjustable.dt.constraint);
+            emit("         A1        A1*A2\n");
+            emit("         A2        7\n");
+            emit("         A1        A1+A2\n");
+            emit("         S7        A1\n");
+            emit("         S7        S7>3\n");
+            emit("         A1        S7\n");
+            emit("         A7        A7-A1\n");    // reserve space on stack for array
+            emit("         S7        A7\n");       // convert to character reference
+            emit("         S7        S7<3\n");
+            emit("         S1        %d\n", symbol->details.adjustable.dt.constraint);
+            emit("         S1        S1<32\n");
+            emit("         S7        S7!S1\n");
+            emit("         %-9s S7\n", buf);
+        }
+        else {
+            emit("         A7        A7-A1\n");    // reserve space on stack for array
+            emit("         %-9s A7\n", buf);
+        }
+    }
+}
+
 void emitIntToReal(OperatorArgument *arg) {
     u16 mask;
 
@@ -794,6 +841,22 @@ void emitLeReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {
     emit("         S%o        <64\n", rightArg->reg);
     emit("         JSP       *+3\n");
     emit("         S%o        0\n", rightArg->reg);
+}
+
+Register emitLoadAdjBoundsRef(Symbol *symbol) {
+    Register reg;
+
+    reg = allocateAddrReg();
+    emit("         A1        %d\n", symbol->details.adjustable.offset + 1);
+    if (progUnitSym->class != SymClass_StmtFunction) {
+        emit("         A%o        A6+A1\n", reg);
+    }
+    else {
+        emit("         A%o        1,A6\n", reg);
+        emit("         A%o        A%o+A1\n", reg, reg);
+    }
+
+    return reg;
 }
 
 void emitLoadByteReference(OperatorArgument *subject, OperatorArgument *object) {
@@ -1016,6 +1079,18 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 exit(1);
             }
             break;
+        case SymClass_Adjustable:
+            if (progUnitSym->class != SymClass_StmtFunction) {
+                emit("         S%o        %d,A6\n", subject->reg, sym->details.adjustable.offset);
+            }
+            else {
+                emit("         A1        1,A6\n");
+                emit("         S%o        %d,A1\n", subject->reg, sym->details.adjustable.offset);
+            }
+            emit("         S7        A%o\n", subject->details.reference.offset.reg);
+            emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+            freeAddrReg(subject->details.reference.offset.reg);
+            break;
         case SymClass_Function:
             if (dt->constraint == -1) {
                 if (object == NULL) {
@@ -1222,6 +1297,18 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
                 exit(1);
             }
+            break;
+        case SymClass_Adjustable:
+            if (progUnitSym->class != SymClass_StmtFunction) {
+                emit("         S%o        %d,A6\n", subject->reg, sym->details.adjustable.offset);
+            }
+            else {
+                emit("         A1        1,A6\n");
+                emit("         S%o        %d,A1\n", subject->reg, sym->details.adjustable.offset);
+            }
+            emit("         S7        A%o\n", subject->details.reference.offset.reg);
+            emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+            freeAddrReg(subject->details.reference.offset.reg);
             break;
         case SymClass_Function:
             switch (subject->details.reference.offsetClass) {
@@ -1449,6 +1536,18 @@ void emitLoadValue(OperatorArgument *arg) {
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
                 exit(1);
             }
+            break;
+        case SymClass_Adjustable:
+            if (progUnitSym->class != SymClass_StmtFunction) {
+                emit("         A1        %d,A6\n", sym->details.adjustable.offset);
+            }
+            else {
+                emit("         A1        1,A6\n");
+                emit("         A1        %d,A1\n", sym->details.adjustable.offset);
+            }
+            emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
+            emit("         S%o        ,A1\n", arg->reg);
+            freeAddrReg(arg->details.reference.offset.reg);
             break;
         case SymClass_Function:
             switch (arg->details.reference.offsetClass) {
@@ -1742,9 +1841,15 @@ void emitProlog(Symbol *sym) {
     }
 }
 
-static void emitPushAddrReg(Register reg) {
+void emitPushAddrReg(Register reg) {
     emit("         A7        A7-1\n");
     emit("         ,A7       A%o\n", reg);
+}
+
+void emitPushInt(int value) {
+    emit("         A7        A7-1\n");
+    emit("         S7        %d\n", value);
+    emit("         ,A7       S7\n");
 }
 
 void emitPushReg(Register reg) {
@@ -1969,6 +2074,10 @@ void emitStoreReg(Symbol *sym, Register reg) {
         break;
     case SymClass_Argument:
         emit("         A1        %d,A6\n", sym->details.variable.offset);
+        emit("         ,A1       S%o\n", reg);
+        break;
+    case SymClass_Adjustable:
+        emit("         A1        %d,A6\n", sym->details.adjustable.offset);
         emit("         ,A1       S%o\n", reg);
         break;
     case SymClass_Function:

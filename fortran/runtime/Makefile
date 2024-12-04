@@ -35,22 +35,21 @@ HDRS = const.h \
        fmt.h   \
        units.h
 
-COBJS = catstr.o cmpstr.o cpystr.o fmt.o fmt2.o getstr.o units.o
-CALOBJS = fio.o
+IO_OBJS = catstr.o cmpstr.o cpystr.o fmt.o fmt2.o getstr.o units.o
 
 all: libio.lib librt.lib
 
 cos:
 	CC=ack AR=lib ARFLAGS="-o" $(MAKE)
 
-libio.a: $(COBJS)
+libio.a: $(IO_OBJS)
 	$(AR) $(ARFLAGS) $@ $+
 
-libio.lib: $(COBJS) $(CALOBJS)
+libio.lib: $(IO_OBJS) fio.o
 	$(AR) $(ARFLAGS) $@ $+
 
-librt.lib:
-	$(AR) $(ARFLAGS) $@ $(COSOBJS)
+librt.lib: daryof.o darysz.o
+	$(AR) $(ARFLAGS) $@ $+ $(COSOBJS)
 
 clean:
 	rm -f *.o *.lib *.a *.lst test
@@ -69,6 +68,12 @@ cmpstr.o: cmpstr.c $(HDRS)
 
 cpystr.o: cpystr.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
+
+daryof.o: daryof.cal
+	$(BINDIR)/cal -o daryof.o $<
+
+darysz.o: darysz.cal
+	$(BINDIR)/cal -o darysz.o $<
 
 fio.o:	fio.cal
 	$(BINDIR)/cal -t $(COSDIR)/systxt -o fio.o $<

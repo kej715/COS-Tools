@@ -28,9 +28,10 @@
 #include <stdio.h>
 #include "types.h"
 
-#define ALL_REG_MASK 0x7e
-#define NO_REG       ((Register)0)
-#define RESULT_REG   ((Register)7)
+#define ADDR_RESULT_REG  ((Register)1)
+#define ALL_REG_MASK     0x7e
+#define NO_REG           ((Register)0)
+#define RESULT_REG       ((Register)7)
 
 Register allocateAddrReg(void);
 Register allocateRegister(void);
@@ -55,6 +56,7 @@ void emitCalcTrip1(DoStackEntry *entry, BaseType type);
 void emitCalcTripNeg1(DoStackEntry *entry, BaseType type);
 void emitCatChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitConvertToByteAddress(Register reg);
+void emitCopyAddrReg(Register r1, Register r2);
 void emitCopyRegister(Register r1, Register r2);
 void emitCopyToOffset(Register r1, Register r2);
 void emitDeactivateQualifier(char *name);
@@ -88,9 +90,11 @@ void emitLabelDatum(char *label);
 void emitLabeledString(CharacterValue *cvp, char *label, bool hasZByte);
 Register emitLabelReference(Symbol *sym);
 void emitLeChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
+void emitInitAdjustableRef(Symbol *symbol);
 void emitLeInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLeLog(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitLeReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
+Register emitLoadAdjBoundsRef(Symbol *symbol);
 void emitLoadByteReference(OperatorArgument *subject, OperatorArgument *object);
 void emitLoadConst(OperatorArgument *arg);
 void emitLoadConstOffset(OperatorArgument *arg);
@@ -120,6 +124,8 @@ void emitOrInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitPrimCall(char *label);
 void emitPopReg(Register reg);
 void emitProlog(Symbol *sym);
+void emitPushAddrReg(Register reg);
+void emitPushInt(int value);
 void emitPushReg(Register reg);
 void emitRealToInt(OperatorArgument *arg);
 void emitRealToIntReg(Register arg);
