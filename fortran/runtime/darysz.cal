@@ -1,0 +1,42 @@
+         TITLE     'DARYSZ'
+         SUBTITLE  'Calculate Dynamic Array Size'
+         IDENT     DARYSZ
+         COMMENT   'DARYSZ - Calculate Dynamic Array Size'
+
+TEXT     SECTION   CODE
+
+**
+*  @%darysz - calculate dynamic array size
+*
+*  Entry:
+*    A1 - address of lower bound of first dimension
+*    A2 - array rank (number of dimensions)
+*
+*  Returns:
+*    A1 - array size (number of elements)
+*
+         ENTRY     @%darysz
+
+@%darysz BSS       0
+         B01       A5             ; save heap pointer
+         A3        1              ; initialize result
+
+dar1     A0        A2
+         JAZ       dar2           ; if all dimensions processed
+         A4        ,A1            ; get lower bound of dimension
+         A1        A1+1
+         A5        ,A1            ; get upper bound of dimension
+         A1        A1+1
+         A4        A5-A4          ; calculate size of dimension
+         A4        A4+1
+         A3        A3*A4          ; multiply result by size of dimension
+         A2        A2-1
+         j         dar1
+
+dar2     A5        B01            ; restore heap pointer
+         A1        A3             ; result to A1
+         J         B00            ; return
+
+         SECTION   *
+
+         END

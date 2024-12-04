@@ -1,0 +1,65 @@
+         TITLE     'DARYOF'
+         SUBTITLE  'Calculate Dynamic Array Offset'
+         IDENT     DARYOF
+         COMMENT   'DARYOF - Calculate Dynamic Array Offset'
+
+TEXT     SECTION   CODE
+
+**
+*  @%daryof - calculate dynamic array offset
+*
+*  Entry:
+*    (SP)   - address of array bounds list
+*    (SP+1) - array rank (number of dimensions)
+*    (SP+2) - most significant array subscript
+*      :
+*    (SP+n) - least significant array subscript
+*
+*  Returns:
+*    A1 - array offset
+*
+         ENTRY     @%daryof
+
+@%daryof BSS       0
+         B05       A5             ; save heap  pointer
+         B06       A6             ; save frame pointer
+         A6        ,A7            ; fetch address of array bounds list
+         A5        2              ; calculate address of subscript list
+         A5        A5+A7
+         A4        1,A7           ; fetch rank
+         A4        A4-1           ; index of last subscript
+         A5        A5+A4          ; address of last subscript
+         A3        A4             ; index of last bounds pair
+         A3        A3+A3
+         A6        A6+A3          ; address of last bounds pair
+*
+*        Initialize result from last subscript
+*
+         A3        ,A5            ; last subscript
+         A2        ,A6            ; last lower bound
+         A1        A3-A2
+
+dar1     A0        A4
+         JAZ       dar2           ; if all subscripts processed
+         A6        A6-1           ; calculate address of next bounds pair
+         A6        A6-1
+         A5        A5-1           ; address of next subscipt
+         A4        A4-1           ; count of subscripts remaining
+         A3        ,A6            ; lower bound
+         A2        1,A6           ; upper bound
+         A3        A2-A3          ; calculate size of dimension : (upper - lower) + 1
+         A3        A3+1
+         A1        A1*A3          ; result = result * ((upper - lower) + 1)
+         A3        ,A5            ; next subscript
+         A2        ,A6            ; lower bound
+         A3        A3-A2
+         A1        A1+A3          ; result = result * ((upper - lower) + 1) + (subscript - lower)
+         J         dar1
+
+dar2     A5        B05            ; restore heap  pointer
+         A6        B06            ; restore frame pointer
+         J         B00            ; return
+
+         SECTION   *
+
+         END
