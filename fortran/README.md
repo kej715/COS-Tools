@@ -146,7 +146,6 @@ The following code would load the second **row** of MATRIX into vector register 
 
 FORTRAN 77 features not yet implemented by _KFTC_ include:
 
-- Adjustable arrays
 - Implied DO loops
 - Direct access files
 - Alternate return points in SUBROUTINE and RETURN
