@@ -2178,6 +2178,8 @@ static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
     OperatorArgument r;
     OperatorArgument *result;
     OperatorArgument results[MAX_INTRINSIC_ARGS];
+    BaseType type;
+
     /*
      *  Assumption: on entry, code emission is disabled and allocated registers
      *  have been saved.
@@ -2207,9 +2209,9 @@ static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
             if (isCalculation(r)) freeRegister(r.reg);
             if (argc == 0) {
                 results[argc++] = r;
-                dt = getDataType(&r);
+                type = getDataType(&r)->type;
             }
-            else if (dt->type != getDataType(&r)->type) {
+            else if (type != getDataType(&r)->type) {
                 err("Inconsistent data types in call to intrinsic %s", name);
                 return NULL;
             }
@@ -2279,11 +2281,11 @@ static void parseArithmeticIF(char *s, Register reg) {
 }
 
 static void parseAssignment(char *s, Token *id) {
-    DataType *dt;
     Token *expression;
     bool isScalar;
     StorageReference reference;
     OperatorArgument result;
+    BaseType symType;
     OperatorArgument target;
 
     s = parseStorageReference(s, id, &reference);
@@ -2301,8 +2303,8 @@ static void parseAssignment(char *s, Token *id) {
         return;
     }
     if (evaluateExpression(expression, &result) == FALSE) {
-        dt = getSymbolType(reference.symbol);
-        if (coerceArgument(&result, getDataType(&result)->type, dt->type) == BaseType_Undefined) {
+        symType = getSymbolType(reference.symbol)->type;
+        if (coerceArgument(&result, getDataType(&result)->type, symType) == BaseType_Undefined) {
             err("Invalid type conversion");
             if (isCalculation(result)) freeRegister(result.reg);
             freeToken(expression);
@@ -3083,7 +3085,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
             freeToken(expression);
             bdt = getDataType(&upperBound);
             if (bdt->type != BaseType_Integer) {
-                err("Dimension expression is not an integer constant");
+                err("Dimension expression is not integer");
                 if (isCalculation(lowerBound)) freeRegister(lowerBound.reg);
                 if (isCalculation(upperBound)) freeRegister(upperBound.reg);
                 break;
@@ -3595,10 +3597,7 @@ static void parseInputList(char *s, ControlInfoList *ciList) {
             case BaseType_Double:
                 emitPrimCall("@_inpdbl");
                 break;
-/*  TODO
-            case BaseType_Complex:
-                break;
-*/
+            case BaseType_Complex: /* TODO */
             default:
                 err("Invalid data type of list-directed I/O element");
                 return;
@@ -4190,10 +4189,7 @@ static void parseOutputList(char *s, ControlInfoList *ciList) {
                 case BaseType_Double:
                     emitPrimCall("@_lstdbl");
                     break;
-/*  TODO
-                case BaseType_Complex:
-                    break;
-*/
+                case BaseType_Complex: /* TODO */
                 default:
                     err("Invalid data type of list-directed I/O element");
                     freeToken(expression);

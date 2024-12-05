@@ -714,6 +714,8 @@ Symbol *getSymbolRoot(void) {
 }
 
 DataType *getSymbolType(Symbol *symbol) {
+    static DataType intrinsicType;
+
     switch (symbol->class) {
     case SymClass_Undefined:
     case SymClass_Auto:
@@ -724,6 +726,10 @@ DataType *getSymbolType(Symbol *symbol) {
         return &symbol->details.variable.dt;
     case SymClass_Function:
         return &symbol->details.progUnit.dt;
+    case SymClass_Intrinsic:
+        memset(&intrinsicType, 0, sizeof(DataType));
+        intrinsicType.type = symbol->details.intrinsic.resultType;
+        return &intrinsicType;
     case SymClass_Parameter:
         return &symbol->details.param.dt;
     case SymClass_Pointee:
