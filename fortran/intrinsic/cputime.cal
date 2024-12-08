@@ -1,0 +1,30 @@
+         TITLE     'CPUTIME'
+         SUBTITLE  'Return Accumulated CPU Time'
+         IDENT     CPUTIME
+         COMMENT   'CPUTIME - Return Accumulated CPU Time'
+
+TEXT     SECTION   CODE
+
+F$JTI    =         O'027          ; Get accumulated job time
+
+**
+*  @%cputim - return accumulated job time
+*
+*  The unit of the returned value is seconds, expressed
+*  as a floating point number.
+*
+         ENTRY     @%cputim
+@%cputim BSS       0
+         S0        F$JTI
+         S1        cputime
+         EX 
+         S7        cputime,
+         J         B00
+
+         SECTION   *
+
+DATA     SECTION   DATA
+cputime  BSSZ      1
+         SECTION   *
+
+         END
