@@ -383,7 +383,7 @@ typedef struct reference {
     ArrayOffset offset;
 } Reference;
 
-typedef struct storageRefeerence {
+typedef struct storageReference {
     Symbol *symbol;
     TokenListItem *expressionList;
     StringRange *strRange;
@@ -414,6 +414,30 @@ typedef struct doStackEntry {
     BaseType loopVariableType;
     int frameOffset;
 } DoStackEntry;
+
+typedef enum ioListItemClass {
+    IoListClass_Expression = 0,
+    IoListClass_DoList
+} IoListItemClass;
+
+typedef union ioListItemDetails {
+    Token *expression;
+    struct impliedDoList *doList;
+} IoListItemDetails;
+
+typedef struct ioListItem {
+    struct ioListItem *next;
+    IoListItemClass class;
+    IoListItemDetails details;
+} IoListItem;
+
+typedef struct impliedDoList {
+    IoListItem *ioList;
+    Symbol *loopVariable;
+    Token *initExpression;
+    Token *limitExpression;
+    Token *incrExpression;
+} ImpliedDoList;
 
 typedef struct ifStackEntry {
     char blockEndLabel[8];

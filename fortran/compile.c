@@ -77,7 +77,9 @@ static void freeCloseInfoList(CloseInfoList *ciList);
 static void freeConstantList(ConstantListItem *list);
 static void freeControlInfoList(ControlInfoList *list);
 static void freeDataInitializerList(DataInitializerItem *list);
+static void freeImpliedDoList(ImpliedDoList *doList);
 static void freeInquireInfoList(InquireInfoList *iiList);
+static void freeIoList(IoListItem *ioList);
 static void freeOpenInfoList(OpenInfoList *oiList);
 static void freeStaticInitializers(void);
 static void freeStorageReference(StorageReference *reference);
@@ -114,10 +116,10 @@ static char *parseExpression(char *s, Token **expression);
 static char *parseExpressionList(char *s, TokenListItem **list);
 static char *parseFmtSpec(char *s, ControlInfoList *ciList);
 static char *parseFormalArguments(char *s, bool isStmtFn);
-static void parseInputList(char *s, ControlInfoList *ciList);
+static char *parseImpliedDo(char *s, Token *doVarId, ImpliedDoList *doList);
+static char *parseIoList(char *s, bool isWithinDo, IoListItem **ioList);
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf);
 static char *parseOpenInfoList(char *s, OpenInfoList **oiList);
-static void parseOutputList(char *s, ControlInfoList *ciList);
 static void parseOutputStmt(char *s, int unitNum);
 static void parseStmtFunction(char *s, Token *id);
 static char *parseStorageReference(char *s, Token *id, StorageReference *reference);
@@ -127,10 +129,13 @@ static void popArg(OperatorArgument *arg);
 static void popOp(OperatorDetails *op);
 static void presetImplicit(void);
 static void presetProgUnit(void); 
+static void processInputList(IoListItem *ioList, ControlInfoList *ciList);
+static void processOutputList(IoListItem *ioList, ControlInfoList *ciList);
 static void pushArg(OperatorArgument *arg);
 static void pushOp(OperatorDetails *op);
 static char *readLine(void);
 static void setIntegerArg(OperatorArgument *arg, int value);
+static bool setupImpliedDoList(ImpliedDoList *doList, DoStackEntry *entry);
 static void transferCharValue(DataValue *to, DataValue *from);
 static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList);
 static void verifyEOS(char *s);
@@ -401,7 +406,6 @@ void compile(char *name) {
     bool isDefn;
     char lineLabel[6];
     char *lp;
-    Register reg1, reg2;
     char *s;
     char *start;
     StatementClass stmtClass;
@@ -770,15 +774,7 @@ void compile(char *name) {
             }
             while (doStackPtr > 0 && currentLabel == doStack[doStackPtr - 1].termLabelSym) {
                 entry = &doStack[--doStackPtr];
-                reg1 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
-                reg2 = emitLoadFrame(entry->frameOffset + DO_INCREMENT);
-                emitAddReg(reg1, reg2, entry->loopVariableType);
-                emitStoreFrame(reg1, entry->frameOffset + DO_CURRENT);
-                emitDecrTrip(entry);
-                freeRegister(reg1);
-                freeRegister(reg2);
-                emitBranch(entry->startLabel);
-                emitLabel(entry->endLabel);
+                emitEndDo(entry);
             }
         }
     }
@@ -1833,6 +1829,16 @@ static void freeDataInitializerList(DataInitializerItem *list) {
     }
 }
 
+static void freeImpliedDoList(ImpliedDoList *doList) {
+    if (doList != NULL) {
+        if (doList->ioList          != NULL) freeIoList(doList->ioList);
+        if (doList->initExpression  != NULL) freeToken(doList->initExpression);
+        if (doList->limitExpression != NULL) freeToken(doList->limitExpression);
+        if (doList->incrExpression  != NULL) freeToken(doList->incrExpression);
+        free(doList);
+    }
+}
+
 static void freeInquireInfoList(InquireInfoList *iiList) {
    if (iiList != NULL) {
         if (iiList->unit != NULL) freeToken(iiList->unit);
@@ -1853,6 +1859,22 @@ static void freeInquireInfoList(InquireInfoList *iiList) {
         freeStorageReference(&iiList->nextRecRef);
         freeStorageReference(&iiList->iostat);
         free(iiList);
+    }
+}
+
+static void freeIoList(IoListItem *ioList) {
+    IoListItem *next;
+
+    while (ioList != NULL) {
+        if (ioList->class == IoListClass_Expression) {
+            freeToken(ioList->details.expression);
+        }
+        else {
+            freeImpliedDoList(ioList->details.doList);
+        }
+        next = ioList->next;
+        free(ioList);
+        ioList = next;
     }
 }
 
@@ -3552,71 +3574,75 @@ static char *parseFormalArguments(char *s, bool isStmtFn) {
     return s;
 }
 
-static void parseInputList(char *s, ControlInfoList *ciList) {
-    DataType *dt;
-    bool isScalar;
-    StorageReference reference;
-    Register reg;
-    OperatorArgument target;
+static char *parseImpliedDo(char *s, Token *doVarId, ImpliedDoList *doList) {
+    Token *expression;
+    char *name;
+    int rank;
+    char *start;
+    Symbol *sym;
     Token token;
+    BaseType type;
 
-    s = eatWsp(s);
-    if (*s == '\0') return;
+    name = doVarId->details.identifier.name;
+    sym = findSymbol(name);
+    if (sym == NULL) {
+        sym = addSymbol(name, SymClass_Undefined);
+    }
+    switch (sym->class) {
+    case SymClass_Undefined:
+        defineLocalVariable(sym);
+        /* fall through */
+    case SymClass_Auto:
+    case SymClass_Static:
+    case SymClass_Global:
+    case SymClass_Argument:
+        type = sym->details.variable.dt.type;
+        rank = sym->details.variable.dt.rank;
+        break;
+    case SymClass_Pointee:
+        type = sym->details.pointee.dt.type;
+        rank = sym->details.pointee.dt.rank;
+        break;
+    default:
+        type = BaseType_Undefined;
+        break;
+    }
+    if (type != BaseType_Integer || rank > 0) {
+        err("Invalid implied DO loop variable: %s", name);
+        return NULL;
+    }
+    doList->loopVariable = sym;
 
-    for (;;) {
-        s = getNextToken(s, &token, FALSE);
-        if (token.type != TokenType_Identifier) {
-            err("Input list item is not a variable");
-            return;
+    s = parseExpression(s, &expression);
+    if (expression == NULL) {
+        err("Invalid expression in implied DO");
+        return NULL;
+    }
+    doList->initExpression = expression;
+    if (*s != ',') {
+        err("Invalid implied DO syntax");
+        return NULL;
+    }
+    s = parseExpression(s + 1, &expression);
+    if (expression == NULL) {
+        err("Invalid expression in implied DO");
+        return NULL;
+    }
+    doList->limitExpression = expression;
+    if (*s == ',') {
+        s = parseExpression(s + 1, &expression);
+        if (expression == NULL) {
+            err("Invalid expression in implied DO");
+            return NULL;
         }
-        s = parseStorageReference(s, &token, &reference);
-        if (s == NULL) return;
-        if (evaluateStorageReference(&reference, &target, NULL, &isScalar)) {
-            freeStorageReference(&reference);
-            return;
-        }
-        freeStorageReference(&reference);
-        if (isCalculation(target) == FALSE) emitLoadReference(&target, NULL);
-        dt = getDataType(&target);
-        if (dt->type != BaseType_Character) emitConvertToByteAddress(target.reg);
-        emitStoreStack(target.reg, 1);
-        freeRegister(target.reg);
-        if (ciList->format == NULL) {
-            switch (dt->type) {
-            case BaseType_Character:
-                emitPrimCall("@_inpchr");
-                break;
-            case BaseType_Logical:
-                emitPrimCall("@_inplog");
-                break;
-            case BaseType_Integer:
-            case BaseType_Pointer:
-                emitPrimCall("@_inpint");
-                break;
-            case BaseType_Real:
-            case BaseType_Double:
-                emitPrimCall("@_inpdbl");
-                break;
-            case BaseType_Complex: /* TODO */
-            default:
-                err("Invalid data type of list-directed I/O element");
-                return;
-            }
-        }
-        else {
-            emitPrimCall("@_rdufmt");
-        }
-        s = eatWsp(s);
-        if (*s == '\0') {
-            break;
-        }
-        else if (*s == ',') {
-            s += 1;
-        }
-        else {
-            err("Input list syntax");
-            return;
-        }
+        doList->incrExpression = expression;
+    }
+    if (*s == ')') {
+        return s + 1;
+    }
+    else {
+        err("Invalid implied DO syntax");
+        return NULL;
     }
 }
 
@@ -3887,6 +3913,89 @@ static char *parseInquireInfoList(char *s, InquireInfoList **iiList) {
     }
 }
 
+static char *parseIoList(char *s, bool isWithinDo, IoListItem **ioList) {
+    IoListItem *currentItem;
+    ImpliedDoList *doList;
+    Token *expression;
+    IoListItem *firstItem;
+    IoListItem *lastItem;
+    char *start;
+    Token token;
+
+    *ioList   = NULL;
+    firstItem = NULL;
+    lastItem  = NULL;
+    s = eatWsp(s);
+    if (*s == '\0') return s;
+
+    for (;;) {
+        if (*s == '(') {
+            s = parseIoList(s + 1, TRUE, &currentItem);
+            if (s == NULL) {
+                freeIoList(firstItem);
+                return NULL;
+            }
+        }
+        else {
+            if (isWithinDo) {
+                start = s;
+                s = getNextToken(s, &token, FALSE);
+                if (token.type == TokenType_Identifier && *s == '=') { // start of implied DO
+                    doList = (ImpliedDoList *)allocate(sizeof(ImpliedDoList));
+                    s = parseImpliedDo(s + 1, &token, doList);
+                    doList->ioList = firstItem;
+                    if (s == NULL) {
+                        freeImpliedDoList(doList);
+                        return NULL;
+                    }
+                    currentItem = (IoListItem *)allocate(sizeof(IoListItem));
+                    currentItem->class = IoListClass_DoList;
+                    currentItem->details.doList = doList;
+                    *ioList = currentItem;
+                    return s;
+                }
+                s = start;
+            }
+            s = parseExpression(s, &expression);
+            if (expression == NULL) {
+                err("Expression syntax");
+                freeIoList(firstItem);
+                return NULL;
+            }
+            currentItem = (IoListItem *)allocate(sizeof(IoListItem));
+            currentItem->class = IoListClass_Expression;
+            currentItem->details.expression = expression;
+        }
+        if (lastItem == NULL) {
+            firstItem = currentItem;
+        }
+        else {
+            lastItem->next = currentItem;
+        }
+        lastItem = currentItem;
+        s = eatWsp(s);
+        if (*s == '\0') {
+            break;
+        }
+        else if (*s == ',') {
+            s = eatWsp(s + 1);
+        }
+        else if (*s == ')' && isWithinDo && firstItem == lastItem) {
+            *ioList = firstItem;
+            return s + 1;
+        }
+        else {
+            err("Syntax");
+            freeIoList(firstItem);
+            return NULL;
+        }
+    }
+
+    *ioList = firstItem;
+
+    return s;
+}
+
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
     IfStackEntry *entry;
     bool hasError;
@@ -4151,68 +4260,6 @@ static char *parseOpenInfoList(char *s, OpenInfoList **oiList) {
     }
     else {
         return s + 1;
-    }
-}
-
-static void parseOutputList(char *s, ControlInfoList *ciList) {
-    DataType *dt;
-    Token *expression;
-    OperatorArgument result;
-
-    s = eatWsp(s);
-    if (*s == '\0') return;
-
-    for (;;) {
-        s = parseExpression(s, &expression);
-        if (expression == NULL) {
-            err("Expression syntax");
-            return;
-        }
-        if (evaluateExpression(expression, &result) == FALSE) {
-            loadValue(&result);
-            emitStoreStack(result.reg, 1);
-            freeRegister(result.reg);
-            if (ciList->format == NULL) {
-                dt = getDataType(&result);
-                switch (dt->type) {
-                case BaseType_Character:
-                    emitPrimCall("@_lstchr");
-                    break;
-                case BaseType_Logical:
-                    emitPrimCall("@_lstlog");
-                    break;
-                case BaseType_Integer:
-                case BaseType_Pointer:
-                    emitPrimCall("@_lstint");
-                    break;
-                case BaseType_Real:
-                case BaseType_Double:
-                    emitPrimCall("@_lstdbl");
-                    break;
-                case BaseType_Complex: /* TODO */
-                default:
-                    err("Invalid data type of list-directed I/O element");
-                    freeToken(expression);
-                    return;
-                }
-            }
-            else {
-                emitPrimCall("@_wrufmt");
-                outputCheckIostat(ciList);
-            }
-        }
-        freeToken(expression);
-        s = eatWsp(s);
-        if (*s == '\0') {
-            break;
-        }
-        else if (*s == ',') {
-            s += 1;
-        }
-        else {
-            err("Output list syntax");
-            return;
-        }
     }
 }
 
@@ -5095,8 +5142,13 @@ static void parseDO(char *s) {
     DoStackEntry *entry;
     Token *expression;
     char *id;
+    int initValue;
     bool isIncr1;
     bool isIncrNeg1;
+    bool isIntConstInit;
+    bool isIntConstLimit;
+    OperatorArgument limit;
+    int limitValue;
     char lineLabel[8];
     int rank;
     Register reg;
@@ -5194,6 +5246,8 @@ static void parseDO(char *s) {
     autoOffset -= DO_FRAME_SIZE;
     entry->frameOffset = autoOffset;
 
+    isIntConstInit = isIntegerConstant(result);
+    if (isIntConstInit) initValue = result.details.constant.value.integer;
     loadValue(&result);
     emitStoreFrame(result.reg, entry->frameOffset + DO_CURRENT);
     freeRegister(result.reg);
@@ -5210,16 +5264,22 @@ static void parseDO(char *s) {
         err("Expression syntax");
         return;
     }
-    if (evaluateExpression(expression, &result)) {
+    if (evaluateExpression(expression, &limit)) {
         freeToken(expression);
         return;
     }
-    if (coerceArgument(&result, getDataType(&result)->type, type) == BaseType_Undefined) {
+    if (coerceArgument(&limit, getDataType(&limit)->type, type) == BaseType_Undefined) {
         err("Invalid type conversion");
     }
-    loadValue(&result);
-    emitStoreFrame(result.reg, entry->frameOffset + DO_TRIP_COUNT);
-    freeRegister(result.reg);
+    isIntConstLimit = isIntegerConstant(limit);
+    if (isIntConstLimit) {
+        limitValue = limit.details.constant.value.integer;
+    }
+    else {
+        loadValue(&limit);
+        emitStoreFrame(limit.reg, entry->frameOffset + DO_TRIP_COUNT);
+        freeRegister(limit.reg);
+    }
     /*
      *  Parse increment value, if provided
      */
@@ -5238,7 +5298,6 @@ static void parseDO(char *s) {
     else {
         setIntegerArg(&result, 1);
     }
-
     isIncr1 = (isIntegerConstant(result) && result.details.constant.value.integer == 1)
         || (isRealConstant(result) && result.details.constant.value.real == 1.0);
     isIncrNeg1 = (isIntegerConstant(result) && result.details.constant.value.integer == -1)
@@ -5247,14 +5306,30 @@ static void parseDO(char *s) {
     if (coerceArgument(&result, getDataType(&result)->type, type) == BaseType_Undefined) {
         err("Invalid type conversion");
     }
+    if (((isIncr1 == FALSE && isIncrNeg1 == FALSE) || isIntConstInit == FALSE || isRealConstant(result)) && isIntConstLimit) {
+        loadValue(&limit);
+        emitStoreFrame(limit.reg, entry->frameOffset + DO_TRIP_COUNT);
+        freeRegister(limit.reg);
+        isIntConstLimit = FALSE;
+    }
     loadValue(&result);
     emitStoreFrame(result.reg, entry->frameOffset + DO_INCREMENT);
     freeRegister(result.reg);
     if (isIncr1) {
-        emitCalcTrip1(entry, type);
+        if (isIntConstLimit && isIntConstInit) {
+            emitStoreFrameInt((limitValue - initValue) + 1, entry->frameOffset + DO_TRIP_COUNT);
+        }
+        else {
+            emitCalcTrip1(entry, type);
+        }
     }
     else if (isIncrNeg1) {
-        emitCalcTripNeg1(entry, type);
+        if (isIntConstLimit && isIntConstInit) {
+            emitStoreFrameInt((initValue - limitValue) + 1, entry->frameOffset + DO_TRIP_COUNT);
+        }
+        else {
+            emitCalcTripNeg1(entry, type);
+        }
     }
     else {
         emitCalcTrip(entry, type);
@@ -5371,8 +5446,6 @@ static void parseEND(char *s) {
 
 static void parseENDDO(char *s) {
     DoStackEntry *entry;
-    Register reg1;
-    Register reg2;
 
     if (doStackPtr < 1) {
         err("ENDDO without DO");
@@ -5384,15 +5457,7 @@ static void parseENDDO(char *s) {
         err("Missing DO termination label %s", entry->termLabelSym->identifier);
         if (doStackPtr < 1) return;
     }
-    reg1 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
-    reg2 = emitLoadFrame(entry->frameOffset + DO_INCREMENT);
-    emitAddReg(reg1, reg2, entry->loopVariableType);
-    emitStoreFrame(reg1, entry->frameOffset + DO_CURRENT);
-    emitDecrTrip(entry);
-    freeRegister(reg1);
-    freeRegister(reg2);
-    emitBranch(entry->startLabel);
-    emitLabel(entry->endLabel);
+    emitEndDo(entry);
     verifyEOS(s);
 }
 
@@ -5949,6 +6014,7 @@ static void parseINTRINSIC(char *s) {
 
 static void parseOutputStmt(char *s, int unitNum) {
     ControlInfoList *ciList;
+    IoListItem *ioList;
     OperatorArgument unit;
 
     ciList = (ControlInfoList *)allocate(sizeof(ControlInfoList));
@@ -5963,10 +6029,14 @@ static void parseOutputStmt(char *s, int unitNum) {
         freeControlInfoList(ciList);
         return;
     }
-    ciList->unit = createIntegerConstant(unitNum);
-    outputInit(ciList);
-    parseOutputList(s + 1, ciList);
-    outputFini(ciList);
+    s = parseIoList(s + 1, FALSE, &ioList);
+    if (s != NULL) {
+        ciList->unit = createIntegerConstant(unitNum);
+        outputInit(ciList);
+        processOutputList(ioList, ciList);
+        freeIoList(ioList);
+        outputFini(ciList);
+    }
     freeControlInfoList(ciList);
 }
 
@@ -6307,6 +6377,7 @@ static void parsePUNCH(char *s) {
 
 static void parseREAD(char *s) {
     ControlInfoList *ciList;
+    IoListItem *ioList;
 
     s = eatWsp(s);
     if (*s == '(') {
@@ -6329,9 +6400,13 @@ static void parseREAD(char *s) {
         s = eatWsp(s + 1);
         ciList->unit = createIntegerConstant(DEFAULT_INPUT_UNIT);
     }
-    inputInit(ciList);
-    parseInputList(s, ciList);
-    inputFini(ciList);
+    s = parseIoList(s + 1, FALSE, &ioList);
+    if (s != NULL) {
+        inputInit(ciList);
+        processInputList(ioList, ciList);
+        freeIoList(ioList);
+        inputFini(ciList);
+    }
     freeControlInfoList(ciList);
 }
 
@@ -6458,6 +6533,7 @@ static void parseSUBROUTINE(char *s) {
 
 static void parseWRITE(char *s) {
     ControlInfoList *ciList;
+    IoListItem *ioList;
 
     s = eatWsp(s);
     if (*s != '(') {
@@ -6466,9 +6542,13 @@ static void parseWRITE(char *s) {
     }
     s = parseControlInfoList(s, &ciList, DEFAULT_OUTPUT_UNIT);
     if (s == NULL) return;
-    outputInit(ciList);
-    parseOutputList(s, ciList);
-    outputFini(ciList);
+    s = parseIoList(s, FALSE, &ioList);
+    if (s != NULL) {
+        outputInit(ciList);
+        processOutputList(ioList, ciList);
+        freeIoList(ioList);
+        outputFini(ciList);
+    }
     freeControlInfoList(ciList);
 }
 
@@ -6518,6 +6598,149 @@ static void presetProgUnit(void) {
     staticOffset   = 0;
     resetCommonBlocks();
     presetImplicit();
+}
+
+static void processInputList(IoListItem *ioList, ControlInfoList *ciList) {
+    ImpliedDoList *doList;
+    DataType *dt;
+    DoStackEntry entry;
+    Token *expression;
+    bool isScalar;
+    char *name;
+    StorageReference reference;
+    OperatorArgument result;
+    Symbol *symbol;
+    OperatorArgument target;
+
+    while (ioList != NULL) {
+        doList = NULL;
+        if (ioList->class == IoListClass_DoList) {
+            doList = ioList->details.doList;
+            if (setupImpliedDoList(doList, &entry)) break;
+            processInputList(doList->ioList, ciList);
+            emitEndDo(&entry);
+        }
+        else {
+            expression = ioList->details.expression;
+            if (expression->type != TokenType_Identifier) {
+                err("Invalid expression in input list");
+                return;
+            }
+            name = expression->details.identifier.name;
+            symbol = findSymbol(name);
+            if (symbol == NULL) {
+                symbol = addSymbol(name, SymClass_Undefined);
+            }
+            switch (symbol->class) {
+            case SymClass_Undefined:
+                defineLocalVariable(symbol);
+                /* fall through */
+            case SymClass_Auto:
+            case SymClass_Static:
+            case SymClass_Global:
+            case SymClass_Argument:
+            case SymClass_Adjustable:
+            case SymClass_Pointee:
+                break;
+            case SymClass_Function:
+                if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
+                    symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
+                    autoOffset -= calculateSize(symbol);
+                    symbol->details.progUnit.offset = autoOffset;
+                }
+                break;
+            default:
+                err("Invalid storage reference to %s", name);
+                return;
+            }
+            reference.symbol = symbol;
+            reference.expressionList = expression->details.identifier.qualifiers;
+            reference.strRange = expression->details.identifier.range;
+            if (evaluateStorageReference(&reference, &target, NULL, &isScalar)) return;
+            if (isCalculation(target) == FALSE) emitLoadReference(&target, NULL);
+            dt = getDataType(&target);
+            if (dt->type != BaseType_Character) emitConvertToByteAddress(target.reg);
+            emitStoreStack(target.reg, 1);
+            freeRegister(target.reg);
+            if (ciList->format == NULL) {
+                switch (dt->type) {
+                case BaseType_Character:
+                    emitPrimCall("@_inpchr");
+                    break;
+                case BaseType_Logical:
+                    emitPrimCall("@_inplog");
+                    break;
+                case BaseType_Integer:
+                case BaseType_Pointer:
+                    emitPrimCall("@_inpint");
+                    break;
+                case BaseType_Real:
+                case BaseType_Double:
+                    emitPrimCall("@_inpdbl");
+                    break;
+                case BaseType_Complex: /* TODO */
+                default:
+                    err("Invalid data type of list-directed I/O element");
+                    return;
+                }
+            }
+            else {
+                emitPrimCall("@_rdufmt");
+            }
+        }
+        ioList = ioList->next;
+    }
+}
+
+static void processOutputList(IoListItem *ioList, ControlInfoList *ciList) {
+    ImpliedDoList *doList;
+    DataType *dt;
+    DoStackEntry entry;
+    OperatorArgument result;
+
+    while (ioList != NULL) {
+        doList = NULL;
+        if (ioList->class == IoListClass_DoList) {
+            doList = ioList->details.doList;
+            if (setupImpliedDoList(doList, &entry)) break;
+            processOutputList(doList->ioList, ciList);
+            emitEndDo(&entry);
+        }
+        else {
+            if (evaluateExpression(ioList->details.expression, &result)) return;
+            loadValue(&result);
+            emitStoreStack(result.reg, 1);
+            freeRegister(result.reg);
+            if (ciList->format == NULL) {
+                dt = getDataType(&result);
+                switch (dt->type) {
+                case BaseType_Character:
+                    emitPrimCall("@_lstchr");
+                    break;
+                case BaseType_Logical:
+                    emitPrimCall("@_lstlog");
+                    break;
+                case BaseType_Integer:
+                case BaseType_Pointer:
+                    emitPrimCall("@_lstint");
+                    break;
+                case BaseType_Real:
+                case BaseType_Double:
+                    emitPrimCall("@_lstdbl");
+                    break;
+                case BaseType_Complex: /* TODO */
+                default:
+                    err("Invalid data type of list-directed I/O element");
+                    return;
+                }
+            }
+            else {
+                emitPrimCall("@_wrufmt");
+                outputCheckIostat(ciList);
+            }
+        }
+        ioList = ioList->next;
+    }
 }
 
 static void pushArg(OperatorArgument *arg) {
@@ -6590,6 +6813,107 @@ static void setIntegerArg(OperatorArgument *arg, int value) {
     arg->details.constant.dt.type = BaseType_Integer;
     arg->details.constant.dt.rank = 0;
     arg->details.constant.value.integer = value;
+}
+
+static bool setupImpliedDoList(ImpliedDoList *doList, DoStackEntry *entry) {
+    int initValue;
+    bool isConstInit;
+    bool isConstLimit;
+    bool isIncr1;
+    bool isIncrNeg1;
+    OperatorArgument limit;
+    int limitValue;
+    Register reg;
+    OperatorArgument result;
+
+    memset(entry, 0, sizeof(DoStackEntry));
+    entry->loopVariable = doList->loopVariable;
+    entry->loopVariableType = BaseType_Integer;
+    generateLabel(entry->startLabel);
+    generateLabel(entry->endLabel);
+    /*
+     *  Evaluate initial value
+     */
+    if (evaluateExpression(doList->initExpression, &result)) return TRUE;
+    if (getDataType(&result)->type != BaseType_Integer) {
+        err("Initial value of implied DO is not integer");
+        return TRUE;
+    }
+    autoOffset -= DO_FRAME_SIZE;
+    entry->frameOffset = autoOffset;
+    isConstInit = isConstant(result);
+    if (isConstInit) initValue = result.details.constant.value.integer;
+    loadValue(&result);
+    emitStoreFrame(result.reg, entry->frameOffset + DO_CURRENT);
+    freeRegister(result.reg);
+    /*
+     *  Evaluate limit value
+     */
+    if (evaluateExpression(doList->limitExpression, &limit)) return TRUE;
+    if (getDataType(&result)->type != BaseType_Integer) {
+        err("Limit value of implied DO is not integer");
+        return TRUE;
+    }
+    isConstLimit = isConstant(limit);
+    if (isConstLimit) {
+        limitValue = limit.details.constant.value.integer;
+    }
+    else {
+        loadValue(&limit);
+        emitStoreFrame(limit.reg, entry->frameOffset + DO_TRIP_COUNT);
+        freeRegister(limit.reg);
+    }
+    /*
+     *  Evaluate increment value, if provided
+     */
+    if (doList->incrExpression != NULL) {
+        if (evaluateExpression(doList->incrExpression, &result)) return TRUE;
+        if (getDataType(&result)->type != BaseType_Integer) {
+            if (isCalculation(limit)) freeRegister(limit.reg);
+            err("Increment value of implied DO is not integer");
+            return TRUE;
+        }
+    }
+    else {
+        setIntegerArg(&result, 1);
+    }
+    isIncr1    = isConstant(result) && result.details.constant.value.integer == 1;
+    isIncrNeg1 = isConstant(result) && result.details.constant.value.integer == -1;
+    if (((isIncr1 == FALSE && isIncrNeg1 == FALSE) || isConstInit == FALSE) && isConstLimit) {
+        loadValue(&limit);
+        emitStoreFrame(limit.reg, entry->frameOffset + DO_TRIP_COUNT);
+        freeRegister(limit.reg);
+        isConstLimit = FALSE;
+    }
+    loadValue(&result);
+    emitStoreFrame(result.reg, entry->frameOffset + DO_INCREMENT);
+    freeRegister(result.reg);
+    if (isIncr1) {
+        if (isConstLimit && isConstInit) {
+            emitStoreFrameInt((limitValue - initValue) + 1, entry->frameOffset + DO_TRIP_COUNT);
+        }
+        else {
+            emitCalcTrip1(entry, BaseType_Integer);
+        }
+    }
+    else if (isIncrNeg1) {
+        if (isConstLimit && isConstInit) {
+            emitStoreFrameInt((initValue - limitValue) + 1, entry->frameOffset + DO_TRIP_COUNT);
+        }
+        else {
+            emitCalcTripNeg1(entry, BaseType_Integer);
+        }
+    }
+    else {
+        emitCalcTrip(entry, BaseType_Integer);
+    }
+    emitLabel(entry->startLabel);
+    reg = emitLoadFrame(entry->frameOffset + DO_CURRENT);
+    emitStoreReg(entry->loopVariable, reg);
+    freeRegister(reg);
+    emitBranchIfEndTrips(entry);
+
+    return FALSE;
 }
 
 static void transferCharValue(DataValue *to, DataValue *from) {

@@ -67,6 +67,7 @@ void emitDivIntReg(Register leftArg, Register rightArg);
 void emitDivReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitDivRealReg(Register leftArg, Register rightArg);
 void emitEnd(void);
+void emitEndDo(DoStackEntry *entry);
 void emitEpilog(Symbol *sym, int frameSize, int staticDataSize);
 void emitEqChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitEqInt(OperatorArgument *leftArg, OperatorArgument *rightArg);
@@ -136,6 +137,7 @@ void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList)
 void emitStoreArg(Symbol *sym, OperatorArgument *arg);
 void emitStoreByReference(OperatorArgument *target, OperatorArgument *value);
 void emitStoreFrame(Register reg, int offset);
+void emitStoreFrameInt(int value, int offset);
 void emitStoreParmAddr(int tempIdx, int parmIdx);
 void emitStoreReg(Symbol *sym, Register reg);
 void emitStoreRegByReference(OperatorArgument *target, Register reg);

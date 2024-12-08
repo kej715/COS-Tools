@@ -91,6 +91,7 @@ static void outfmtHelper(void *value, int doEndOnRep, int *eor);
 static char *parseFloat(char *s, char *limit, f64 *value);
 static char *parseInteger(char *s, char *limit, i64 *value);
 static char *prsfmtHelper(char *s, char *limit, FormatDesc **list);
+static void resetIterations(FormatDesc *fdp);
 static void showWhere(char *fmt, char *cursor, char *limit);
 
 void _endfmt(void) {
@@ -163,6 +164,7 @@ void _inpfmt(void *value) {
             }
             else {
                 nextDesc = revertDesc;
+                resetIterations(nextDesc);
             }
             continue;
         }
@@ -243,6 +245,7 @@ void _inpfmt(void *value) {
             return;
         case Fmt_Embedded:
             nextDesc = nextDesc->child;
+            resetIterations(nextDesc);
             break;
         case Fmt_Nospace:
         case Fmt_S:
@@ -985,11 +988,12 @@ static void outfmtHelper(void *value, int doEndOnRep, int *eor) {
             else if (nextDesc->parent != NULL) {
                 nextDesc = nextDesc->parent;
             }
-            else if (doEndOnRep == 0) {
-                nextDesc = revertDesc;
+            else if (doEndOnRep) {
+                return;
             }
             else {
-                return;
+                nextDesc = revertDesc;
+                resetIterations(nextDesc);
             }
             continue;
         }
@@ -1090,6 +1094,7 @@ static void outfmtHelper(void *value, int doEndOnRep, int *eor) {
             break;
         case Fmt_Embedded:
             nextDesc = nextDesc->child;
+            resetIterations(nextDesc);
             break;
         default:
             break;
@@ -1440,6 +1445,18 @@ static char *prsfmtHelper(char *s, char *limit, FormatDesc **list) {
         s = eatWsp(s, limit);
         if (s < limit && *s == ',') {
             s += 1;
+        }
+    }
+}
+
+static void resetIterations(FormatDesc *fdp) {
+    FormatDesc *next;
+
+    if (fdp != NULL) {
+        fdp->currentIteration = 0;
+        resetIterations(fdp->child);
+        for (next = fdp->sibling; next != NULL; next = next->sibling) {
+            resetIterations(next);
         }
     }
 }

@@ -465,6 +465,21 @@ void emitEnd(void) {
     emit("         END\n");
 }
 
+void emitEndDo(DoStackEntry *entry) {
+    Register reg1;
+    Register reg2;
+
+    reg1 = emitLoadFrame(entry->frameOffset + DO_CURRENT);
+    reg2 = emitLoadFrame(entry->frameOffset + DO_INCREMENT);
+    emitAddReg(reg1, reg2, entry->loopVariableType);
+    emitStoreFrame(reg1, entry->frameOffset + DO_CURRENT);
+    emitDecrTrip(entry);
+    freeRegister(reg1);
+    freeRegister(reg2);
+    emitBranch(entry->startLabel);
+    emitLabel(entry->endLabel);
+}
+
 void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
     if (sym->class != SymClass_BlockData) {
         emitLabel(sym->details.progUnit.exitLabel);
@@ -2038,6 +2053,14 @@ void emitStoreFrame(Register reg, int offset) {
 
     sprintf(buf, "%d,A6", offset);
     emit("         %-9s S%o\n", buf, reg);
+}
+
+void emitStoreFrameInt(int value, int offset) {
+    char buf[16];
+
+    emit("         S7        %d\n", value);
+    sprintf(buf, "%d,A6", offset);
+    emit("         %-9s S7\n", buf);
 }
 
 void emitStoreParmAddr(int tempIdx, int parmIdx) {

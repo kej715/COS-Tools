@@ -103,10 +103,8 @@ upon, and store registers, as in:
      &             VLOAD(V2, 1, A2)),  ! load register V2 from array A2
      &      1, A3)                     ! store register V3 in array A3
 
-      DO 200 I = 0, 63, 8
-        PRINT '(1X,8F8.3)',A3(I+1),A3(I+2),A3(I+3),A3(I+4),
-     &                     A3(I+5),A3(I+6),A3(I+7),A3(I+8)
- 200  CONTINUE
+      PRINT '(8(1X,8F8.3,/))', (A3(I), I = 1, 64)
+      
       END
 ```
 This program sets the vector length to 64 (the full length of a Cray X-MP vector register),
@@ -146,7 +144,7 @@ The following code would load the second **row** of MATRIX into vector register 
 
 FORTRAN 77 features not yet implemented by _KFTC_ include:
 
-- Implied DO loops
+- Implied DO loops in DATA statements (implied DO in I/O statements *is* supported)
 - Direct access files
 - Alternate return points in SUBROUTINE and RETURN
 - EXTERNAL

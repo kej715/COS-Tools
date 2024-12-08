@@ -232,4 +232,5 @@ static void usage(void) {
     fputs("  -s        - echo source code lines to output file\n", stderr);
     fputs("  sfile     - FORTRAN source code file\n", stderr);
 #endif
+    exit(1);
 }
