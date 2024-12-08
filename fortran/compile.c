@@ -2975,6 +2975,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
     /*
      *  Pass 1. Calculate rank and determine whether any bounds are adjustable
      */
+    s = eatWsp(s);
     start = s;
     rank = 0;
     isAdjustable = FALSE;
@@ -4650,7 +4651,7 @@ static void parseBLOCKDATA(char *s) {
 
 static void parseCALL(char *s) {
     int frameSize;
-    char name[16];
+    char name[MAX_ID_LENGTH + 1];
     int pass;
     char *start;
     Symbol *sym;
