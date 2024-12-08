@@ -11,7 +11,7 @@ F$DAT    =         O'002          ; Get current date
 *  @%date - return current date as ASCII-encoded integer
 *
          ENTRY     @%date
-@%date  BSS       0
+@%date   BSS       0
          S0        F$DAT
          S1        date
          EX 
