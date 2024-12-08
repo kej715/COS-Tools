@@ -34,7 +34,7 @@ COBJS =	aint.o amax0.o amin0.o anint.o chari.o ichar.o imax.o imax1.o imin.o imi
 	rabs.o racos.o rasin.o ratan.o ratan2.o rcos.o rcosh.o rdim.o rexp.o rint.o rlog.o rlog10.o rmod.o rreal.o rsign.o rsin.o rsinh.o rsqrt.o rtan.o rtanh.o \
 	rtc.o
 
-CALOBJS = cosclk.o date.o jdate.o irtc.o loc.o mask.o shift.o shiftl.o shiftr.o \
+CALOBJS = cosclk.o cputime.o date.o jdate.o irtc.o loc.o mask.o shift.o shiftl.o shiftr.o \
 	  vlen.o vload.o vsaddi.o vsaddr.o vsdivr.o vsmulr.o vssubi.o vssubr.o vstore.o vvaddi.o vvaddr.o vvdivr.o vvmulr.o vvsubi.o vvsubr.o
 
 all: libintf.lib
@@ -158,6 +158,9 @@ llt.o: llt.c
 
 cosclk.o: cosclk.cal
 	$(BINDIR)/cal -o cosclk.o $<
+
+cputime.o: cputime.cal
+	$(BINDIR)/cal -o cputime.o $<
 
 date.o: date.cal
 	$(BINDIR)/cal -o date.o $<

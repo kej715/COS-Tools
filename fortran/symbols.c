@@ -245,6 +245,7 @@ static IntrinsicFnDefn intrinsicFnDefns[] = {
 
     {"RTC",    NULL,    "_rtc",    BaseType_Real,     FALSE, 0},
     {"IRTC",   NULL,    "_irtc",   BaseType_Integer,  FALSE, 0},
+    {"CPUTIME",NULL,    "_cputim", BaseType_Real,     FALSE, 0},
 
     {"SHIFT",  NULL,    "_shift",  BaseType_Integer,  FALSE, 2, {BaseType_Integer, BaseType_Integer}},
     {"SHIFT", "SHIFT",  "_shift",  BaseType_Integer,  FALSE, 2, {BaseType_Real,    BaseType_Integer}},
