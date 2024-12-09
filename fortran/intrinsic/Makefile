@@ -27,7 +27,8 @@ CFLAGS  = -O3
 AR      ?= ar
 ARFLAGS ?= -r
 PREFIX = /usr/local
-BINDIR = /usr/local/bin
+BINDIR = $(PREFIX)/bin
+ACKROOT = $(PREFIX)/share/ack
 
 COBJS =	aint.o amax0.o amin0.o anint.o chari.o ichar.o imax.o imax1.o imin.o imin1.o index.o len.o lge.o lgt.o lle.o llt.o nint.o rmax.o rmin.o \
         iabs.o iacos.o iasin.o iatan.o iatan2.o icos.o icosh.o idim.o iexp.o iint.o ilog.o ilog10.o imod.o ireal.o isign.o isin.o isinh.o isqrt.o itan.o itanh.o \
@@ -44,6 +45,10 @@ cos:
 
 libintf.lib: $(COBJS) $(CALOBJS)
 	$(AR) $(ARFLAGS) $@ $+
+
+install: cos
+	mkdir -p $(ACKROOT)/cos/fortran ; \
+	install -b -o root -m 755 libintf.lib $(ACKROOT)/cos/fortran
 
 clean:
 	rm -f *.o *.a *.lib *.lst

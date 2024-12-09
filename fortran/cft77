@@ -16,6 +16,8 @@
 #    $1.abs : Cray X-MP absoluate executable
 #
 export ACKROOT=/usr/local/share/ack
+export COSROOT=$ACKROOT/cos
+export FTNROOT=$COSROOT/fortran
 kftc -l $1.lst -o $1.cal -s $1.f
 cal -x -o $1.o -l - -i $1.cal >> $1.lst
-ldr -o $1.abs -m $1.map $1.o runtime/libio.lib runtime/librt.lib intrinsic/libintf.lib $ACKROOT/cos/libem.a $ACKROOT/cos/libsys.a $ACKROOT/cos/libc.a
+ldr -o $1.abs -m $1.map $1.o $FTNROOT/libio.lib $FTNROOT/librt.lib $FTNROOT/libintf.lib $COSROOT/libem.a $COSROOT/libsys.a $COSROOT/libc.a

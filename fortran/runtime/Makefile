@@ -29,7 +29,8 @@ ARFLAGS ?= -r
 PREFIX = /usr/local
 BINDIR = ../..
 COSDIR = ../../cos-interface
-COSOBJS = $(PREFIX)/share/ack/cos/boot.o $(PREFIX)/share/ack/cos/c-ansi.o
+ACKROOT = $(PREFIX)/share/ack
+COSOBJS = $(ACKROOT)/cos/boot.o $(ACKROOT)/cos/c-ansi.o
 
 HDRS = const.h \
        fmt.h   \
@@ -50,6 +51,11 @@ libio.lib: $(IO_OBJS) fio.o
 
 librt.lib: daryof.o darysz.o
 	$(AR) $(ARFLAGS) $@ $+ $(COSOBJS)
+
+install: cos
+	mkdir -p $(ACKROOT)/cos/fortran ; \
+	install -b -o root -m 755 libio.lib $(ACKROOT)/cos/fortran ; \
+	install -b -o root -m 755 librt.lib $(ACKROOT)/cos/fortran
 
 clean:
 	rm -f *.o *.lib *.a *.lst test

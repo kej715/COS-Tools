@@ -70,7 +70,9 @@ clean:
 
 install: kftc
 	install -b -o root -m 755 kftc  $(PREFIX)/bin ; \
-	install -b -o root -m 755 cft77 $(PREFIX)/bin
+	install -b -o root -m 755 cft77 $(PREFIX)/bin ; \
+	$(MAKE) -C runtime install ; \
+	$(MAKE) -C intrinsic install
 
 binops.o: binops.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<
