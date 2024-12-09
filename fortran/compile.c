@@ -6401,7 +6401,7 @@ static void parseREAD(char *s) {
         s = eatWsp(s + 1);
         ciList->unit = createIntegerConstant(DEFAULT_INPUT_UNIT);
     }
-    s = parseIoList(s + 1, FALSE, &ioList);
+    s = parseIoList(s, FALSE, &ioList);
     if (s != NULL) {
         inputInit(ciList);
         processInputList(ioList, ciList);
