@@ -29,8 +29,8 @@
 
 int baseStack[BASE_STACK_SIZE];
 int baseStackPtr = 0;
-char *calName = "xCAL";
-char *calVersion = "0.9";
+char *calName = "kCAL";
+char *calVersion = "1.0";
 int currentBase = 10;
 Section *currentSection = NULL;
 char currentDate[9];
