@@ -559,16 +559,25 @@ void reserveStorage(Section *section, u32 firstAddress, u32 count) {
     u32 addr;
     ObjectBlock *block;
     u32 lastAddress;
+    u32 newSize;
 
     if (pass == 1 || count < 1) return;
     lastAddress = firstAddress + count - 1;
     addr = lastAddress * 2;
     block = section->objectBlock;
+    newSize = (((addr + 1) + (IMAGE_INCREMENT - 1)) / IMAGE_INCREMENT) * IMAGE_INCREMENT;
+    if (newSize > block->imageSize) {
+    if (block->image == NULL) block->lowestParcelAddress = firstAddress;
+        block->image = (u8 *)reallocate(block->image, block->imageSize, newSize);
+        block->imageSize = newSize;
+    }
+/*  -- original, inefficient code
     while (addr + 1 >= block->imageSize) {
         if (block->image == NULL) block->lowestParcelAddress = firstAddress;
         block->image = (u8 *)reallocate(block->image, block->imageSize, block->imageSize + IMAGE_INCREMENT);
         block->imageSize += IMAGE_INCREMENT;
     }
+*/
     if (firstAddress < block->lowestParcelAddress) block->lowestParcelAddress = firstAddress;
     if (lastAddress > block->highestParcelAddress) block->highestParcelAddress = lastAddress;
 }
