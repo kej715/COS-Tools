@@ -1102,9 +1102,23 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         A1        1,A6\n");
                 emit("         S%o        %d,A1\n", subject->reg, sym->details.adjustable.offset);
             }
-            emit("         S7        A%o\n", subject->details.reference.offset.reg);
-            emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
-            freeAddrReg(subject->details.reference.offset.reg);
+            switch (subject->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", subject->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
+                exit(1);
+            }
             break;
         case SymClass_Function:
             if (dt->constraint == -1) {
@@ -1321,9 +1335,23 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         A1        1,A6\n");
                 emit("         S%o        %d,A1\n", subject->reg, sym->details.adjustable.offset);
             }
-            emit("         S7        A%o\n", subject->details.reference.offset.reg);
-            emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
-            freeAddrReg(subject->details.reference.offset.reg);
+            switch (subject->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                /* do nothing */
+                break;
+            case ArgClass_Constant:
+                emit("         S7        %d\n", subject->details.reference.offset.constant);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                break;
+            case ArgClass_Calculation:
+                emit("         S7        A%o\n", subject->details.reference.offset.reg);
+                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                freeAddrReg(subject->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
+                exit(1);
+            }
             break;
         case SymClass_Function:
             switch (subject->details.reference.offsetClass) {
@@ -1560,9 +1588,22 @@ void emitLoadValue(OperatorArgument *arg) {
                 emit("         A1        1,A6\n");
                 emit("         A1        %d,A1\n", sym->details.adjustable.offset);
             }
-            emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
-            emit("         S%o        ,A1\n", arg->reg);
-            freeAddrReg(arg->details.reference.offset.reg);
+            switch (arg->details.reference.offsetClass) {
+            case ArgClass_Undefined:
+                emit("         S%o        ,A1\n", arg->reg);
+                break;
+            case ArgClass_Constant:
+                emit("         S%o        %d,A1\n", arg->reg, arg->details.reference.offset.constant);
+                break;
+            case ArgClass_Calculation:
+                emit("         A1        A1+A%o\n", arg->details.reference.offset.reg);
+                emit("         S%o        ,A1\n", arg->reg);
+                freeAddrReg(arg->details.reference.offset.reg);
+                break;
+            default:
+                fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, arg->details.reference.offsetClass);
+                exit(1);
+            }
             break;
         case SymClass_Function:
             switch (arg->details.reference.offsetClass) {
