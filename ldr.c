@@ -41,6 +41,7 @@ static void addBlock(Module *module, Block *block);
 static bool addLibraryModule(Module *module);
 static Symbol *addSymbol(u8 *id, Block *block, u64 value, bool isParcelAddress);
 static void addSuffix(char *inPath, char *suffix, char *outPath);
+static bool addUnsatisfiedExternal(u8 *id);
 static void adjustEntryPoints(Symbol *symbol);
 static void calculateBaseAddresses(Block *block);
 static void calculateCommonBaseAddresses(Block *block);
@@ -98,8 +99,8 @@ static int    imageSize = 0;
 static Module *lastLibraryModule = NULL;
 static Module *lastObjectModule = NULL;
 static Module *libraryModuleTree;
-static char   *ldrName = "xLDR";
-static char   *ldrVersion = "0.9";
+static char   *ldrName = "kLDR";
+static char   *ldrVersion = "1.0";
 static int    libraryCount = 0;
 static char   *libraryPaths[MAX_LIBRARIES];
 static FILE   *loadMap = NULL;
@@ -111,6 +112,9 @@ static int    sourceCount = 0;
 static char   *sourcePaths[MAX_SOURCE_FILES];
 static Symbol *startSymbol = NULL;
 static Symbol *symbolTable = NULL;
+
+static UnsatisfiedExternal *firstUnsatisfied = NULL;
+static UnsatisfiedExternal *lastUnsatisfied  = NULL;
 
 #if defined(__cos)
 #define IS_KEY(s) (*((s) + strlen(s) - 1) == '=')
@@ -429,6 +433,25 @@ static bool addLibraryModule(Module *module) {
         lastLibraryModule->next = module;
     }
     lastLibraryModule = module;
+
+    return TRUE;
+}
+
+static bool addUnsatisfiedExternal(u8 *id) {
+    UnsatisfiedExternal *current;
+
+    for (current = firstUnsatisfied; current != NULL; current = current->next) {
+        if (idcmp(current->id, id, 8) == 0) return FALSE;
+    }
+    current = (UnsatisfiedExternal *)allocate(sizeof(UnsatisfiedExternal));
+    memcpy(current->id, id, 8);
+    if (lastUnsatisfied == NULL) {
+        firstUnsatisfied = current;
+    }
+    else {
+        lastUnsatisfied->next = current;
+    }
+    lastUnsatisfied = current;
 
     return TRUE;
 }
@@ -1616,8 +1639,10 @@ static int processXRT(Dataset *ds, u64 hdr, int tableLength) {
         id = currentModule->externalRefTable + (extIndex * 8);
         symbol = findSymbol(id);
         if (symbol == NULL) {
-            eprintf("Unsatisfied external reference %.8s", id);
-            errorCount += 1;
+            if (addUnsatisfiedExternal(id)) {
+                eprintf("Unsatisfied external reference %.8s", id);
+                errorCount += 1;
+            }
             continue;
         }
         bitAddress += block->baseAddress << 6;

@@ -79,4 +79,9 @@ typedef struct symbol {
     u64 value;
 } Symbol;
 
+typedef struct unsatisfiedExternal {
+    struct unsatisfiedExternal *next;
+    u8 id[8];
+} UnsatisfiedExternal;
+
 #endif
