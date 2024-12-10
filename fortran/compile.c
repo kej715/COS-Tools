@@ -1374,6 +1374,7 @@ static bool evaluateIdentifier(Token *id) {
                 emitLoadReference(&arg, NULL);
                 emitUpdateStringRef(&arg, &strOffset, &strLength);
             }
+            loadValue(&arg);
         }
         else {
             err("%s is not an array", symbol->identifier);
