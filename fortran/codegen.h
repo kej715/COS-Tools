@@ -137,7 +137,7 @@ void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList)
 void emitStoreArg(Symbol *sym, OperatorArgument *arg);
 void emitStoreByReference(OperatorArgument *target, OperatorArgument *value);
 void emitStoreFrame(Register reg, int offset);
-void emitStoreFrameInt(int value, int offset);
+void emitStoreFrameInt(i64 value, int offset);
 void emitStoreParmAddr(int tempIdx, int parmIdx);
 void emitStoreReg(Symbol *sym, Register reg);
 void emitStoreRegByReference(OperatorArgument *target, Register reg);

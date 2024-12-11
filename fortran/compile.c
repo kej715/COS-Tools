@@ -5144,13 +5144,13 @@ static void parseDO(char *s) {
     DoStackEntry *entry;
     Token *expression;
     char *id;
-    int initValue;
+    i64 initValue;
     bool isIncr1;
     bool isIncrNeg1;
     bool isIntConstInit;
     bool isIntConstLimit;
     OperatorArgument limit;
-    int limitValue;
+    i64 limitValue;
     char lineLabel[8];
     int rank;
     Register reg;
@@ -6818,13 +6818,13 @@ static void setIntegerArg(OperatorArgument *arg, int value) {
 }
 
 static bool setupImpliedDoList(ImpliedDoList *doList, DoStackEntry *entry) {
-    int initValue;
+    i64 initValue;
     bool isConstInit;
     bool isConstLimit;
     bool isIncr1;
     bool isIncrNeg1;
     OperatorArgument limit;
-    int limitValue;
+    i64 limitValue;
     Register reg;
     OperatorArgument result;
 
@@ -6968,7 +6968,7 @@ static bool validateDataInitializers(DataInitializerItem *dList, ConstantListIte
                     case BaseType_Real:
                     case BaseType_Double:
                         cListItem->details.dt.type = BaseType_Integer;
-                        cListItem->details.value.integer = (long)cListItem->details.value.real;
+                        cListItem->details.value.integer = (i64)cListItem->details.value.real;
                         break;
                     case BaseType_Character:
                     case BaseType_Complex:

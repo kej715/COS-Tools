@@ -38,6 +38,7 @@
 static void emit(char *format, ...);
 static void emitBranchTarget(char *label);
 static void emitFloat(double f);
+static void emitLoadConstInt(Register reg, i64 value);
 static void emitLoadPointer(Symbol *pointee, char *regName);
 static Register emitLoadStackAddr(int offset);
 static void emitPopAddrReg(Register reg);
@@ -921,15 +922,7 @@ void emitLoadConst(OperatorArgument *arg) {
             emit("         S%o        =%ld,\n", arg->reg, l);
         break;
     case BaseType_Integer:
-        i = arg->details.constant.value.integer;
-        if (i >= 0 && i <= 07777777) {
-            emit("         S%o        %ld\n", arg->reg, i);
-        }
-        else if (i < 0 && i >= -010000000) {
-            emit("         S%o        %ld\n", arg->reg, i);
-        }
-        else
-            emit("         S%o        =%ld,\n", arg->reg, i);
+        emitLoadConstInt(arg->reg, arg->details.constant.value.integer);
         break;
     case BaseType_Double:
     case BaseType_Real:
@@ -946,6 +939,18 @@ void emitLoadConst(OperatorArgument *arg) {
     }
     arg->class = ArgClass_Calculation;
     arg->details.calculation = dt;
+}
+
+static void emitLoadConstInt(Register reg, i64 value) {
+    if (value >= 0 && value <= 07777777) {
+        emit("         S%o        %ld\n", reg, value);
+    }
+    else if (value < 0 && value >= -010000000) {
+        emit("         S%o        %ld\n", reg, value);
+    }
+    else {
+        emit("         S%o        =%ld,\n", reg, value);
+    }
 }
 
 void emitLoadConstOffset(OperatorArgument *arg) {
@@ -2096,10 +2101,10 @@ void emitStoreFrame(Register reg, int offset) {
     emit("         %-9s S%o\n", buf, reg);
 }
 
-void emitStoreFrameInt(int value, int offset) {
+void emitStoreFrameInt(i64 value, int offset) {
     char buf[16];
 
-    emit("         S7        %d\n", value);
+    emitLoadConstInt(RESULT_REG, value);
     sprintf(buf, "%d,A6", offset);
     emit("         %-9s S7\n", buf);
 }
