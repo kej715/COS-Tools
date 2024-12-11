@@ -226,9 +226,9 @@ void emitBranch3Way(Register reg, char *label1, char *label2, char *label3) {
 }
 
 void emitBranchIfEndTrips(DoStackEntry *entry) {
-    emit("         A0        %d,A6\n", entry->frameOffset + DO_TRIP_COUNT);
-    emit("         JAZ       %s\n", entry->endLabel);
-    emit("         JAM       %s\n", entry->endLabel);
+    emit("         S0        %d,A6\n", entry->frameOffset + DO_TRIP_COUNT);
+    emit("         JSZ       %s\n", entry->endLabel);
+    emit("         JSM       %s\n", entry->endLabel);
 }
 
 void emitBranchIndexed(char *tableLabel, int tableSize, Register reg) {
@@ -421,11 +421,15 @@ void emitDeactivateSection(char *name) {
 
 void emitDecrTrip(DoStackEntry *entry) {
     char buf[16];
+    Register reg;
 
+    reg = allocateRegister();
     sprintf(buf, "%d,A6", entry->frameOffset + DO_TRIP_COUNT);
-    emit("         A1        %s\n", buf);
-    emit("         A1        A1-1\n");
-    emit("         %-9s A1\n", buf);
+    emit("         S%o        %s\n", reg, buf);
+    emit("         S7        1\n");
+    emit("         S%o        S%o-S7\n", reg, reg);
+    emit("         %-9s S%o\n", buf, reg);
+    freeRegister(reg);
 }
 
 void emitDivInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
