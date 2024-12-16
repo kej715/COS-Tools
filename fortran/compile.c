@@ -3932,10 +3932,18 @@ static char *parseIoList(char *s, bool isWithinDo, IoListItem **ioList) {
 
     for (;;) {
         if (*s == '(') {
+            start = s;
             s = parseIoList(s + 1, TRUE, &currentItem);
             if (s == NULL) {
-                freeIoList(firstItem);
-                return NULL;
+                s = parseExpression(start, &expression);
+                if (s == NULL) {
+                    err("Expression syntax");
+                    freeIoList(firstItem);
+                    return NULL;
+                }
+                currentItem = (IoListItem *)allocate(sizeof(IoListItem));
+                currentItem->class = IoListClass_Expression;
+                currentItem->details.expression = expression;
             }
         }
         else {
@@ -3968,7 +3976,7 @@ static char *parseIoList(char *s, bool isWithinDo, IoListItem **ioList) {
             currentItem->class = IoListClass_Expression;
             currentItem->details.expression = expression;
         }
-        if (lastItem == NULL) {
+        if (firstItem == NULL) {
             firstItem = currentItem;
         }
         else {
@@ -3982,12 +3990,8 @@ static char *parseIoList(char *s, bool isWithinDo, IoListItem **ioList) {
         else if (*s == ',') {
             s = eatWsp(s + 1);
         }
-        else if (*s == ')' && isWithinDo && firstItem == lastItem) {
-            *ioList = firstItem;
-            return s + 1;
-        }
         else {
-            err("Syntax");
+            if (isWithinDo == FALSE) err("Syntax");
             freeIoList(firstItem);
             return NULL;
         }
@@ -4672,6 +4676,7 @@ static void parseCALL(char *s) {
         err("%s is not a subroutine name", name);
         return;
     }
+    frameSize = 0;
     s = eatWsp(s);
     if (*s == '(') {
         s = parseActualArguments(s, &frameSize);
@@ -5430,6 +5435,7 @@ static void parseEND(char *s) {
             err("Missing ENDDO");
         }
     }
+    reportUnresolvedLabels();
 
     if (errorCount + warningCount > 0 && listingFile != NULL) fputs("\n\n", listingFile);
 

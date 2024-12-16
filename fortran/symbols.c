@@ -44,6 +44,7 @@ static Symbol *labels = NULL;
 static int labelCounter = 0;
 static int labelPrefixIdx = 0;
 static char labelPrefixes[] = {'H','I','G','J','F','K','E','L','D','M','C','N','B','O','A','P'};
+static Symbol *lastLabel = NULL;
 static Symbol *lastSymbol = NULL;
 static DataType undefinedType = { BaseType_Undefined };
 
@@ -271,12 +272,20 @@ Symbol *addCommonBlock(char *name) {
 }
 
 Symbol *addLabel(char *label) {
-    Symbol *symbol;
+    Symbol *new;
 
-    symbol = addNode(label, SymClass_Label, &labels);
-    generateLabel(symbol->details.label.label);
+    new = addNode(label, SymClass_Label, &labels);
+    if (new != NULL) {
+        generateLabel(new->details.label.label);
+        if (new->next == NULL) {
+            if (lastLabel != NULL) {
+                lastLabel->next = new;
+            }
+            lastLabel = new;
+        }
+    }
 
-    return symbol;
+    return new;
 }
 
 static Symbol *addNode(char *identifier, SymbolClass class, Symbol **tree) {
@@ -928,6 +937,16 @@ void removeShadow(Symbol *symbol) {
         symbol->isDeleted = TRUE;
         symbol->isShadow = FALSE;
         symbol->class = SymClass_Undefined;
+    }
+}
+
+void reportUnresolvedLabels(void) {
+    Symbol *label;
+
+    for (label = labels; label != NULL; label = label->next) {
+        if (label->details.label.forwardRef) {
+            err("Missing line label: %s\n", label->identifier);
+        }
     }
 }
 

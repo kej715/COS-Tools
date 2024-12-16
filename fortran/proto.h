@@ -64,6 +64,7 @@ void *reallocate(void *old, int oldSize, int newSize);
 void registerIntrinsicFunctions(void);
 void removeAllShadows(void);
 void removeShadow(Symbol *symbol);
+void reportUnresolvedLabels(void);
 void resetCommonBlocks(void);
 char *symClassToStr(SymbolClass class);
 void warn(char *format, ...);
