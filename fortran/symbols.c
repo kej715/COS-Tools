@@ -690,9 +690,10 @@ Symbol *findSymbol(char *identifier) {
 void freeAllSymbols(void) {
     freeTree(symbols);
     symbols = NULL;
+    lastSymbol = NULL;
     freeTree(labels);
     labels = NULL;
-    lastSymbol = NULL;
+    lastLabel = NULL;
 }
 
 static void freeNode(Symbol *symbol) {
