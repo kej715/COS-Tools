@@ -276,6 +276,7 @@ int _queryu(int unitNum, ulong fileNameRef, long *existRef, long *openedRef, int
             ulong nameRef, ulong accessRef, ulong sequentialRef, ulong directRef, ulong formattedRef, ulong unformattedRef, ulong formRef, ulong blankRef,
             int *reclRef, int *nextRecRef) {
     Unit dummyUnit;
+    bool exists;
     char fileName[MAX_FILE_NAME_LEN+1];
     int i;
     int len;
@@ -287,7 +288,7 @@ int _queryu(int unitNum, ulong fileNameRef, long *existRef, long *openedRef, int
         if (up == NULL) {
             up = &dummyUnit;
             memset(up, 0, sizeof(Unit));
-            up->fd = -1;
+            up->number = unitNum;
         }
     }
     else if (fileNameRef != 0) {
@@ -297,7 +298,7 @@ int _queryu(int unitNum, ulong fileNameRef, long *existRef, long *openedRef, int
         fileName[len] = '\0';
         up = NULL;
         for (i = 0; i < MAX_ALLOCATED_UNITS; i++) {
-            if (units[i].number != 0 && strcmp(fileName, units[i].fileName) == 0) {
+            if ((units[i].flags & MASK_OPEN) != 0 && strcmp(fileName, units[i].fileName) == 0) {
                 up = &units[i];
                 break;
             }
@@ -305,22 +306,33 @@ int _queryu(int unitNum, ulong fileNameRef, long *existRef, long *openedRef, int
         if (up == NULL) {
             up = &dummyUnit;
             memset(up, 0, sizeof(Unit));
-            up->fd = open(fileName, O_RDONLY);
-            if (up->fd == -1) {
-                if (errno != ENOENT) return errno;
-            }
-            else {
-                close(up->fd);
-            }
+            up->number = unitNum;
+            memcpy(up->fileName, fileName, len);
         }
     }
     else {
         return EINVAL;
     }
-    if (existRef       != NULL) *existRef = (up->fd == -1) ? 0 : ~0L;
-    if (openedRef      != NULL) *openedRef = (up->fd == -1 || up->fileName[0] == '\0') ? 0 : ~0L;
+    if (existRef != NULL) {
+        exists = FALSE;
+        if ((up->flags & MASK_OPEN) == 0 && *up->fileName != '\0') {
+            up->fd = open(up->fileName, O_RDONLY);
+            if (up->fd == -1) {
+                if (errno != ENOENT) return errno;
+            }
+            else {
+                exists = TRUE;
+                close(up->fd);
+            }
+        }
+        else {
+            exists = TRUE;
+        }
+        *existRef = exists ? ~0L : 0;
+    }
+    if (openedRef      != NULL) *openedRef = (up->flags & MASK_OPEN) ? ~0L : 0;
     if (numberRef      != NULL) *numberRef = up->number;
-    if (namedRef       != NULL) *namedRef = (up->fileName[0] == '\0') ? 0 : ~0L;
+    if (namedRef       != NULL) *namedRef = (up->fileName[0] != '\0') ? ~0L : 0;
     if (nameRef        != 0   ) copyStrToRef(up->fileName, nameRef);
     if (accessRef      != 0   ) copyStrToRef((up->flags & MASK_DIRECT) != 0 ? "DIRECT" : "SEQENTIAL", accessRef);
     if (sequentialRef  != 0   ) copyStrToRef((up->flags & MASK_DIRECT) != 0 ? "NO" : "YES", sequentialRef);
