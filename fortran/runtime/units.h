@@ -38,6 +38,7 @@
  *    3   BLANK       : 0 if NULL, 1 if ZERO
  *    4   SCRATCH     : 0 if ordinary file, 1 if scratch file
  *    5   IMMUTABLE   : 0 if mutable, 1 if immutable
+ *    6   OPEN        : 0 if unit closed, 1 if open
  */
 #define FLAG_NEW         0
 #define FLAG_DIRECT      1
@@ -45,6 +46,7 @@
 #define FLAG_ZERO        3
 #define FLAG_SCRATCH     4
 #define FLAG_IMMUTABLE   5
+#define FLAG_OPEN        6
 
 #define MASK_NEW         (1 << FLAG_NEW)
 #define MASK_DIRECT      (1 << FLAG_DIRECT)
@@ -52,6 +54,7 @@
 #define MASK_ZERO        (1 << FLAG_ZERO)
 #define MASK_SCRATCH     (1 << FLAG_SCRATCH)
 #define MASK_IMMUTABLE   (1 << FLAG_IMMUTABLE)
+#define MASK_OPEN        (1 << FLAG_OPEN)
 
 typedef unsigned long ulong;
 
@@ -79,10 +82,9 @@ void _endfio(void);
 Unit *_findu(int unitNum);
 void _flufmt(int unitNum);
 void _flulst(int unitNum);
-void _freeu(int unitNum);
 void _inifio(void);
 int  _iostat(int unitNum);
-void _openu(ulong fileNameRef, int unitNum, ulong statusRef, ulong accessRef, ulong formattingRef, ulong blankRef, int recLen);
+void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ulong formattingRef, ulong blankRef, int recLen);
 int  _queryu(int unitNum, ulong fileNameRef, long *existRef, long *openedRef, int *numberRef, long *namedRef,
              ulong nameRef, ulong accessRef, ulong sequentialRef, ulong directRef, ulong formattedRef, ulong unformattedRef, ulong formRef, ulong blankRef,
              int *reclRef, int *nextRecRef);

@@ -6143,6 +6143,21 @@ static void parseOPEN(char *s) {
     emitAdjustSP(-7);
     ec = errorCount;
     for (;;) {
+        if (oiList->unit == NULL) {
+            err("UNIT missing");
+            break;
+        }
+        if (evaluateExpression(oiList->unit, &arg)) break;
+        loadValue(&arg);
+        dt = getDataType(&arg);
+        if (dt->type != BaseType_Integer) {
+            err("UNIT not integer");
+            freeRegister(arg.reg);
+            break;
+        }
+        emitStoreStack(arg.reg, 0);
+        freeRegister(arg.reg);
+
         if (oiList->fileName == NULL) {
             emitLoadNullPtr(&arg);
         }
@@ -6155,21 +6170,6 @@ static void parseOPEN(char *s) {
                 freeRegister(arg.reg);
                 break;
             }
-        }
-        emitStoreStack(arg.reg, 0);
-        freeRegister(arg.reg);
-
-        if (oiList->unit == NULL) {
-            err("UNIT missing");
-            break;
-        }
-        if (evaluateExpression(oiList->unit, &arg)) break;
-        loadValue(&arg);
-        dt = getDataType(&arg);
-        if (dt->type != BaseType_Integer) {
-            err("UNIT not integer");
-            freeRegister(arg.reg);
-            break;
         }
         emitStoreStack(arg.reg, 1);
         freeRegister(arg.reg);

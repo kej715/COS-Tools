@@ -38,7 +38,7 @@ static char unitName[8] = {'U','N','I','T','0','0','0',0};
 
 static Unit units[MAX_ALLOCATED_UNITS];
 
-static void closeUnit(int unitNum, int doDelete);
+static void closeUnit(Unit *up, int doDelete);
 static void copyStrToRef(char *s1, ulong ref);
 static Unit *getUnit(int unitNum, int flags, int recLen);
 static int openUnit(char *fileName, int unitNum, int flags, int recLen);
@@ -48,10 +48,15 @@ static int writer(Unit *up, void *buf, size_t nbyte);
 Unit *_allocu(int unitNum) {
     Unit *up;
 
-    up = _findu(0);
+    up = _findu(unitNum);
+    if (up == NULL) up = _findu(0);
     if (up != NULL) {
+        if ((up->flags & MASK_OPEN) != 0) closeUnit(up, (up->flags & MASK_SCRATCH) != 0);
         memset(up, 0, sizeof(Unit));
         up->number = unitNum;
+    }
+    else {
+        fputs("I/O unit pool exhausted\n", stderr);
     }
     return up;
 }
@@ -62,17 +67,17 @@ void _closeu(int unitNum, ulong statusRef) {
     Unit *up;
 
     up = _findu(unitNum);
-    if (up == NULL) return;
+    if (up == NULL || (up->flags & MASK_OPEN) == 0) return;
 
     refToCharPtr(statusRef, &s, &len);
-    if (len == 4 && strncasecmp(s, "KEEP", len) == 0) {
-        closeUnit(unitNum, 0);
+    if (s == NULL) {
+        closeUnit(up, (up->flags & MASK_SCRATCH) != 0);
+    }
+    else if (len == 4 && strncasecmp(s, "KEEP", len) == 0) {
+        closeUnit(up, 0);
     }
     else if (len == 6 && strncasecmp(s, "DELETE", len) == 0) {
-        closeUnit(unitNum, 1);
-    }
-    else if (s == NULL) {
-        closeUnit(unitNum, (up->flags & MASK_SCRATCH) != 0);
+        closeUnit(up, 1);
     }
     else {
         fputs("Invalid file STATUS: ", stderr);
@@ -97,16 +102,25 @@ void _endfio(void) {
 
     for (i = 0; i < MAX_ALLOCATED_UNITS; i++) {
         up = &units[i];
-        if (up->number != 0 && (up->flags & MASK_IMMUTABLE) == 0)
-            closeUnit(up->number, (up->flags & MASK_SCRATCH) != 0);
+        closeUnit(up, (up->flags & MASK_SCRATCH) != 0);
     }
 }
 
 Unit *_findu(int unitNum) {
     int i;
+    Unit *up;
 
-    for (i = 0; i < MAX_ALLOCATED_UNITS; i++) {
-        if (units[i].number == unitNum) return &units[i];
+    if (unitNum == 0) {
+        for (i = 0; i < MAX_ALLOCATED_UNITS; i++) {
+            up = &units[i];
+            if ((up->flags & MASK_OPEN) == 0) return up;
+        }
+    }
+    else {
+        for (i = 0; i < MAX_ALLOCATED_UNITS; i++) {
+            up = &units[i];
+            if (up->number == unitNum) return up;
+        }
     }
     return NULL;
 }
@@ -141,39 +155,28 @@ void _flulst(int unitNum) {
     }
 }
 
-void _freeu(int unitNum) {
-    Unit *up;
-
-    up = _findu(unitNum);
-    if (up != NULL) {
-        up->number = 0;
-        if (up->buf != NULL) {
-            free(up->buf);
-            up->buf = NULL;
-        }
-    }
-}
-
 void _inifio(void) {
     int rc;
     Unit *up;
 
     up = _allocu(100);
     up->fd = 0;
-    up->flags = MASK_IMMUTABLE;
+    up->flags = MASK_IMMUTABLE | MASK_OPEN;
     strcpy(up->fileName, "$IN");
 
     up = _allocu(101);
     up->fd = 1;
-    up->flags = MASK_IMMUTABLE;
+    up->flags = MASK_IMMUTABLE | MASK_OPEN;
     strcpy(up->fileName, "$OUT");
 
     up = _allocu(5);
     up->fd = 0;
+    up->flags = MASK_OPEN;
     strcpy(up->fileName, "$IN");
 
     up = _allocu(6);
     up->fd = 1;
+    up->flags = MASK_OPEN;
     strcpy(up->fileName, "$OUT");
 }
 
@@ -184,13 +187,15 @@ int _iostat(int unitNum) {
     return (up != NULL) ? up->ioStat : EBADF;
 }
 
-void _openu(ulong fileNameRef, int unitNum, ulong statusRef, ulong accessRef, ulong formattingRef, ulong blankRef, int recLen) {
+void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ulong formattingRef, ulong blankRef, int recLen) {
     char *fileName;
     char fileNameBuf[MAX_FILE_NAME_LEN+1];
     int flags;
     bool isNameUndefined;
     int len;
+    int rc;
     char *s;
+    Unit *up;
 
     flags = 0;
     refToCharPtr(fileNameRef, &fileName, &len);
@@ -257,7 +262,14 @@ void _openu(ulong fileNameRef, int unitNum, ulong statusRef, ulong accessRef, ul
         fputs("\n", stderr);
         exit(1);
     }
-    openUnit(fileNameBuf, unitNum, flags, recLen);
+    rc = openUnit(fileNameBuf, unitNum, flags, recLen);
+    if (unitNum != 0) {
+        up = _findu(unitNum);
+        if (up != NULL) up->ioStat = rc;
+    }
+    if (rc != 0) {
+        fprintf(stderr, "%s: %s\n", fileNameBuf, strerror(rc));
+    }
 }
 
 int _queryu(int unitNum, ulong fileNameRef, long *existRef, long *openedRef, int *numberRef, long *namedRef,
@@ -396,21 +408,22 @@ void _wrufmt(int unitNum, DataValue *value) {
     }
 }
 
-static void closeUnit(int unitNum, int doDelete) {
-    Unit *up;
-
-    up = _findu(unitNum);
+static void closeUnit(Unit *up, int doDelete) {
     if (up != NULL && (up->flags & MASK_IMMUTABLE) == 0) {
-        if (up->fd > 2) {
+        up->ioStat = 0;
+        if (up->fd > 2 && (up->flags & MASK_OPEN) != 0) {
+            up->flags ^= MASK_OPEN;
             if (close(up->fd) == -1) {
                 up->ioStat = errno;
-                return;
             }
             else if (doDelete) {
                 unlink(up->fileName);
             }
+            if (up->buf != NULL) {
+                free(up->buf);
+                up->buf = NULL;
+            }
         }
-        _freeu(unitNum);
     }
 }
 
@@ -435,7 +448,7 @@ static Unit *getUnit(int unitNum, int flags, int recLen) {
     Unit *up;
 
     up = _findu(unitNum);
-    if (up == NULL) {
+    if (up == NULL || (up->flags & MASK_OPEN) == 0) {
         if (unitNum == 102) {
             rc = openUnit("$PUNCH", unitNum, MASK_NEW, 0);
             if (rc != 0) {
@@ -469,26 +482,39 @@ static Unit *getUnit(int unitNum, int flags, int recLen) {
 }
 
 static int openUnit(char *fileName, int unitNum, int flags, int recLen) {
+    int rc;
     Unit *up;
 
-    if (unitNum < 1 || unitNum > MAX_UNIT_NUMBER) return EINVAL;
+    if (unitNum < 1 || unitNum > MAX_UNIT_NUMBER) {
+        fprintf(stderr, "Invalid unit number: %d\n", unitNum);
+        return EINVAL;
+    }
+
+    if (strlen(fileName) > MAX_FILE_NAME_LEN) {
+        fprintf(stderr, "%s: file name too long\n", fileName);
+        return EINVAL;
+    }
 
     up = _allocu(unitNum);
     if (up == NULL) return EMFILE;
 
-    if (strlen(fileName) > MAX_FILE_NAME_LEN) return EINVAL;
-
     strcpy(up->fileName, fileName);
 
     if ((flags & MASK_NEW) != 0) {
-        up->fd = open(fileName, O_CREAT|O_TRUNC|O_RDWR, 0640);
+//      up->fd = open(fileName, O_CREAT|O_TRUNC|O_RDWR, 0640);
+        up->fd = open(fileName, O_CREAT|O_TRUNC|O_WRONLY, 0640);
     }
     else {
-        up->fd = open(fileName, O_RDWR);
+//      up->fd = open(fileName, O_RDWR);
+        up->fd = open(fileName, O_RDONLY);
     }
-    if (up->fd == -1) return errno;
+    if (up->fd == -1) {
+        rc = errno;
+        perror(fileName);
+        return rc;
+    }
 
-    up->flags = flags;
+    up->flags = flags | MASK_OPEN;
 
     return 0;
 }
