@@ -30,6 +30,7 @@
 char  currentDate[9];
 char  currentTime[9];
 bool  doEchoSource          = FALSE;
+bool  doSuppressWarnings    = FALSE;
 bool  doList                = TRUE;
 bool  doStaticLocals        = TRUE;
 bool  doStaticLocalsDefault = TRUE;
@@ -38,6 +39,7 @@ int   lineNo                = 0;
 FILE *listingFile           = NULL;
 FILE *objectFile            = NULL;
 FILE *sourceFile            = NULL;
+char *sourcePath            = NULL;
 char stmtBuf[MAX_STMT_LENGTH+1];
 int  totalErrors            = 0;
 int warningCount            = 0;

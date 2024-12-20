@@ -39,7 +39,6 @@ int main(int argc, char *argv[]) {
     int len;
     char name[9];
     char *sp;
-    char *sourcePath;
 
     sourcePath = parseOptions(argc, argv);
     dp = NULL;
@@ -82,6 +81,7 @@ int main(int argc, char *argv[]) {
 #define L_KEY "L="
 #define O_KEY "O="
 #define S_KEY "S"
+#define W_KEY "W"
 #define STDIN  "$IN"
 #define STDOUT "$OUT"
 #else
@@ -90,6 +90,7 @@ int main(int argc, char *argv[]) {
 #define L_KEY "-l"
 #define O_KEY "-o"
 #define S_KEY "-s"
+#define W_KEY "-w"
 #define STDIN  "-"
 #define STDOUT "-"
 #endif
@@ -132,7 +133,7 @@ static char *parseOptions(int argc, char *argv[]) {
             }
             sourcePath = argv[i];
             if (strcmp(sourcePath, STDIN) != 0) {
-                sourceFile = fopen(argv[i], "r");
+                sourceFile = fopen(sourcePath, "r");
                 if (sourceFile == NULL) {
                     perror(sourcePath);
                     exit(1);
@@ -178,6 +179,9 @@ static char *parseOptions(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], S_KEY) == 0) {
             doEchoSource = TRUE;
+        }
+        else if (strcmp(argv[i], W_KEY) == 0) {
+            doSuppressWarnings = TRUE;
         }
 #if defined(__cos)
         else {

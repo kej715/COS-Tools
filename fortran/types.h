@@ -25,9 +25,10 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <stdio.h>
 #include "../basetypes.h"
 
-#define MAX_DIMENSIONS       7
+#define MAX_DIMENSIONS 7
 
 typedef enum tokenId {
     UNDEFINED = 0,
@@ -194,6 +195,13 @@ typedef enum tokenType {
     TokenType_Constant,
     TokenType_Invalid
 } TokenType;
+
+typedef struct sourceStackEntry {
+    FILE *sourceFile;
+    char *sourcePath;
+    int lineNo;
+    char *lineBuf;
+} SourceStackEntry;
 
 typedef struct keyword {
     char *name;

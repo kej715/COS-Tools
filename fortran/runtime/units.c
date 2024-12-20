@@ -470,6 +470,7 @@ static Unit *getUnit(int unitNum, int flags, int recLen) {
                 exit(1);
             }
             up = _findu(102);
+            up->ioStat = 0;
             up->flags |= MASK_IMMUTABLE;
         }
         else {
@@ -488,12 +489,15 @@ static Unit *getUnit(int unitNum, int flags, int recLen) {
                 exit(1);
             }
             up = _findu(unitNum);
+            up->ioStat = 0;
         }
     }
     return up;
 }
 
 static int openUnit(char *fileName, int unitNum, int flags, int recLen) {
+    int access;
+    int mode;
     int rc;
     Unit *up;
 
@@ -511,15 +515,18 @@ static int openUnit(char *fileName, int unitNum, int flags, int recLen) {
     if (up == NULL) return EMFILE;
 
     strcpy(up->fileName, fileName);
+    mode = 0;
 
     if ((flags & MASK_NEW) != 0) {
-//      up->fd = open(fileName, O_CREAT|O_TRUNC|O_RDWR, 0640);
-        up->fd = open(fileName, O_CREAT|O_TRUNC|O_WRONLY, 0640);
+        access = O_CREAT|O_TRUNC|O_WRONLY;
+        mode = 0640;
     }
     else {
-//      up->fd = open(fileName, O_RDWR);
+        access = O_RDONLY;
         up->fd = open(fileName, O_RDONLY);
     }
+    if ((flags & MASK_UNFORMATTED) != 0) access |= O_BINARY;
+    up->fd = open(fileName, access, mode);
     if (up->fd == -1) {
         rc = errno;
         perror(fileName);

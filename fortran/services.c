@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "const.h"
 #include "proto.h"
 
 #if defined(__APPLE__)
@@ -52,7 +53,7 @@ void err(char *format, ...) {
     vsprintf(buf, format, ap);
     va_end(ap);
     list(" *ERROR*   %s", buf);
-    fprintf(stderr, "ERROR line %d : %s\n", lineNo, buf);
+    fprintf(stderr, "ERROR %s[%d] : %s\n", sourcePath, lineNo, buf);
     errorCount  += 1;
     totalErrors += 1;
 }
@@ -89,10 +90,12 @@ void warn(char *format, ...) {
     va_list ap;
     char buf[80];
 
-    va_start(ap, format);
-    vsprintf(buf, format, ap);
-    va_end(ap);
-    list(" *WARNING* %s", buf);
-    fprintf(stderr, "WARNING line %d : %s\n", lineNo, buf);
-    warningCount += 1;
+    if (doSuppressWarnings == FALSE) {
+        va_start(ap, format);
+        vsprintf(buf, format, ap);
+        va_end(ap);
+        list(" *WARNING* %s", buf);
+        fprintf(stderr, "WARNING %s[%d] : %s\n", sourcePath, lineNo, buf);
+        warningCount += 1;
+    }
 }

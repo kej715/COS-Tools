@@ -34,6 +34,7 @@
 #define MAX_IF_STACK_SIZE   20
 #define MAX_LINE_LENGTH     96
 #define MAX_OP_STACK_SIZE  100
+#define MAX_SRC_STACK_SIZE  20
 #define MAX_STMT_LENGTH   1320
 
 #define TRUE  1

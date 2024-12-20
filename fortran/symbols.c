@@ -22,6 +22,7 @@
 **--------------------------------------------------------------------------
 */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,7 @@ static Symbol *lastLabel = NULL;
 static Symbol *lastSymbol = NULL;
 static DataType undefinedType = { BaseType_Undefined };
 
+DataType implicitTypes[26];
 Symbol *progUnitSym;
 Symbol *symbols = NULL;
 
@@ -321,7 +323,7 @@ static Symbol *addNode(char *identifier, SymbolClass class, Symbol **tree) {
         }
         else if (current->isDeleted) {
             freeNode(new);
-            current->class = SymClass_Undefined;
+            current->class = class;
             current->isDeleted = FALSE;
             current->isShadow = FALSE;
             current->size = 0;
@@ -342,7 +344,7 @@ Symbol *addSymbol(char *identifier, SymbolClass class) {
     Symbol *new;
 
     new = addNode(identifier, class, &symbols);
-    if (new != NULL && new->next == NULL) {
+    if (new != NULL && new->next == NULL && new != lastSymbol) {
         if (lastSymbol != NULL) {
             lastSymbol->next = new;
         }
@@ -451,6 +453,7 @@ int calculateAutoOffsets(void) {
 
 void calculateCommonOffsets(void) {
     int baseOffset;
+    Symbol *commonBlock;
     DataType *dt;
     Symbol *equiv;
     int equivOffset;
@@ -459,31 +462,25 @@ void calculateCommonOffsets(void) {
     int size;
     Symbol *symbol;
 
+    /*
+     *  Pass 1. Calculate sizes of all common blocks and the offsets of variables
+     *          defined within them.
+     */
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
         if (symbol->class == SymClass_Global
             && symbol->details.variable.isStorageAssigned == FALSE
             && symbol->details.variable.isSubordinate == FALSE) {
-            symbol->details.variable.isStorageAssigned = TRUE;
-            offset = symbol->details.variable.offset;
-            if (symbol->details.variable.nextInStorage != NULL) {
-                baseOffset = offset;
-                highestOffset = baseOffset + symbol->size;
-                equiv = symbol->details.variable.nextInStorage;
-                equivOffset = symbol->details.variable.nextOffset;
-                while (equiv != NULL) {
-                    equiv->details.variable.isStorageAssigned = TRUE;
-                    baseOffset += equivOffset;
-                    equiv->details.variable.offset = baseOffset;
-                    if (highestOffset < baseOffset + equiv->size) highestOffset = baseOffset + equiv->size;
-                    equivOffset = equiv->details.variable.nextOffset;
-                    equiv = equiv->details.variable.nextInStorage;
-                }
-                if (highestOffset > symbol->details.variable.staticBlock->details.common.limit) {
-                    symbol->details.variable.staticBlock->details.common.limit = highestOffset;
-                }
+            commonBlock = symbol->details.variable.staticBlock;
+            symbol->details.variable.offset = commonBlock->details.common.offset;
+            commonBlock->details.common.offset += symbol->size;
+            if (commonBlock->details.common.offset > commonBlock->details.common.limit) {
+                commonBlock->details.common.limit = commonBlock->details.common.offset;
             }
         }
     }
+    /*
+     *  Pass 2. Assign storage.
+     */
     for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
         if (symbol->class == SymClass_Global
             && symbol->details.variable.isStorageAssigned == FALSE
@@ -632,6 +629,36 @@ int countArrayElements(Symbol *symbol) {
         count *= (bounds->upper - bounds->lower) + 1;
     }
     return count;
+}
+
+void defineType(Symbol *symbol) {
+    DataType *dt;
+
+    switch (symbol->class) {
+    case SymClass_Auto:
+    case SymClass_Static:
+    case SymClass_Adjustable:
+    case SymClass_Global:
+    case SymClass_Argument:
+        dt = &symbol->details.variable.dt;
+        break;
+    case SymClass_Undefined:
+        if (symbol->isFnRef == FALSE) return;
+    case SymClass_Function:
+        dt = &symbol->details.progUnit.dt;
+        break;
+    case SymClass_Pointee:
+        dt = &symbol->details.pointee.dt;
+        break;
+    case SymClass_Parameter:
+        dt = &symbol->details.param.dt;
+        break;
+    default:
+        return;
+    }
+    if (dt->type == BaseType_Undefined) {
+        dt->type = implicitTypes[toupper(symbol->identifier[0]) - 'A'].type;
+    }
 }
 
 void emitCommonBlocks(void) {
@@ -868,6 +895,14 @@ bool linkVariables(Symbol *fromSym, int fromOffset, Symbol *toSym, int toOffset)
     return TRUE;
 }
 
+void presetImplicit(void) {
+    char c;
+
+    for (c = 'A'; c <  'I'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
+    for (c = 'I'; c <  'O'; c++) implicitTypes[c - 'A'].type = BaseType_Integer;
+    for (c = 'O'; c <= 'Z'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
+}
+
 void presetOffsetCalculation(void) {
     Symbol *symbol;
     int size;
@@ -960,5 +995,13 @@ static void resetCommonTree(Symbol *symbol) {
         resetCommonTree(symbol->left);
         resetCommonTree(symbol->right);
         symbol->details.common.offset = 0;
+    }
+}
+
+void resolveTypes(void) {
+    Symbol *symbol;
+
+    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
+        defineType(symbol);
     }
 }

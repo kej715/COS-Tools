@@ -57,7 +57,6 @@ static void copyCharValue(DataValue *to, DataValue *from);
 static Token *copyToken(Token *token);
 static Token *createIntegerConstant(int value);
 static void defineLocalVariable(Symbol *symbol);
-static void defineType(Symbol *symbol);
 static char *eatWsp(char *s);
 static void errArgType(OperatorId op, BaseType type, OperatorArgument *arg);
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset);
@@ -127,12 +126,13 @@ static char *parseStringRange(char *s, StringRange **range);
 static char *parseTypeDecl(char *s, DataType *dt);
 static void popArg(OperatorArgument *arg);
 static void popOp(OperatorDetails *op);
-static void presetImplicit(void);
+static void popSource(void);
 static void presetProgUnit(void); 
 static void processInputList(IoListItem *ioList, ControlInfoList *ciList);
 static void processOutputList(IoListItem *ioList, ControlInfoList *ciList);
 static void pushArg(OperatorArgument *arg);
 static void pushOp(OperatorDetails *op);
+static void pushSource(void);
 static char *readLine(void);
 static void setIntegerArg(OperatorArgument *arg, int value);
 static bool setupImpliedDoList(ImpliedDoList *doList, DoStackEntry *entry);
@@ -210,7 +210,6 @@ static Symbol defaultProgSym = {
 };
 static int autoOffset = 0;
 static Symbol *currentLabel;
-static DataType implicitTypes[26];
 static char lineBuf[MAX_LINE_LENGTH+1];
 static int staticOffset = 0;
 static ParsingState state;
@@ -224,6 +223,8 @@ static int ifStackPtr = 0;
 static OperatorDetails opStack[MAX_OP_STACK_SIZE];
 static int opStkBtm;
 static int opStkPtr = 0;
+static SourceStackEntry sourceStack[MAX_SRC_STACK_SIZE];
+static int sourceStkPtr = 0;
 
 static ConstantListItem *firstCListItem = NULL;
 static DataInitializerItem *firstDListItem = NULL;
@@ -271,6 +272,7 @@ static char *appendLine(char *sp, char *lp) {
 }
 
 static void assignStorage(void) {
+    resolveTypes();
     presetOffsetCalculation();
     autoOffset = -calculateAutoOffsets();
     staticOffset = calculateStaticOffsets();
@@ -343,7 +345,16 @@ static char *collectStmt() {
             lp = readLine();
             if (lp == NULL) {
                 *s = '\0';
-                return (s > stmtBuf) ? stmtBuf : NULL;
+                if (s > stmtBuf) {
+                    return stmtBuf;
+                }
+                else if (sourceStkPtr > 0) {
+                    popSource();
+                    continue;
+                }
+                else {
+                    return NULL;
+                }
             }
         }
         if (*lp == 'C' || *lp == 'c') {
@@ -482,6 +493,10 @@ void compile(char *name) {
             state = STATE_EXECUTABLE;
         }
         else if (token.type == TokenType_Keyword) {
+            if (token.details.keyword.id == INCLUDE) {
+                parseINCLUDE(s);
+                continue;
+            }
             if (state == STATE_DEFINITION) state = STATE_EXECUTABLE;
             stmtClass = token.details.keyword.class;
         }
@@ -645,9 +660,6 @@ void compile(char *name) {
                     continue;
                 case FORMAT: /* FORMAT may occur almost anywhere */
                     parseFORMAT(s);
-                    continue;
-                case INCLUDE:
-                    parseINCLUDE(s);
                     continue;
                 case INTRINSIC:
                     parseINTRINSIC(s);
@@ -859,20 +871,17 @@ static void defineLocalVariable(Symbol *symbol) {
     defineType(symbol);
     if (doStaticLocals) {
         symbol->class = SymClass_Static;
+        defineType(symbol);
         symbol->details.variable.offset = staticOffset;
         symbol->details.variable.staticBlock = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym : progUnitSym->details.progUnit.parentUnit;
         staticOffset += calculateSize(symbol);
     }
     else {
         symbol->class = SymClass_Auto;
+        defineType(symbol);
         autoOffset -= calculateSize(symbol);
         symbol->details.variable.offset = autoOffset;
     }
-}
-
-static void defineType(Symbol *symbol) {
-    if (symbol->details.variable.dt.type == BaseType_Undefined)
-        symbol->details.variable.dt = implicitTypes[toupper(symbol->identifier[0]) - 'A'];
 }
 
 static char *eatWsp(char *s) {
@@ -881,7 +890,7 @@ static char *eatWsp(char *s) {
 }
 
 static void errArgType(OperatorId op, BaseType type, OperatorArgument *arg) {
-    err("Invalid argument type %s to '%s'", baseTypeToStr(type), op);
+    err("Invalid argument type %s to '%s'", baseTypeToStr(type), opIdToStr(op));
     if (arg != NULL && arg->class == ArgClass_Constant && arg->details.constant.dt.type == BaseType_Character) {
         freeCharValue(&arg->details.constant.value);
     }
@@ -912,7 +921,7 @@ static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, Opera
         for (d = rank - 1; d >= 0; d--) {
             qualifier = getQualifier(subscriptList, d);
             if (qualifier == NULL || qualifier->item == NULL || evaluateExpression(qualifier->item, &subscript)) {
-                err("Incorrect array index");
+                err("Incorrect %s array index", symbol->identifier);
                 return TRUE;
             }
             dt = getDataType(&subscript);
@@ -1303,8 +1312,8 @@ static bool evaluateIdentifier(Token *id) {
                 symbol->details.intrinsic.resultType = intrinsic->details.intrinsic.resultType;
             }
             else {
-                defineType(symbol);
                 symbol->isFnRef = TRUE;
+                defineType(symbol);
             }
             return evaluateFunction(id, symbol, intrinsic);
         }
@@ -1560,7 +1569,7 @@ static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int 
 
     qualifier = getQualifier(subscriptList, idx);
     if (qualifier == NULL || qualifier->item == NULL || evaluateExpression(qualifier->item, subscript)) {
-        err("Incorrect array index");
+        err("Incorrect %s array index", symbol->identifier);
         return TRUE;
     }
     dt = getDataType(subscript);
@@ -2921,19 +2930,15 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
 }
 
 static char *parseDataType(char *s, Token *token, DataType *dt) {
+    int value;
+
     memset(dt, 0, sizeof(DataType));
     dt->type = BaseType_Undefined;
     if (token->type == TokenType_Keyword) {
         switch (token->details.keyword.id) {
         case CHARACTER:
             dt->type = BaseType_Character;
-            s = eatWsp(s);
-            if (*s == '*') {
-                s = parseCharConstraint(s + 1, token, dt);
-            }
-            else {
-                dt->constraint = 1;
-            }
+            dt->constraint = 1;
             break;
         case COMPLEX:
             dt->type = BaseType_Complex;
@@ -2953,6 +2958,22 @@ static char *parseDataType(char *s, Token *token, DataType *dt) {
             break;
         default:
             break;
+        }
+        s = eatWsp(s);
+        if (*s == '*') {
+            if (dt->type == BaseType_Character) {
+                s = parseCharConstraint(s + 1, token, dt);
+            }
+            else {
+                s = eatWsp(s + 1);
+                if (isdigit(*s)) {
+                    s = getIntValue(s, &value);
+                    warn("Type constraint ignored");
+                }
+                else {
+                    err("Type constraint syntax");
+                }
+            }
         }
     }
     return s;
@@ -4481,6 +4502,7 @@ static char *parseStringRange(char *s, StringRange **range) {
 
 static char *parseTypeDecl(char *s, DataType *dt) {
     char *id;
+    DataType *sdt;
     Symbol *symbol;
     Token token;
 
@@ -4490,35 +4512,52 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             id = token.details.identifier.name;
             symbol = findSymbol(id);
             if (symbol == NULL) {
-                if (dt->type == BaseType_Character && dt->constraint == -1) {
-                    err("Invalid assumed-length CHARACTER declaration");
-                    break;
-                }
                 symbol = addSymbol(id, SymClass_Undefined);
-                symbol->details.variable.dt = *dt;
             }
-            else if (symbol->class == SymClass_Argument && symbol->details.variable.dt.type == BaseType_Undefined) {
-                symbol->details.variable.dt = *dt;
+            sdt = NULL;
+            switch (symbol->class) {
+            case SymClass_Undefined:
+                if (dt->type == BaseType_Character && dt->constraint == -1) {
+                    err("Invalid assumed-length CHARACTER declaration of %s", id);
+                }
+                sdt = &symbol->details.variable.dt;
+                break;
+            case SymClass_Argument:
+            case SymClass_Auto:
+            case SymClass_Static:
+            case SymClass_Global:
+                sdt = &symbol->details.variable.dt;
+                break;
+            case SymClass_Function:
+                sdt = &symbol->details.progUnit.dt;
+                break;
+            case SymClass_Adjustable:
+                sdt = &symbol->details.adjustable.dt;
+                break;
+            case SymClass_Parameter:
+                sdt = &symbol->details.param.dt;
+                break;
+            case SymClass_Pointee:
+                sdt = &symbol->details.pointee.dt;
+                break;
+            default:
+                break;
             }
-            else if (symbol->class == SymClass_Function && symbol->details.progUnit.dt.type == BaseType_Undefined) {
-                symbol->details.progUnit.dt = *dt;
-            }
-            else {
+            if (sdt == NULL || sdt->type != BaseType_Undefined) {
                 err("Duplicate declaration of %s", id);
                 break;
             }
+            sdt->type = dt->type;
             if (dt->type == BaseType_Character) {
+                sdt->constraint = dt->constraint;
                 s = eatWsp(s);
                 if (*s == '*') {
-                    s = parseCharConstraint(s + 1, &token, &symbol->details.variable.dt);
-                    if (symbol->details.variable.dt.constraint == -1 && symbol->class != SymClass_Argument
-                        && symbol->class != SymClass_Function) {
-                        err("Invalid assumed-length CHARACTER declaration");
-                        break;
+                    s = parseCharConstraint(s + 1, &token, sdt);
+                    if (sdt->constraint == -1 && symbol->class != SymClass_Argument && symbol->class != SymClass_Function) {
+                        err("Invalid assumed-length CHARACTER declaration of %s", id);
                     }
                 }
             }
-            symbol->details.variable.dt.rank = 0;
             s = eatWsp(s);
             if (*s == '\0') {
                 break;
@@ -4527,6 +4566,9 @@ static char *parseTypeDecl(char *s, DataType *dt) {
                 s = eatWsp(s + 1);
             }
             else if (*s == '(') {
+                if (sdt->rank != 0) {
+                    err("Duplicate dimension declaration of %s", id);
+                }
                 s = parseDimDecl(s + 1, symbol);
                 if (symbol->class == SymClass_Undefined) {
                     defineLocalVariable(symbol);
@@ -4814,20 +4856,13 @@ static void parseCOMMON(char *s) {
             case SymClass_Static:
                 symbol->class = SymClass_Global;
                 symbol->details.variable.staticBlock = commonBlock;
-                defineType(symbol);
-                symbol->details.variable.offset = commonBlock->details.common.offset;
                 s = eatWsp(s);
                 if (*s == '(') {
                     if (symbol->details.variable.dt.rank != 0) {
-                        err("Duplicate declaration of %s", name);
+                        err("Duplicate dimension declaration of %s", name);
                     }
                     s = parseDimDecl(s + 1, symbol);
                     s = eatWsp(s);
-                }
-                size = calculateSize(symbol);
-                commonBlock->details.common.offset += size;
-                if (commonBlock->details.common.offset > commonBlock->details.common.limit) {
-                    commonBlock->details.common.limit = commonBlock->details.common.offset;
                 }
                 break;
             default:
@@ -5094,7 +5129,6 @@ static void parseDIMENSION(char *s) {
             else {
                 symbol->class = SymClass_Auto;
             }
-            defineType(symbol);
             /* fall through */
         case SymClass_Auto:
         case SymClass_Static:
@@ -5914,6 +5948,53 @@ static void parseIMPLICITNONE(char *s) {
 }
 
 static void parseINCLUDE(char *s) {
+    DataType *dt;
+    Token *expression;
+    FILE *fp;
+    bool isErr;
+    char *path;
+    OperatorArgument result;
+
+    if (sourceStkPtr + 1 >= MAX_SRC_STACK_SIZE) {
+        err("INCLUDE nested too deeply");
+        return;
+    }
+    s = parseExpression(s, &expression);
+    if (expression == NULL) {
+        err("Expression syntax");
+        return;
+    }
+    if (*s != '\0') {
+        err("Unexpected text at end of statement");
+        return;
+    }
+    enableEmission(FALSE);
+    isErr = evaluateExpression(expression, &result);
+    enableEmission(TRUE);
+    freeToken(expression);
+    if (isErr) return;
+    if (!isConstant(result)) {
+        err("Non-constant expression");
+        if (isCalculation(result)) freeRegister(result.reg);
+        return;
+    }
+    dt = getDataType(&result);
+    if (dt->type != BaseType_Character) {
+        err("Non-character expression");
+        return;
+    }
+    path = result.details.constant.value.character.string;
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        err("Failed to open %s", path);
+        freeCharValue(&result.details.constant.value);
+        return;
+    }
+    pushSource();
+    sourceFile = fp;
+    sourcePath = result.details.constant.value.character.string;
+    lineNo = 0;
+    lineBuf[0] = '\0';
 }
 
 static void parseINQUIRE(char *s) {
@@ -6072,8 +6153,8 @@ static void parsePARAMETER(char *s) {
             symbol = addSymbol(name, SymClass_Undefined);
         }
         if (symbol->class == SymClass_Undefined) {
-            defineType(symbol);
             symbol->class = SymClass_Parameter;
+            defineType(symbol);
         }
         else {
             err("Parameter name not unique: %s", name);
@@ -6586,12 +6667,17 @@ static void popOp(OperatorDetails *op) {
     }
 }
 
-static void presetImplicit(void) {
-    char c;
+static void popSource(void) {
+    SourceStackEntry *entry;
 
-    for (c = 'A'; c <  'I'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
-    for (c = 'I'; c <  'O'; c++) implicitTypes[c - 'A'].type = BaseType_Integer;
-    for (c = 'O'; c <= 'Z'; c++) implicitTypes[c - 'A'].type = BaseType_Real;
+    fclose(sourceFile);
+    free(sourcePath);
+    entry = &sourceStack[--sourceStkPtr];
+    sourceFile = entry->sourceFile;
+    sourcePath = entry->sourcePath;
+    lineNo = entry->lineNo;
+    strcpy(lineBuf, entry->lineBuf);
+    free(entry->lineBuf);
 }
 
 static void presetProgUnit(void) {
@@ -6769,6 +6855,17 @@ static void pushOp(OperatorDetails *op) {
         fputs("Operator stack overflow\n", stderr);
         exit(1);
     }
+}
+
+static void pushSource(void) {
+    SourceStackEntry *entry;
+
+    entry = &sourceStack[sourceStkPtr++];
+    entry->sourceFile = sourceFile;
+    entry->sourcePath = sourcePath;
+    entry->lineNo = lineNo;
+    entry->lineBuf = (char *)allocate(strlen(lineBuf) + 1);
+    strcpy(entry->lineBuf, lineBuf);
 }
 
 static char *readLine(void) {

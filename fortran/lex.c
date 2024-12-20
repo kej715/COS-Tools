@@ -541,7 +541,9 @@ char *getNextToken(char *s, Token *token, bool doMatchKeywords) {
 }
 
 static char *getNumber(char *s, Token *token) {
+    char buf[4];
     char *cp;
+    int i;
     char *start;
     i64 value;
 
@@ -550,12 +552,25 @@ static char *getNumber(char *s, Token *token) {
     if (*s == '.') {
         cp = getNextChar(s + 1);
         if (isalpha(*cp)) { // could be .AND., .OR., etc.
+            i = 0;
+            while (i < sizeof(buf) && *cp != '\0') {
+                buf[i++] = toupper(*cp++);
+                cp = getNextChar(cp);
+            }
+            cp = buf;
+            if (i > 1 && (*cp == 'E' || *cp == 'D')) {
+                cp += 1;
+                if (isdigit(*cp)
+                    || (i > 2 && (*cp == '-' || *cp == '+') && isdigit(*(cp + 1)))) {
+                    return getFloat(start, token);
+                }
+            }
             token->type = TokenType_Constant;
             token->details.constant.dt.type = BaseType_Integer;
             token->details.constant.value.integer = value;
         }
         else {
-            s = getFloat(start, token);
+            return getFloat(start, token);
         }
     }
     else if (*s == 'B' || *s == 'b') {
