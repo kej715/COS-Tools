@@ -98,6 +98,7 @@ void emitLeReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 Register emitLoadAdjBoundsRef(Symbol *symbol);
 void emitLoadByteReference(OperatorArgument *subject, OperatorArgument *object);
 void emitLoadConst(OperatorArgument *arg);
+void emitLoadConstInt(Register reg, i64 value);
 void emitLoadConstOffset(OperatorArgument *arg);
 Register emitLoadFrame(int offset);
 void emitLoadNullPtr(OperatorArgument *arg);

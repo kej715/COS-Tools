@@ -2396,7 +2396,10 @@ static void outputCheckIostat(ControlInfoList *ciList) {
 }
 
 static void outputFini(ControlInfoList *ciList) {
-    if (ciList->unitType != BaseType_Character) {
+    if (ciList->unitType == BaseType_Character) {
+        emitPrimCall("@_flustr");
+    }
+    else {
         emitPrimCall((ciList->format == NULL) ? "@_flulst" : "@_flufmt");
         outputCheckIostat(ciList);
     }
@@ -2417,6 +2420,7 @@ static void outputInit(ControlInfoList *ciList) {
     ciList->unitType = dt->type;
     if (ciList->unitType == BaseType_Character) {
         emitPrimCall("@_setrcd");
+        emitPrimCall("@_inircd");
     }
     else {
         emitPrimCall("@_setdrc");
@@ -6827,6 +6831,9 @@ static void processOutputList(IoListItem *ioList, ControlInfoList *ciList) {
                     err("Invalid data type of list-directed I/O element");
                     return;
                 }
+            }
+            else if (ciList->unitType == BaseType_Character) {
+                emitPrimCall("@_wrsfmt");
             }
             else {
                 emitPrimCall("@_wrufmt");

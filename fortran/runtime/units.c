@@ -155,6 +155,12 @@ void _flulst(int unitNum) {
     }
 }
 
+void _flustr(void) {
+    int eor;
+
+    _outfin(&eor);
+}
+
 void _inifio(void) {
     int rc;
     Unit *up;
@@ -398,6 +404,16 @@ void _rdurec(int unitNum) {
         else {
             *s++ = c;
         }
+    }
+}
+
+void _wrsfmt(unsigned long strRef, DataValue *value) {
+    int eor;
+
+    _outfmt(value, &eor);
+    while (eor) {
+        eor = 0;
+        _outfmt(value, &eor);
     }
 }
 

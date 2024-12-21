@@ -457,8 +457,6 @@ void _setfdl(FormatDesc *fdp) {
 }
 
 void _setrcd(unsigned long strRef) {
-    char *s;
-
     currentRecord = (char *)(strRef & 0xffffffff);
     cursor = currentRecord;
     limit  = currentRecord + (strRef >> 32);

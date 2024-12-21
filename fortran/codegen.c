@@ -38,7 +38,6 @@
 static void emit(char *format, ...);
 static void emitBranchTarget(char *label);
 static void emitFloat(double f);
-static void emitLoadConstInt(Register reg, i64 value);
 static void emitLoadPointer(Symbol *pointee, char *regName);
 static Register emitLoadStackAddr(int offset);
 static void emitPopAddrReg(Register reg);
@@ -945,7 +944,7 @@ void emitLoadConst(OperatorArgument *arg) {
     arg->details.calculation = dt;
 }
 
-static void emitLoadConstInt(Register reg, i64 value) {
+void emitLoadConstInt(Register reg, i64 value) {
     if (value >= 0 && value <= 07777777) {
         emit("         S%o        %ld\n", reg, value);
     }
