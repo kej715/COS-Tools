@@ -3267,15 +3267,15 @@ static char *parseExpression(char *s, Token **expression) {
         }
         break;
     case TokenType_Identifier:
+        tp = copyToken(&token);
         if (*s == '(') {
             start = s;
             s = eatWsp(s + 1);
             if (*s == ')') { // maybe a parameter-less function call
                 expressionList = (TokenListItem *)allocate(sizeof(TokenListItem));
-                s = eatWsp(s + 1);
+                s += 1;
             }
             else {
-                tp = copyToken(&token);
                 s = parseExpressionList(start, &expressionList);
                 if (s == NULL) {
                     freeToken(tp);
@@ -3296,6 +3296,8 @@ static char *parseExpression(char *s, Token **expression) {
                 }
             }
         }
+        tp->details.identifier.qualifiers = expressionList;
+        tp->details.identifier.range = strRange;
         /*
          *  Fall through
          */
@@ -3315,10 +3317,6 @@ static char *parseExpression(char *s, Token **expression) {
         }
         s = eatWsp(s);
         if (*s == '\0' || *s == ',' || *s == ')' || *s == ':') {
-            if (tp->type == TokenType_Identifier) {
-                tp->details.identifier.qualifiers = expressionList;
-                tp->details.identifier.range = strRange;
-            }
             *expression = tp;
         }
         else {
