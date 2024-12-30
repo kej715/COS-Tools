@@ -870,7 +870,11 @@ bool linkVariables(Symbol *fromSym, int fromOffset, Symbol *toSym, int toOffset)
         toOffset = toOffset << 3;
     }
     offset = fromOffset - toOffset;
-    if (offset >= 0) {
+    if (toSym->class == SymClass_Global && fromSym->class != SymClass_Global) {
+        left   = toSym;
+        right  = fromSym;
+    }
+    else if (offset >= 0) {
         left   = fromSym;
         right  = toSym;
     }

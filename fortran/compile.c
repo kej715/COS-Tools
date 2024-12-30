@@ -1096,7 +1096,9 @@ static bool evaluateFmtSpec(ControlInfoList *ciList) {
     Symbol *sym;
 
     if (ciList->format == NULL) {
-        emitPrimCall("@_prslst");
+        if (ciList->isListDirected) {
+            emitPrimCall("@_prslst");
+        }
         return FALSE;
     }
     if (evaluateExpression(ciList->format, &result)) return TRUE;
@@ -1383,7 +1385,6 @@ static bool evaluateIdentifier(Token *id) {
                 emitLoadReference(&arg, NULL);
                 emitUpdateStringRef(&arg, &strOffset, &strLength);
             }
-            loadValue(&arg);
         }
         else {
             err("%s is not an array", symbol->identifier);
@@ -2129,7 +2130,7 @@ static void inputInit(ControlInfoList *ciList) {
     if (ciList->unitType == BaseType_Character) {
         emitPrimCall("@_setrcd");
     }
-    else {
+    else if (ciList->format != NULL || ciList->isListDirected) {
         emitPrimCall("@_setdrc");
         emitPrimCall("@_rdurec");
         inputCheckIostat(ciList);
@@ -2400,8 +2401,14 @@ static void outputFini(ControlInfoList *ciList) {
         emitPrimCall("@_flustr");
     }
     else {
-        emitPrimCall((ciList->format == NULL) ? "@_flulst" : "@_flufmt");
-        outputCheckIostat(ciList);
+        if (ciList->isListDirected) {
+            emitPrimCall("@_flulst");
+            outputCheckIostat(ciList);
+        }
+        else if (ciList->format != NULL) {
+            emitPrimCall("@_flufmt");
+            outputCheckIostat(ciList);
+        }
     }
     if (ciList->format != NULL) emitPrimCall("@_endfmt");
     emitAdjustSP(3);
@@ -2422,7 +2429,7 @@ static void outputInit(ControlInfoList *ciList) {
         emitPrimCall("@_setrcd");
         emitPrimCall("@_inircd");
     }
-    else {
+    else if (ciList->format != NULL || ciList->isListDirected) {
         emitPrimCall("@_setdrc");
     }
 }
@@ -2729,7 +2736,6 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
     DataType *dt;
     int ec;
     Token *expression;
-    bool isListDirected;
     ControlInfoList *list;
     Symbol *labelSym;
     int len;
@@ -2742,7 +2748,6 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
 
     list = (ControlInfoList *)allocate(sizeof(ControlInfoList));
     *ciList = list;
-    isListDirected = FALSE;
     s = eatWsp(s);
     if (*s != '(') {
         err("I/O control info list syntax");
@@ -2754,11 +2759,11 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
     for (;;) {
         s = eatWsp(s + 1);
         if (*s == '*' && n < 2) {
-            if (list->unit == NULL && isListDirected == FALSE) {
+            if (list->unit == NULL && list->isListDirected == FALSE) {
                 list->unit = createIntegerConstant(defaultUnit);
             }
-            else if (list->format == NULL && isListDirected == FALSE) {
-                isListDirected = TRUE;
+            else if (list->format == NULL && list->isListDirected == FALSE) {
+                list->isListDirected = TRUE;
             }
             else {
                 err("I/O control info list syntax");
@@ -2774,11 +2779,11 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
             if (token.type == TokenType_Identifier && *s == '=') {
                 s = eatWsp(s + 1);
                 if (*s == '*') {
-                    if (list->unit == NULL && isListDirected == FALSE) {
+                    if (list->unit == NULL && list->isListDirected == FALSE) {
                         list->unit = createIntegerConstant(defaultUnit);
                     }
-                    else if (list->format == NULL && isListDirected == FALSE) {
-                        isListDirected = TRUE;
+                    else if (list->format == NULL && list->isListDirected == FALSE) {
+                        list->isListDirected = TRUE;
                     }
                     else {
                         err("I/O control info list syntax");
@@ -2805,7 +2810,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                         list->unit = expression;
                     }
                     else if (strcasecmp(keyword, "FMT") == 0) {
-                        if (list->format != NULL || isListDirected) {
+                        if (list->format != NULL || list->isListDirected) {
                             err("FMT specified more than once");
                             break;
                         }
@@ -2899,7 +2904,7 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
                 if (list->unit == NULL) {
                     list->unit = expression;
                 }
-                else if (list->format == NULL && isListDirected == FALSE) {
+                else if (list->format == NULL && list->isListDirected == FALSE) {
                     list->format = expression;
                 }
                 else {
@@ -3513,6 +3518,7 @@ static char *parseFmtSpec(char *s, ControlInfoList *ciList) {
 
     s = eatWsp(s);
     if (*s == '*') {
+        ciList->isListDirected = TRUE;
         s += 1;
     }
     else {
@@ -4318,8 +4324,8 @@ static void parseStmtFunction(char *s, Token *id) {
     }
     if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
         symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
-        symbol->details.progUnit.offset = -1;
     }
+    symbol->details.progUnit.offset = -1;
     strcpy(qualifier, getProgUnitQualifier());
     dt = &symbol->details.progUnit.dt;
     s = parseFormalArguments(s, TRUE);
@@ -6761,25 +6767,50 @@ static void processInputList(IoListItem *ioList, ControlInfoList *ciList) {
             emitStoreStack(target.reg, 1);
             freeRegister(target.reg);
             if (ciList->format == NULL) {
-                switch (dt->type) {
-                case BaseType_Character:
-                    emitPrimCall("@_inpchr");
-                    break;
-                case BaseType_Logical:
-                    emitPrimCall("@_inplog");
-                    break;
-                case BaseType_Integer:
-                case BaseType_Pointer:
-                    emitPrimCall("@_inpint");
-                    break;
-                case BaseType_Real:
-                case BaseType_Double:
-                    emitPrimCall("@_inpdbl");
-                    break;
-                case BaseType_Complex: /* TODO */
-                default:
-                    err("Invalid data type of list-directed I/O element");
-                    return;
+                if (ciList->isListDirected) {
+                    switch (dt->type) {
+                    case BaseType_Character:
+                        emitPrimCall("@_inpchr");
+                        break;
+                    case BaseType_Logical:
+                        emitPrimCall("@_inplog");
+                        break;
+                    case BaseType_Integer:
+                    case BaseType_Pointer:
+                        emitPrimCall("@_inpint");
+                        break;
+                    case BaseType_Real:
+                    case BaseType_Double:
+                        emitPrimCall("@_inpdbl");
+                        break;
+                    case BaseType_Complex: /* TODO */
+                    default:
+                        err("Invalid data type of list-directed I/O element");
+                        return;
+                    }
+                }
+                else {
+                    if (ciList->unitType == BaseType_Character) {
+                       err("Invalid unformatted read from CHARACTER");
+                       return;
+                    }
+                    switch (dt->type) {
+                    case BaseType_Character:
+                        emitPrimCall("@_inbchr");
+                        break;
+                    case BaseType_Logical:
+                    case BaseType_Integer:
+                    case BaseType_Pointer:
+                    case BaseType_Real:
+                    case BaseType_Double:
+                        emitPrimCall("@_inbwrd");
+                        break;
+                    case BaseType_Complex: /* TODO */
+                    default:
+                        err("Invalid data type of unformatted I/O element");
+                        return;
+                    }
+                    inputCheckIostat(ciList);
                 }
             }
             else {
@@ -6794,6 +6825,7 @@ static void processOutputList(IoListItem *ioList, ControlInfoList *ciList) {
     ImpliedDoList *doList;
     DataType *dt;
     DoStackEntry entry;
+    Register reg;
     OperatorArgument result;
 
     while (ioList != NULL) {
@@ -6806,11 +6838,11 @@ static void processOutputList(IoListItem *ioList, ControlInfoList *ciList) {
         }
         else {
             if (evaluateExpression(ioList->details.expression, &result)) return;
-            loadValue(&result);
-            emitStoreStack(result.reg, 1);
-            freeRegister(result.reg);
-            if (ciList->format == NULL) {
-                dt = getDataType(&result);
+            dt = getDataType(&result);
+            if (ciList->isListDirected) {
+                loadValue(&result);
+                emitStoreStack(result.reg, 1);
+                freeRegister(result.reg);
                 switch (dt->type) {
                 case BaseType_Character:
                     emitPrimCall("@_lstchr");
@@ -6832,12 +6864,58 @@ static void processOutputList(IoListItem *ioList, ControlInfoList *ciList) {
                     return;
                 }
             }
-            else if (ciList->unitType == BaseType_Character) {
-                emitPrimCall("@_wrsfmt");
-            }
             else {
-                emitPrimCall("@_wrufmt");
-                outputCheckIostat(ciList);
+                if (isLoadable(result)) {
+                    emitLoadByteReference(&result, NULL);
+                    emitStoreStack(result.reg, 1);
+                    freeRegister(result.reg);
+                }
+                else {
+                    loadValue(&result);
+                    if (dt->type == BaseType_Character) {
+                        emitStoreStack(result.reg, 1);
+                        freeRegister(result.reg);
+                    }
+                    else {
+                        emitStoreStack(result.reg, 2);
+                        freeRegister(result.reg);
+                        reg = emitLoadStackByteAddr(2);
+                        emitStoreStack(reg, 1);
+                        freeRegister(reg);
+                    }
+                }
+                if (ciList->format != NULL) {
+                    if (ciList->unitType == BaseType_Character) {
+                        emitPrimCall("@_wrsfmt");
+                    }
+                    else {
+                        emitPrimCall("@_wrufmt");
+                        outputCheckIostat(ciList);
+                    }
+                }
+                else {
+                    if (ciList->unitType == BaseType_Character) {
+                       err("Invalid unformatted write to CHARACTER");
+                       return;
+                    }
+                    switch (dt->type) {
+                    case BaseType_Character:
+                        emitPrimCall("@_wrbchr");
+                        break;
+                    case BaseType_Logical:
+                    case BaseType_Integer:
+                    case BaseType_Pointer:
+                    case BaseType_Real:
+                    case BaseType_Double:
+                        emitPrimCall("@_wrbwrd");
+                        break;
+                    case BaseType_Complex: /* TODO */
+                    default:
+                        err("Invalid data type of unformatted I/O element");
+                        return;
+                    }
+                    outputCheckIostat(ciList);
+                }
             }
         }
         ioList = ioList->next;
@@ -6891,7 +6969,7 @@ static char *readLine(void) {
             if (feof(sourceFile) && lp != lineEnd) break;
             return NULL;
         }
-#if defined(__cos)
+#if 0  /* defined(__cos) */
         else if (c == 0x1b) {
             /*
              * Handle COS blank compression indicator

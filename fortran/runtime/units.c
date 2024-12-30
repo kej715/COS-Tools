@@ -43,6 +43,7 @@ static void copyStrToRef(char *s1, ulong ref);
 static Unit *getUnit(int unitNum, int flags, int recLen);
 static int openUnit(char *fileName, int unitNum, int flags, int recLen);
 static void refToCharPtr(ulong ref, char **s, int *len);
+static int trim(char *s, int len);
 static int writer(Unit *up, void *buf, size_t nbyte);
 
 Unit *_allocu(int unitNum) {
@@ -161,6 +162,50 @@ void _flustr(void) {
     _outfin(&eor);
 }
 
+void _inbchr(int unitNum, unsigned long ref) {
+    int len;
+    int n;
+    char *s;
+    Unit *up;
+
+    up = getUnit(unitNum, MASK_UNFORMATTED, MAX_FMT_RECL);
+    if (up->ioStat != 0) return;
+    s = (char *)(ref & 0xffffffff);
+    len = ref >> 32;
+    n = read(up->fd, s, len);
+    if (n == len) {
+        up->ioStat = 0;
+    }
+    else if (n == 0) {
+        up->ioStat = -1;
+    }
+    else {
+        up->ioStat = errno;
+        if (errno == 0) {
+            s += n;
+            while (n++ < len) *s++ = ' ';
+        }
+    }
+}
+
+void _inbwrd(int unitNum, u64 *value) {
+    int n;
+    Unit *up;
+
+    up = getUnit(unitNum, MASK_UNFORMATTED, MAX_FMT_RECL);
+    if (up->ioStat != 0) return;
+    n = read(up->fd, (u8 *)value, sizeof(u64));
+    if (n == sizeof(u64)) {
+        up->ioStat = 0;
+    }
+    else if (n == 0) {
+        up->ioStat = -1;
+    }
+    else {
+        up->ioStat = errno;
+    }
+}
+
 void _inifio(void) {
     int rc;
     Unit *up;
@@ -175,6 +220,11 @@ void _inifio(void) {
     up->flags = MASK_IMMUTABLE | MASK_OPEN;
     strcpy(up->fileName, "$OUT");
 
+    up = _allocu(103);
+    up->fd = 2;
+    up->flags = MASK_OPEN;
+    strcpy(up->fileName, "$ERR");
+
     up = _allocu(5);
     up->fd = 0;
     up->flags = MASK_OPEN;
@@ -184,6 +234,11 @@ void _inifio(void) {
     up->fd = 1;
     up->flags = MASK_OPEN;
     strcpy(up->fileName, "$OUT");
+
+    up = _allocu(7);
+    up->fd = 2;
+    up->flags = MASK_OPEN;
+    strcpy(up->fileName, "$ERR");
 }
 
 int _iostat(int unitNum) {
@@ -197,7 +252,7 @@ void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ul
     char *fileName;
     char fileNameBuf[MAX_FILE_NAME_LEN+1];
     int flags;
-    bool isNameUndefined;
+    bool isNameDefined;
     int len;
     int rc;
     char *s;
@@ -205,22 +260,24 @@ void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ul
 
     flags = 0;
     refToCharPtr(fileNameRef, &fileName, &len);
-    if (len > MAX_FILE_NAME_LEN) {
-        fputs("File name too long: ", stderr);
-        fwrite(fileName, 1, len, stderr);
-        fputs("\n", stderr);
-        exit(1);
-    }
-    isNameUndefined = fileName == NULL;
-    if (isNameUndefined) {
-        sprintf(fileNameBuf, "UNIT%d", unitNum);
-        flags |= MASK_SCRATCH | MASK_NEW;
-    }
-    else {
+    isNameDefined = fileName != NULL;
+    if (isNameDefined) {
+        len = trim(fileName, len);
+        if (len > MAX_FILE_NAME_LEN) {
+            fputs("File name too long: ", stderr);
+            fwrite(fileName, 1, len, stderr);
+            fputs("\n", stderr);
+            exit(1);
+        }
         memcpy(fileNameBuf, fileName, len);
         fileNameBuf[len] = '\0';
     }
+    else {
+        sprintf(fileNameBuf, "UNIT%d", unitNum);
+        flags |= MASK_SCRATCH | MASK_NEW;
+    }
     refToCharPtr(statusRef, &s, &len);
+    len = trim(s, len);
     if (len == 3 && strncasecmp(s, "NEW", len) == 0) {
         flags |= MASK_NEW;
     }
@@ -228,7 +285,7 @@ void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ul
         flags |= MASK_SCRATCH;
     }
     else if (s == NULL || (len == 7 && strncasecmp(s, "UNKNOWN", len) == 0)) {
-        if (isNameUndefined == FALSE) {
+        if (isNameDefined) {
             flags &= ~MASK_NEW;
         }
     }
@@ -239,6 +296,7 @@ void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ul
         exit(1);
     }
     refToCharPtr(accessRef, &s, &len);
+    len = trim(s, len);
     if (len == 6 && strncasecmp(s, "DIRECT", len) == 0) {
         flags |= MASK_DIRECT;
     }
@@ -249,6 +307,7 @@ void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ul
         exit(1);
     }
     refToCharPtr(formattingRef, &s, &len);
+    len = trim(s, len);
     if (len == 11 && strncasecmp(s, "UNFORMATTED", len) == 0) {
         flags |= MASK_UNFORMATTED;
     }
@@ -259,6 +318,7 @@ void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ul
         exit(1);
     }
     refToCharPtr(blankRef, &s, &len);
+    len = trim(s, len);
     if (len == 4 && strncasecmp(s, "ZERO", len) == 0) {
         flags |= MASK_ZERO;
     }
@@ -404,6 +464,43 @@ void _rdurec(int unitNum) {
         else {
             *s++ = c;
         }
+    }
+}
+
+void _wrbchr(int unitNum, unsigned long ref) {
+    int len;
+    int n;
+    char *s;
+    Unit *up;
+
+    up = getUnit(unitNum, MASK_UNFORMATTED|MASK_NEW, MAX_FMT_RECL);
+    if (up->ioStat != 0) return;
+    s = (char *)(ref & 0xffffffff);
+    len = ref >> 32;
+    n = write(up->fd, s, len);
+    if (n == len) {
+        up->ioStat = 0;
+    }
+    else if (n < 0) {
+        up->ioStat = errno;
+    }
+    else {
+        up->ioStat = EIO;
+    }
+}
+
+void _wrbwrd(int unitNum, u64 *value) {
+    int n;
+    Unit *up;
+
+    up = getUnit(unitNum, MASK_UNFORMATTED|MASK_NEW, MAX_FMT_RECL);
+    if (up->ioStat != 0) return;
+    n = write(up->fd, (u8 *)value, sizeof(u64));
+    if (n == sizeof(u64)) {
+        up->ioStat = 0;
+    }
+    else {
+        up->ioStat = errno;
     }
 }
 
@@ -557,6 +654,20 @@ static int openUnit(char *fileName, int unitNum, int flags, int recLen) {
 static void refToCharPtr(ulong ref, char **s, int *len) {
     *s = (char *)(ref & 0xffffffff);
     *len = ref >> 32;
+}
+
+static int trim(char *s, int len) {
+    char *cp;
+
+    if (s != NULL) {
+        cp = s + (len - 1);
+        while (cp >= s && *cp == ' ') cp -= 1;
+
+        return (cp - s) + 1;
+    }
+    else {
+        return 0;
+    }
 }
 
 static int writer(Unit *up, void *buf, size_t nbyte) {

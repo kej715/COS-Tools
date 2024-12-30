@@ -1,15 +1,15 @@
 # FORTRAN 77 Compiler
-This directory and its subdirectories contain _KFTC_ (Kevin's FORTRAN Compiler), an
+This directory and its subdirectories contain _kFTC_ (Kevin's FORTRAN Compiler), an
 implementation of a FORTRAN 77 compiler and its supporting runtime and intrinsic function
 libraries for COS 1.17. The original compiler provided by Cray Research, Inc. was lost from
 the COS 1.17 image recovered for the
-[Cray simulator](https://github.com/andrastantos/cray-sim). _KFTC_ is intended to fill this
+[Cray simulator](https://github.com/andrastantos/cray-sim). _kFTC_ is intended to fill this
 gap for hobbyists interested in experiencing FORTRAN programming in the COS 1.17 environment.
 The compiler is strongly influenced by, but not identical in functionality to, the original
 Cray compiler as documented by
 [CFT77 Reference Manual](http://bitsavers.trailing-edge.com/pdf/cray/CFT/SR-0018B_CFT77_Reference_Feb88.pdf).
 
-_KFTC_ is a single pass, recursive descent parser. It parses FORTRAN 77 source code and produces CAL (Cray
+_kFTC_ is a single pass, recursive descent parser. It parses FORTRAN 77 source code and produces CAL (Cray
 Assembly Language) source code as output. The [CAL assembler](../README.md#cal) can then be
 applied to produce Cray X-MP relocatable object code, and the
 [LDR linking loader](../README.md#ldr) can be applied to the object code to resolve external
@@ -43,7 +43,7 @@ See [Going Native with the Tools](../README.md#native) for instructions about in
 native compiler and the libraries on which it depends on a Cray X-MP system running COS 1.17.
 
 ## Intrinsic Functions
-_KFTC_ implements all ANSI-standard FORTRAN 77 intrinsic functions. The following
+_kFTC_ implements all ANSI-standard FORTRAN 77 intrinsic functions. The following
 intrinsic functions defined by Cray as extensions are supported too, as documented by
 [CFT77 Reference Manual](http://bitsavers.trailing-edge.com/pdf/cray/CFT/SR-0018B_CFT77_Reference_Feb88.pdf).
 
@@ -62,7 +62,7 @@ Additionally, logical operators such as .AND., .OR., and .NOT. apply to INTEGER 
 documented for BOOLEAN values by [CFT77 Reference Manual](http://bitsavers.trailing-edge.com/pdf/cray/CFT/SR-0018B_CFT77_Reference_Feb88.pdf).
 
 ### Explicit Vector Functions
-_KFTC_ does not implement implicit vectorization yet, but its intrinsic function library
+_kFTC_ does not implement implicit vectorization yet, but its intrinsic function library
 provides **explicit** vector functions that make use of Cray X-MP vector registers and vector
 instructions. These are defined as follows:
 
@@ -140,9 +140,17 @@ The following code would load the second **row** of MATRIX into vector register 
      I = VLOAD(5, 10, MATRIX(2,1))
 ```
 
+### Additional Intrinsic Functions
+The following additional intrinsic functions are provided by _kFTC_:
+
+| Function Defn | Description | Result  | Arguments |
+|---------------|-------------|---------|-----------|
+| _i_ = **CPUTIME**() | Returns the current amount of CPU time consumed by the COS job. | INTEGER | none |
+
+
 ## Features not yet implemented
 
-FORTRAN 77 features not yet implemented by _KFTC_ include:
+FORTRAN 77 features not yet implemented by _kFTC_ include:
 
 - Implied DO loops in DATA statements (implied DO in I/O statements *is* supported)
 - Direct access files
@@ -153,4 +161,4 @@ FORTRAN 77 features not yet implemented by _KFTC_ include:
 - DOUBLE PRECISION is handled the same as REAL
 - COMPLEX
 
-In addition, _KFTC_ does not yet implement any implicit vectorization.
+In addition, _kFTC_ does not yet implement any implicit vectorization.

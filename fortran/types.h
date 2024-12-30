@@ -470,6 +470,7 @@ typedef struct controlInfoList {
     Token *unit;
     BaseType unitType;
     Token *format;
+    int isListDirected;
     Symbol *endLabel;
     Symbol *errLabel;
     Token *recordNumber;

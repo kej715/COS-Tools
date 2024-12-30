@@ -130,7 +130,7 @@ void readNextLine(void) {
                 exit(1);
             }
         }
-#if defined(__cos)
+#if 0  /* defined(__cos) */
         else if (c == 0x1b) {
             /*
              * Handle COS blank compression indicator

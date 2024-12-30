@@ -544,12 +544,14 @@ static char *getNumber(char *s, Token *token) {
     char buf[4];
     char *cp;
     int i;
+    int n;
     char *start;
     i64 value;
 
     start = s;
     s = getInteger(start, &value);
-    if (*s == '.') {
+    switch (*s) {
+    case '.':
         cp = getNextChar(s + 1);
         if (isalpha(*cp)) { // could be .AND., .OR., etc.
             i = 0;
@@ -565,39 +567,76 @@ static char *getNumber(char *s, Token *token) {
                     return getFloat(start, token);
                 }
             }
-            token->type = TokenType_Constant;
-            token->details.constant.dt.type = BaseType_Integer;
-            token->details.constant.value.integer = value;
         }
         else {
             return getFloat(start, token);
         }
-    }
-    else if (*s == 'B' || *s == 'b') {
-        s = getOctal(start, token);
-    }
-    else if (*s == 'E' || *s == 'e' || *s == 'D' || *s == 'd') {
-        s = getFloat(start, token);
-    }
-    else if (*s == 'H' || *s == 'h') {
-        token->type = TokenType_Constant;
-        token->details.constant.dt.type = BaseType_Character;
-        token->details.constant.value.character.length = value;
-        token->details.constant.value.character.string = cp = (char *)allocate(value + 1);
-        s += 1;
-        while (*s != '\0' && value > 0) {
-            *cp++ = *s++;
-            value -= 1;
+        break;
+    case 'B':
+    case 'b':
+        return getOctal(start, token);
+    case 'D':
+    case 'd':
+    case 'E':
+    case 'e':
+        return getFloat(start, token);
+    case 'H':
+    case 'h':
+        n = value;
+        value = 0;
+        if (n < 0) {
+            return setInvalidToken(start, token);
         }
-        while (value-- > 0) *cp++ = ' ';
-        *cp = '\0';
+        s += 1;
+        for (i = 0; i < n; i++) {
+            if (*s == '\0') {
+                return setInvalidToken(start, token);
+            }
+            if (i < 8) value = (value << 8) | *s;
+            s += 1;
+        }
+        while (n++ < 8) value = (value << 8) | ' ';
+        break;
+    case 'L':
+    case 'l':
+        n = value;
+        value = 0;
+        if (n < 0) {
+            return setInvalidToken(start, token);
+        }
+        s += 1;
+        for (i = 0; i < n; i++) {
+            if (*s == '\0') {
+                return setInvalidToken(start, token);
+            }
+            if (i < 8) value = (value << 8) | *s;
+            s += 1;
+        }
+        if (n < 8) value <<= (8 - n) << 3;
+        break;
+    case 'R':
+    case 'r':
+        n = value;
+        value = 0;
+        if (n < 0) {
+            return setInvalidToken(start, token);
+        }
+        s += 1;
+        for (i = 0; i < n; i++) {
+            if (*s == '\0') {
+                return setInvalidToken(start, token);
+            }
+            if (i < 8) value = (value << 8) | *s;
+            s += 1;
+        }
+        if (n < 8) value >>= (8 - n) << 3;
+        break;
+    default:
+        break;
     }
-    else {
-        token->type = TokenType_Constant;
-        token->details.constant.dt.type = BaseType_Integer;
-        token->details.constant.value.integer = value;
-    }
-
+    token->type = TokenType_Constant;
+    token->details.constant.dt.type = BaseType_Integer;
+    token->details.constant.value.integer = value;
     return s;
 }
 

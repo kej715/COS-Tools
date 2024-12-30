@@ -99,9 +99,7 @@ void _endfmt(void) {
 }
 
 void _inircd(void) {
-    char *cp;
-
-    for (cp = currentRecord; cp < limit; cp++) *cp = ' ';
+    memset(currentRecord, ' ', limit - currentRecord);
     cursor = currentRecord;
 }
 
@@ -173,6 +171,9 @@ void _inpfmt(void *value) {
             charRef = (unsigned long)value;
             s = (char *)(charRef & 0xffffffff);
             len = charRef >> 32;
+            if (len == 0) { // value is not type CHARACTER
+                len = 8;
+            }
             fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
             while (fieldWidth > 0 && len > 0) {
                 if (cursor < limit) {
@@ -187,6 +188,9 @@ void _inpfmt(void *value) {
             charRef = (unsigned long)value;
             s = (char *)(charRef & 0xffffffff);
             len = charRef >> 32;
+            if (len == 0) { // value is not type CHARACTER
+                len = 8;
+            }
             fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
             while (len > fieldWidth) {
                 *s++ = ' ';
@@ -1002,6 +1006,9 @@ static void outfmtHelper(void *value, int doEndOnRep, int *eor) {
                 charRef = (unsigned long)value;
                 s = (char *)(charRef & 0xffffffff);
                 len = charRef >> 32;
+                if (len == 0) { // value is not type CHARACTER
+                    len = 8;
+                }
                 fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
                 if (len < fieldWidth) {
                     n = fieldWidth - len;
@@ -1029,25 +1036,25 @@ static void outfmtHelper(void *value, int doEndOnRep, int *eor) {
         case Fmt_F:
         case Fmt_G:
             if (doEndOnRep == 0) {
-                fmtReal((f64)value, nextDesc);
+                fmtReal(*(f64 *)value, nextDesc);
             }
             return;
         case Fmt_I:
             if (doEndOnRep == 0) {
-                fmtInt((u64)value, nextDesc, 10);
+                fmtInt(*(u64 *)value, nextDesc, 10);
             }
             return;
         case Fmt_L:
             if (doEndOnRep == 0) {
                 fieldWidth = (nextDesc->width == 0) ? 1 : nextDesc->width;
                 s = cursor + fieldWidth - 1;
-                if (s < limit) *s = ((u64)value == 0) ? 'F' : 'T';
+                if (s < limit) *s = (*(u64 *)value == 0) ? 'F' : 'T';
                 cursor += fieldWidth;
             }
             return;
         case Fmt_O:
             if (doEndOnRep == 0) {
-                fmtInt((u64)value, nextDesc, 8);
+                fmtInt(*(u64 *)value, nextDesc, 8);
             }
             return;
         case Fmt_P:
@@ -1074,7 +1081,7 @@ static void outfmtHelper(void *value, int doEndOnRep, int *eor) {
             break;
         case Fmt_Z:
             if (doEndOnRep == 0) {
-                fmtInt((u64)value, nextDesc, 16);
+                fmtInt(*(u64 *)value, nextDesc, 16);
             }
             return;
         case Fmt_EOR:
