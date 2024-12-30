@@ -1,0 +1,1267 @@
+(MAPC '(1 2 3 4 5 6 7) '(LAMBDA(X) (SYSFLAG X T>
+(IOTAB 4 80)(IOTAB 8 80)
+'(FILEHEADER BASIC1)
+<PUT 'PUTD 'FNCELL '(LAMBDA (FN DEF) (PUT FN 'FNCELL DEF>
+<PUTD 'FILEHEADER '(NLAMBDA (A) (PRINT (LIST 'FILEHEADER A> 
+<PUTD 'DEFINEQ '(NLAMBDA L (MAPC L '(LAMBDA (X) (PUTD (CAR X) (CADR X>
+<PUTD 'READFILE
+      '(LAMBDA (UNIT LDFLG)
+               (PROG (&&X (TEMP (IOTAB 1 UNIT)))
+                LOOP (SELECTQ (SETQ &&X (READ))
+                              (STOP (RETURN (IOTAB 1 TEMP)))
+                              (EVAL &&X))
+                     (GO LOOP>
+(PUTD 'PRINT '(LAMBDA (A) (PRIN0 A T) (TERPRI) A))
+  
+(PROG((F(IOTAB 1)))(RPT 7 '(READFILE F T))(INUNIT T>
+  
+(FILEHEADER BASIC2) 
+(DEFINEQ
+(ABS
+  (LAMBDA (X) (TIMES X (SIGN X))))
+  
+(ADDPROP
+  (LAMBDA (A IND S FLAG)
+          <PUT A IND
+               (COND ((NLISTP (GETP A IND)) (LIST S))
+                     (FLAG (CONS S (GETP A IND))) 
+                     (T (NCONC1 (GETP A IND) S>
+          IND))
+  
+(APPLY*
+  <LAMBDA (FN . L) (APPLYSTK FN L (BINDENV FN>)
+  
+  
+(ATTACH
+  (LAMBDA (X Y)
+          (RPLACD Y (CONS (CAR Y) (CDR Y)))
+          (RPLACA Y X)))
+  
+(COPY
+  (LAMBDA (X) (SUBPAIR NIL NIL X)))
+  
+(DEFLIST
+  <LAMBDA (L PROP)
+          (MAPC L
+                '(LAMBDA (X) (PUT (CAR X) PROP (CADR X>)
+  
+(DSUBST
+  (LAMBDA (NEW OLD SOURCE)
+          <COND ((LISTP SOURCE)
+                  <COND ((EQUAL OLD (CAR SOURCE)) 
+                          (RPLACA SOURCE (COPY NEW)))
+                        (T (DSUBST NEW OLD (CAR SOURCE>
+                  (COND ((EQUAL OLD (CDR SOURCE)) 
+                          (RPLACD SOURCE (COPY NEW)))
+                        (T (DSUBST NEW OLD (CDR SOURCE>
+          SOURCE))
+  
+  
+(GCGAG
+  (LAMBDA (X) (SYSFLAG 1 X))) 
+  
+  
+(MERGE
+  <LAMBDA (A B COMPAREFN)
+          (COND ((NLISTP B) A)
+                ((NLISTP A) B)
+                (T (ATTACH NIL B)
+                   (MERGE---
+                     (ATTACH NIL A)
+                     (CDR A)
+                     (CDR B)
+                     (SELECTQ COMPAREFN 
+                       ((T NIL) 'ALPHORDER)
+                       COMPAREFN))
+                   (RPLACD (RPLACA A (CADR A)) (CDDR A))
+                   (RPLACD (RPLACA B (CAR A)) (CDR A>)
+  
+(MERGE--- 
+  (LAMBDA (MERGEROOT A B COMPAREFN)
+          (PROG NIL 
+           LOOP <COND ((NLISTP A)
+                        (RETURN (RPLACD MERGEROOT B)))
+                      ((NLISTP B)
+                        (RETURN (RPLACD MERGEROOT A)))
+                      <(APPLY* COMPAREFN (CAR A) (CAR B))
+                        (SETQ A
+                              (PROG1
+                                (CDR A) 
+                                (RPLACD MERGEROOT (RPLACD A NIL>
+                      (T (SETQ B
+                               (PROG1
+                                 (CDR B)
+                                 (RPLACD MERGEROOT
+                                   (RPLACD B NIL> 
+                (SETQ MERGEROOT (CDR MERGEROOT))
+                (GO LOOP))))
+  
+(MINUS
+  (LAMBDA (X) (DIFFERENCE 0 X)))
+  
+(MINUSP
+  (LAMBDA (X) (LESSP X 0)))
+  
+(MKATOM
+  (LAMBDA (X) (PACK (LIST X))))
+  
+(MKSTRING 
+  (LAMBDA (X) (CONCAT X)))
+  
+  
+(PUTPROPS 
+  (NLAMBDA (X . L)
+           (MAP L
+                '(LAMBDA (A) (PUT X (CAR A) (CADR A)))
+                'CDDR)))
+  
+(REMOVE
+  (LAMBDA (X L L1)
+          <MAPC L
+                '(LAMBDA
+                   (A)
+                   (OR (EQUAL A X) (SETQ L1 (CONS A L1>
+          (REVERSE L1)))
+  
+(REMPROP
+  <LAMBDA (A IND)
+          (PROG ((TEMP A))
+           LOP  (COND ((EQ (CADR TEMP) IND)
+                        (RPLACD TEMP (CDDDR TEMP))
+                        (RETURN IND))
+                      (TEMP (SETQ TEMP (CDDR TEMP)) (GO LOP>)
+  
+(RPAQ
+  <NLAMBDA (A B) (RPLACA A (EVSTK B (BINDENV A>)
+  
+(RPAQQ
+  (NLAMBDA (A B) (RPLACA A B)))
+  
+(RPTQ
+  (NLAMBDA (N X)
+        (APPLYSTK 'RPT (LIST (EVSTK N (BINDENV N)) X) (BINDENV N))))
+  
+(SETQQ
+  <NLAMBDA L (APPLYSTK 'SET L (BINDENV L>)
+  
+(SIGN
+  (LAMBDA (X)
+          (COND ((ZEROP X) 0) 
+                ((LESSP 0 X) 1)
+                (T -1))))
+  
+(SORT
+  (LAMBDA (DATA COMPAREFN)
+          (PROG ((SORTTMP1 DATA) (SORTTMP2 (CONS)))
+           L2   (COND ((LISTP SORTTMP1) 
+                        <SETQ SORTTMP1
+                              (CDR (RPLACA SORTTMP1
+                                     (LIST (CAR SORTTMP1>
+                        (GO L2))
+                      ((NLISTP DATA) (RETURN DATA))
+                      ((EQ COMPAREFN T) 
+                        (SETQ COMPAREFN 'ALPHORDER))
+                      ((NULL COMPAREFN) 
+                        (SETQ COMPAREFN 'ALPHORDER)))
+           L1   (COND <(NLISTP (CDR DATA))
+                        (RETURN
+                          (RPLACA
+                            (RPLACD DATA (CDAR DATA))
+                            (CAAR DATA> 
+                      (T (SETQ SORTTMP1 DATA)))
+           LOOP (AND (LISTP SORTTMP1)
+                     (LISTP (CDR SORTTMP1))
+                     (PROGN (MERGE--- SORTTMP2
+                              (CAR SORTTMP1)
+                              (CADR SORTTMP1)
+                              COMPAREFN)
+                            <RPLACD SORTTMP1
+                              (SETQ SORTTMP1
+                                    (CDDR
+                                      (RPLACA SORTTMP1
+                                        (CDR SORTTMP2>
+                            (GO LOOP))) 
+                (GO L1))))
+  
+(STREQUAL 
+  (LAMBDA (X Y)
+          (AND (STRINGP X) (STRINGP Y) (EQUAL X Y))))
+  
+(SUBST
+  (LAMBDA (X Y S)
+          (SUBPAIR (CONS Y)(CONS X)S))) 
+  
+(SUBLIS
+  (LAMBDA (A S)
+          (SUBPAIR (MAPCAR A 'CAR)(MAPCAR A 'CDR) S)))
+)
+(PRINT 'BASIC2FNS)
+(RPAQQ BASIC2FNS
+       (ABS ADDPROP APPLY* ARRAY  ATTACH COPY DEFLIST DSUBST
+             GCGAG MERGE MERGE--- MINUS MINUSP MKATOM
+            MKSTRING  PUTPROPS REMOVE REMPROP RPAQ RPAQQ RPTQ SETQQ
+            SIGN SORT STREQUAL   SUBST SUBLIS))
+(FILEHEADER IO1)
+(DEFINEQ
+(COM-READ 
+  <NLAMBDA (COMS-- CH)
+           (PROG ((COMS (EVAL COMS--))) 
+                 (COND ((NULL COMS)
+                         (SETQ CH (PROMPTTEXT CH))
+                         (SETQ COMS (READ))
+                         (PROMPTTEXT CH)
+                         (RETURN COMS)) 
+                       (T (SET COMS-- (CDR COMS)) 
+                          (RETURN (CAR COMS>)
+  
+(INUNIT
+  (LAMBDA (N) (IOTAB 1 N)))
+  
+(OUTUNIT
+  (LAMBDA (N) (IOTAB 5 N)))
+  
+(PRINT
+  (LAMBDA (X) (PRIN0 X T) (TERPRI) X))
+  
+(PRINTDEF 
+  (LAMBDA (X) (PRIN0 X T T) NIL))
+  
+(PRINTL
+  (LAMBDA L (MAPC L 'PRIN1) (TERPRI)))
+  
+(PRINTLENGTH
+  (LAMBDA (N) (IOTAB 9 N)))
+  
+(PRINTLEVEL
+  (LAMBDA (N) (IOTAB 10 N)))
+  
+(PRINTL-SP
+  (LAMBDA L
+          (MAPC L '(LAMBDA (X) (PRIN1 X) (SPACES 1)))
+          (TERPRI)))
+(PRIN2L-SP
+  (LAMBDA L
+          (MAPC L '(LAMBDA (X) (PRIN2 X) (SPACES 1)))
+          (TERPRI)))
+  
+(PRINTPOS 
+  (LAMBDA (N) (IOTAB 6 N)))
+  
+(PRIN1
+  (LAMBDA (X) (PRIN0 X)))
+  
+(PRIN2
+  (LAMBDA (X) (PRIN0 X T)))
+  
+  
+(READPOS
+  (LAMBDA (N) (IOTAB 2 N)))
+  
+(SPACES
+  <LAMBDA (N) (IOTAB 6 (PLUS N (IOTAB 6>)
+  
+(*
+  (FSUBR . QUOTE))
+  
+)
+(PRINT 'IO1FNS)
+(RPAQQ IO1FNS
+       (COM-READ INUNIT OUTUNIT PRINT PRINTDEF PRINTL PRINTLENGTH
+         PRINTLEVEL PRINTL-SP PRIN2L-SP PRINTPOS PRIN1 PRIN2  READPOS 
+         SPACES *)) 
+(FILEHEADER FUNC1)
+(DEFINEQ
+(DE
+  (NLAMBDA L
+           (PUTD (CAR L) (CONS 'LAMBDA (CDR L)))
+           (CAR L)))
+  
+(DF
+  (NLAMBDA L
+           (PUTD (CAR L) (CONS 'NLAMBDA (CDR L))) 
+           (CAR L)))
+  
+(GETD
+  (LAMBDA (FN) (AND (NULL LDFLG) ((SUBR . GETD) FN))))
+  
+(SAVEDEF
+  (LAMBDA (X) (PUT X 'EXPR (GETD X)) 'EXPR))
+  
+(UNSAVEDEF
+  <LAMBDA (X)
+          (AND (GETP X 'EXPR) (PUT X 'FNCELL (GETP X 'EXPR>)
+  
+(VIRGINFN 
+  (LAMBDA (X) (OR (GETP X 'VIRGINFN) ((SUBR . GETD) X))))
+  
+)
+(PRINT 'FUNC1FNS)
+(RPAQQ FUNC1FNS (DE DF GETD SAVEDEF UNSAVEDEF VIRGINFN))
+(PRINT 'FUNC1VARS)
+<RPAQQ FUNC1VARS
+       ((P (RPAQ CURFNS)
+           (RPAQ CURFILEFNS 'CURFNS)
+           (RPAQ LDFLG)
+>
+(RPAQ CURFNS)
+(RPAQ CURFILEFNS 'CURFNS)
+(RPAQ LDFLG)
+(FILEHEADER DEBUG1) 
+(DEFINEQ
+(BREAK-BT 
+  (LAMBDA (AL BTV)
+          (PRINTLEVEL
+            (PRINTLEVEL *PRINTLEVEL)
+            (MAPC (BREAK-SKIP1 (ALIST T)) 'BT-PRINT 'BREAK-SKIP))))
+  
+(BREAK-EVAL
+  <LAMBDA (BREAK-FORM)
+          (PROG ((*BRKFLG NIL) BREAK-EVAL)
+                (RETURN (COND (*BRKEVAL !VALUE)
+                              ((OR (NLISTP BREAK-FORM)
+                                   (CAR BREAK-FORM))
+                                (EVAL BREAK-FORM))
+                              ((APPLY (CADR BREAK-FORM)
+                                      (CDDR BREAK-FORM>)
+  
+(BREAK-SKIP
+  <LAMBDA (X)
+          (PROG NIL 
+           LOOP (RETURN (AND X
+                             (SELECTQ
+                               (CAADR X)
+                               (BREAK-EVAL (BREAK-SKIP1 X)) 
+                               (*FORM (CDR X))
+                               (COND (BTV (CDR X))
+                                     (T (SETQ X (CDR X)) (GO LOOP>)
+  
+(BREAK-SKIP1
+  <LAMBDA (X)
+          (PROG NIL 
+           LOOP (COND ((NULL (SETQ X (CDR X))) (RETURN NIL))
+                      ((EQ (CAAR X) '*FORM)
+                        (SELECTQ
+                          (CADAR X)
+                          <(BREAK11 SYSERROR)
+                            (RETURN (CONS '**BREAK** (CDR X>
+                          (GO LOOP)))
+                      (T (GO LOOP>)
+  
+(BREAK1
+  (NLAMBDA L (APPLYSTK 'BREAK11 L (BINDENV L))))
+  
+(BREAK11
+  <LAMBDA (BRKEXP BRKWHEN BRKFN BRKCOMS SYSERROR) 
+          ((FSUBR . COND)
+            (*BRKFLG ((SUBR . EVAL) BRKEXP))
+            (((FSUBR . PROG)
+               ((*BR1 ((SUBR . IOTAB) 1 T))
+                 (*BR2 ((SUBR . IOTAB) 5 T))
+                 (*BRKFLG T)) 
+               (RETURN (PROG (COM *BRKEVAL
+                                  (*BRKFLG T)
+                                  (AL (BINDENV BRKEXP))
+                                  !VALUE)
+                             (OR (BREAK-EVAL BRKWHEN)
+                                 (RETURN (BREAK-EVAL BRKEXP)))
+                             (IOTAB 2 (IOTAB 4))
+                        BREAK11LOOP
+                             (PRINT (LIST BRKFN 'BROKEN))
+                        L    (SETQ COM (COM-READ BRKCOMS :))
+                             <SELECTQ COM
+                               <?= (OR SYSERROR
+                                       (PRVARS1
+                                         (*ARGLIST BRKFN)
+                                         (PRVARS (*ARGLIST BRKFN) AL> 
+                               (! (GO* BREAKOUT)) 
+                               (OK (RETURN (BREAK-EVAL BRKEXP)))
+                               <GO (RETURN
+                                     (PRINT
+                                       (BREAK-EVAL BRKEXP)
+                                       (PRIN2 BRKFN)
+                                       (PRIN1 " = ">
+                               <RETURN
+                                 (SETQ *BRKEVAL NIL)
+                                 (RETURN
+                                   (BREAK-EVAL (COM-READ BRKCOMS :>
+                               (EVAL (SETQ *BRKEVAL NIL)
+                                     (SETQ !VALUE (BREAK-EVAL BRKEXP))
+                                     (PRINTL-SP BRKFN 'EVALUATED)
+                                     (SETQ *BRKEVAL T))
+                               (!EVAL (SETQ BRKCOMS
+                                            (APPEND
+                                              '(UB EVAL BR) 
+                                              BRKCOMS)))
+                               (!OK (SETQ BRKCOMS 
+                                          (APPEND '(!EVAL OK) BRKCOMS)))
+                               (!GO (SETQ BRKCOMS 
+                                          (APPEND '(!EVAL GO) BRKCOMS)))
+                               (UB (UNBREAK1 BRKFN))
+                               (BR (REBREAK1 BRKFN))
+                               (BT (BREAK-BT AL)) 
+                               (BTV (BREAK-BT AL T))
+                               ((LAMBDA *BRKEVAL
+                                  (PRINT (BREAK-EVAL COM>
+                             (GO L))
+                       (IOTAB 1 *BR1)
+                       (IOTAB 5 *BR2))
+               BREAKOUT
+               (GO* BREAK11LOOP)
+               (RESET>)
+  
+(BT-PRINT 
+  <LAMBDA (X)
+          (COND ((NLISTP X) (PRINT X))
+                ((SELECTQ
+                   (CAR X)
+                   <*FORM (PRIN2L-SP
+                            (CAR X)
+                            (SELECTQ (CADR X) (PROG '*PROG) (CDR X>
+                   (PRIN2L-SP (CAR X) '= (CDR X>) 
+  
+(ERRORB
+  (LAMBDA NIL (GO* ERRORSET) (RESET)))
+  
+(ERRORN
+  (LAMBDA NIL (CAR (ERRORSET 'ERRTYPE))))
+  
+(ERRORSET 
+  (LAMBDA (ERRFORM ERRFLG)
+          (PROG NIL 
+                (RETURN (LIST (EVAL ERRFORM)))
+           ERRORSET 
+                (RETURN NIL))))
+  
+(KWOTE
+  (LAMBDA (X) (LIST 'QUOTE X)))
+  
+(PRVARS
+  <LAMBDA (L AL)
+          (COND ((NULL L) NIL)
+                ((ATOM L) (EVSTK L AL)) 
+                (T (CONS (EVSTK (CAR L) AL) (PRVARS (CDR L) AL>)
+  
+(PRVARS1
+  <LAMBDA (VARS VALS)
+          (COND ((NULL VARS) NIL)
+                ((NLISTP VARS)
+                  (PRIN2L-SP VARS '= VALS))
+                (T (PRIN2L-SP (CAR VARS) '= (CAR VALS))
+                   (PRVARS1 (CDR VARS) (CDR VALS>)
+  
+(SYSERROR 
+  (LAMBDA (ERRTYPE FN ARG FORM *BRKFLG) 
+          <COND (ERRFLG (OUTUNIT
+                          (OUTUNIT T)
+                          (ERRORMESS ERRTYPE)
+                          (PRIN2L-SP FN '- ARG>
+          (GO* ERRORSET)
+          (BREAK11 FORM T FN NIL T)))
+  
+(*ARGLIST 
+  (LAMBDA (X) (CADR (GETD X))))
+  
+)
+(PRINT 'DEBUG1FNS)
+(RPAQQ DEBUG1FNS
+       (BREAK-BT BREAK-EVAL BREAK-SKIP BREAK-SKIP1 BREAK1 BREAK11 BT-PRINT
+         ERRORB ERRORN ERRORSET KWOTE PRVARS PRVARS1 SYSERROR *ARGLIST))
+(PRINT 'DEBUG1VARS) 
+<RPAQQ DEBUG1VARS ((P (RPAQ *BRKFLG) (RPAQ ERRFLG T>
+(RPAQ *BRKFLG)
+(RPAQ ERRFLG T)
+(FILEHEADER DEBUG2) 
+(DEFINEQ
+(ADDINNAME
+  <LAMBDA (F)
+          (COND ((NLISTP F) F)
+                ((EQ (CADR FN) 'IN)
+                  (PROG (NEW (FN (CAR F)) (IFN (CADDR F)) ND)
+                        (OR (GETD FN) (RETURN))
+                        (SETQ NEW (INNAME FN IFN))
+                        (COND ((MEMB FN (GETP IFN 'NAMESCHANGED))
+                                (RETURN NEW)))
+                        (SETQ ND (SUBST NEW FN (GETD IFN))) 
+                        (AND (EQUAL ND (GETD IFN)) (RETURN))
+                        (OR (GETP IFN 'VIRGINFN)
+                            (PUT IFN 'VIRGINFN (GETD IFN))) 
+                        (PUT IFN 'FNCELL ND)
+                        (ADDPROP IFN 'NAMESCHANGED FN)
+                        (PUT NEW 'FNCELL (GETD FN))
+                        (PUT NEW 'ALIAS (CONS IFN FN))
+                        (RETURN NEW>)
+  
+(ADVICE-BODY
+  (LAMBDA (FN)
+          (PROG ((BDY (LAMBDAEQV FN)) FORM)
+                (SETQ FORM (CDDR BDY))
+                <RPLACA FORM
+                        (SUBST (CAR FORM)
+                               'FORM
+                               '(PROG (!VALUE)
+                                      (PROGN)
+                                      (SETQ !VALUE FORM)
+                                      (PROGN)
+                                      (RETURN !VALUE>
+                (RETURN BDY))))
+  
+(ADVISE
+  (LAMBDA (FN . L)
+          (PROG (WHEN WHAT
+                      (BR (UNBREAK1 FN))
+                      <NEW (GETD (SETQ FN (ADDINNAME FN>
+                      (TMP (GETP FN 'ADVISED)))
+                (OR NEW (RETURN NIL))
+                (OR L (RETURN NIL))
+                (OR (GETP FN 'VIRGINFN) (PUT FN 'VIRGINFN NEW))
+                <OR TMP (PUT FN 'ADVISED (SETQ TMP (CONS>
+                <COND ((CAR TMP))
+                      (T (RPLACA TMP NEW)
+                         (SETQ NEW (ADVICE-BODY NEW>
+                (NCONC1 TMP L)
+                (SETQ WHAT (CAR (LAST L)))
+                (SETQ WHEN (COND ((CDR L) (CAR L)) ('BEFORE)))
+                (PUT FN 'FNCELL NEW)
+                (SETQ NEW (CADDR NEW))
+                (SETQ TMP
+                      (SELECTQ WHEN
+                        (BIND (CADR NEW))
+                        (AFTER (CADDR NEW) (CAR (NTH NEW 5)))
+                        (CADDR NEW)))
+                (AND WHAT (NCONC1 TMP WHAT))
+                (SETQ ADVISEDFNS (ADDLIST FN ADVISEDFNS))
+                (RETURN FN))))
+  
+(BREAK
+  <NLAMBDA L (MAPCAR L '(LAMBDA (FN) (BREAK0 FN T>)
+  
+(BREAK-BODY
+  (LAMBDA (NEW)
+          (PROG ((BDY (LAMBDAEQV NEW))) 
+                (RPLACA (CDDR BDY)
+                        (LIST 'BREAK1 (CADDR BDY) BRKWHEN FN BRKCOMS))
+                (RETURN BDY))))
+  
+(BREAK0
+  (LAMBDA (FN BRKWHEN BRKCOMS)
+          (SETQ FN (ADDINNAME FN))
+          (PROG ((NEW (GETD FN)) (TMP (GETP FN 'BROKEN)))
+                (OR NEW (RETURN NIL))
+                (OR (GETP FN 'VIRGINFN) (PUT FN 'VIRGINFN NEW))
+                (COND ((NULL TMP)
+                        (PUT FN 'BROKEN (LIST NEW BRKWHEN BRKCOMS)))
+                      ((NULL (CAR TMP)) (RPLACA TMP NEW))
+                      (T (RETURN NIL))) 
+                (SETQ NEW (BREAK-BODY NEW))
+                (PUT FN 'FNCELL NEW)
+                (SETQ BROKENFNS (ADDLIST FN BROKENFNS))
+                (RETURN FN))))
+  
+(INNAME
+  (LAMBDA (F IN) (PACK (LIST F '-IN- IN))))
+  
+(LAMBDAEQV
+  <LAMBDA (NEW)
+          (SELECTQ (CAR NEW)
+                   (FUNARG (LIST (CAR NEW)
+                                 (LAMBDAEQV (CADR NEW))
+                                 (CADDR NEW)))
+                   <(LAMBDA NLAMBDA)
+                     (LIST (CAR NEW)
+                           (CADR NEW)
+                           (COND ((CDDDR NEW)
+                                   (CONS 'PROGN (CDDR NEW)))
+                                 ((CADDR NEW>
+                   (LIST (COND ((EQ (CAR NEW) 'SUBR) 'LAMBDA)
+                               (T 'NLAMBDA))
+                         'ARGS
+                         (LIST 'APPLY (LIST 'QUOTE NEW) 'ARGS>)
+  
+(READVISE 
+  <NLAMBDA L
+           (MAPCAR (OR L ADVISEDFNS)
+                   '(LAMBDA (FN)
+                            (SETQ FN (THEINNAME FN))
+                            (PROG ((OLD (GETP FN 'ADVISED)))
+                                  (COND ((AND OLD (NULL (CAR OLD)))
+                                          (PUT FN 'ADVISED) 
+                                          <MAPC
+                                            (CDR OLD)
+                                            '(LAMBDA
+                                               (ADV)
+                                               (APPLY 'ADVISE
+                                                 (CONS FN ADV>
+                                          (RETURN FN))
+                                        (T (RETURN NIL>)
+  
+(REBREAK
+  (NLAMBDA L (MAPCAR (OR L BROKENFNS) 'REBREAK1)))
+  
+(REBREAK1 
+  <LAMBDA (FN)
+          (SETQ FN (ADDINNAME FN))
+          (PROG ((OLD (GETP FN 'BROKEN)))
+                (COND ((AND OLD (NULL (CAR OLD))) 
+                        (BREAK0 FN (CADR OLD) (CADDR OLD))
+                        (RETURN FN))
+                      (T (RETURN NIL>)
+  
+(REMINNAME
+  <LAMBDA (FN TEMP) 
+          (COND ((NLISTP FN)
+                  <COND ((SETQ ALIAS (GETP FN 'ALIAS))
+                          <PUT (CAR ALIAS)
+                               'FNCELL
+                               (SUBST (CDR ALIAS) 
+                                      (INNAME (CDR ALIAS) (CAR ALIAS))
+                                      (GETD (CAR ALIAS>
+                          (PUT (CAR ALIAS)
+                               'NAMESCHANGED
+                               (REMOVE
+                                 (CDR ALIAS)
+                                 (GETP (CAR ALIAS) 'NAMESCHANGED>
+                  FN)
+                ((EQ (CADR FN) 'IN)
+                  (REMINNAME (INNAME (CAR FN) (CADDR FN>)
+  
+(THEINNAME
+  <LAMBDA (X)
+          (COND ((NLISTP X) X)
+                ((EQ (CADR X) 'IN) (INNAME (CAR X) (CADDR X>)
+  
+(TRACE
+  <NLAMBDA L
+           (MAPCAR L
+                   '(LAMBDA (FN IFN)
+                            (SETQ IFN (THEINNAME FN))
+                            (COND ((GETP IFN 'TRACED) NIL)
+                                  (T (OR (ADVISE FN
+                                           (LIST 'TRACE-PRINT
+                                             (KWOTE IFN)
+                                             T))
+                                         (RETURN))
+                                     (PUT IFN 'TRACED T)
+                                     (ADVISE FN 'BIND
+                                       '(*TRACEN (ADD1 *TRACEN)))
+                                     (ADVISE FN 'AFTER
+                                       (LIST 'TRACE-PRINT (KWOTE IFN>)
+  
+(TRACE-PRINT
+  <LAMBDA (FN FLG)
+          (AND (GREATERP *TRACEN 15) (SETQ *TRACEN -1))
+          (RPTQ *TRACEN (PROGN (PRIN1 'I) (SPACES 2)))
+          (PRINTLEVEL
+            (PRINTLEVEL *PRINTLEVEL)
+            (COND <FLG (PRIN1 "-->")
+                       (SPACES 1)
+                       (PRIN2 FN)
+                       (SPACES 1)
+                       (PRINT (PRVARS (*ARGLIST FN) (BINDENV FN>
+                  (T (PRIN1 "<--")
+                     (SPACES 1)
+                     (PRIN2 FN)
+                     (SPACES 1)
+                     (PRINT !VALUE>)
+  
+(UNADVISE 
+  (NLAMBDA L (MAPCAR (OR L ADVISEDFNS) 'UNADVISE1)))
+  
+(UNADVISE1
+  (LAMBDA (FN)
+          (SETQ FN (THEINNAME FN))
+          (PROG ((OLD (GETP FN 'ADVISED)) (BR (UNBREAK1 FN)))
+                (OR OLD (RETURN NIL))
+                (OR (CAR OLD) (RETURN NIL))
+                (PUT FN 'FNCELL (CAR OLD))
+                (RPLACA OLD NIL)
+                (COND (BR (REBREAK1 FN)) ((REMINNAME FN)))
+                (RETURN FN))))
+  
+(UNBREAK
+  (NLAMBDA L (MAPCAR (OR L BROKENFNS) 'UNBREAK1)))
+  
+(UNBREAK1 
+  (LAMBDA (FN)
+          (SETQ FN (THEINNAME FN))
+          (PROG ((OLD (GETP FN 'BROKEN)))
+                (OR OLD (RETURN NIL))
+                (OR (CAR OLD) (RETURN NIL))
+                (PUT FN 'FNCELL (CAR OLD))
+                (RPLACA OLD NIL)
+                (REMINNAME FN)
+                (RETURN FN))))
+  
+(UNTRACE
+  <NLAMBDA L
+           (MAPCAR <OR L
+                       (REMOVE NIL
+                               (MAPCAR ADVISEDFNS 
+                                 '(LAMBDA
+                                    (X) 
+                                    (AND (GETP X 'TRACED) X>
+                   '(LAMBDA (FN) (REMPROP FN 'TRACED) (UNADVISE1 FN>) 
+  
+(PUTD
+  (LAMBDA (FN DEF)
+          (COND ((GETD FN) (SAVEDEF FN) (PRIN2L-SP FN 'REDEFINED)))
+          (REMPROP FN 'TRACED)
+          (REMPROP FN 'VIRGINFN)
+          <COND ((GETP FN 'ADVISED) (RPLACA (GETP FN 'ADVISED>
+          <COND ((GETP FN 'BROKEN) (RPLACA (GETP FN 'BROKEN>
+          (PUT FN 'FNCELL DEF)
+          (SET CURFILEFNS (ADDLIST FN (EVAL CURFILEFNS)))
+          DEF))
+  
+)
+(PRINT 'DEBUG2FNS)
+(RPAQQ DEBUG2FNS
+       (ADDINNAME ADVICE-BODY ADVISE BREAK BREAK-BODY BREAK0 INNAME LAMBDAEQV
+         READVISE REBREAK REBREAK1 REMINNAME THEINNAME TRACE TRACE-PRINT
+         UNADVISE UNADVISE1 UNBREAK UNBREAK1 UNTRACE PUTD)) 
+(PRINT 'DEBUG2VARS) 
+<RPAQQ DEBUG2VARS
+       ((P (RPAQ BROKENFNS) (RPAQ *BRKFLG))
+         (P (RPAQ ADVISEDFNS) 
+            (RPAQ !ADVICEFLG) 
+            (RPAQ *TRACEN -1) 
+            (RPAQ *PRINTLEVEL 3>
+(RPAQ BROKENFNS)
+(RPAQ *BRKFLG)
+(RPAQ ADVISEDFNS)
+(RPAQ !ADVICEFLG)
+(RPAQ *TRACEN -1)
+(RPAQ *PRINTLEVEL 3)
+(FILEHEADER EDIT)
+(DEFINEQ
+(EDITF
+  (NLAMBDA (FN . L) (EDITS (VIRGINFN FN) L) FN))
+  
+(EDITS
+  (LAMBDA (S EDCOM) 
+          (PROG (CL CTLS TEMP X A B L)
+                (AND (NLISTP S)
+                     (PRINTL "NOT EDITABLE")
+                     (RETURN NIL))
+                <AND EDCOM (SETQ EDCOM (APPEND EDCOM '(OK>
+           START
+           B    (SETQ CL S)
+                (SETQ CTLS (LIST CL))
+           NEXT (SETQ L (COM-READ EDCOM *))
+                (COND ((ATOM L) (GO ATOML)))
+                (SETQ X (CAR L))
+                (SETQ L (CDR L))
+                <COND ((NUMBERP X) (GO NUMCARX))
+                      ((GETP X 'DEEDITL)
+                        (SETQ EDCOM
+                              (APPEND
+                                (APPLY
+                                  (GETP X 'DEEDITL)
+                                  (LIST L))
+                                EDCOM)) 
+                        (GO NEXT))
+                      (T (SELECTQ X
+                           (R (DSUBST (CADR L) (CAR L) CL)) 
+                           (N (NCONC CL L))
+                           <US (COND ((SETQ TEMP
+                                        (COPY
+                                          (GETP
+                                            (CAR L)
+                                            'EDITVALUE)))
+                                       (SETQ EDCOM
+                                         (APPEND
+                                           (SUBST TEMP
+                                             (CAR L)
+                                             (CDR L))
+                                           EDCOM)))
+                                     (T (GO ILLG> 
+                           (MARK (PUT (CAR L) 'EDITCHAIN CTLS))
+                           <@ (COND ((AND (LITATOM (CAR L))
+                                          (SETQ TEMP
+                                            (GETP 
+                                              (CAR L)
+                                              'EDITCHAIN))) 
+                                      (SETQ CL (CAR TEMP))
+                                      (SETQ CTLS TEMP))
+                                    (T (GO ILLG>
+                           <: (SETQ EDCOM
+                                    (CONS 'UP
+                                      (CONS (CONS 1 L) EDCOM>
+                           <MBD (SETQ EDCOM
+                                      (CONS
+                                        (CONS ': (SUBST CL '* L))
+                                        (CONS 1 EDCOM>
+                           (XTR (SETQ EDCOM
+                                      (APPEND
+                                        <CONS
+                                          '(MARK LISPF3-XTR)
+                                          (APPEND L
+                                            '(S LISPF3-XTR
+                                                (@ LISPF3-XTR)
+                                                (US LISPF3-XTR
+                                                    (: LISPF3-XTR>
+                                        EDCOM)))
+                           (GO CONT>
+                (GO NEXT)
+           CONT (COND ((OR (NULL (NUMBERP (CAR L)))
+                           (LESSP (CAR L) 1))
+                        (GO ILLG)))
+                (OR (SETQ TEMP (NTH CL (CAR L)))
+                    (GO EMPTY))
+                (SELECTQ X
+                  (LO (EDIT-SMASH TEMP (CAAR TEMP) (CDAR TEMP)))
+                  (LI (EDIT-SMASH TEMP
+                        (CONS (CAR TEMP) (CDR TEMP))
+                        NIL)) 
+                  (RO (NCONC (CAR TEMP) (CDR TEMP))
+                      (RPLACD TEMP NIL))
+                  (RI (OR (NUMBERP (CADR L)) (GO ILLG))
+                      (SETQ A (NTH (CAR TEMP) (CADR L)))
+                      (OR (CDR A) (GO EMPTY))
+                      (RPLACD TEMP
+                        (NCONC (CDR A) (CDR TEMP)))
+                      (RPLACD A NIL))
+                  <BO (EDIT-SMASH TEMP
+                        (CAAR TEMP)
+                        (NCONC (CDAR TEMP) (CDR TEMP>
+                  (BI <SETQ B 
+                            (CDR (SETQ A
+                                       (COND
+                                         ((NULL
+                                            (NUMBERP (CADR L)))
+                                           TEMP)
+                                         (T (NTH CL (CADR L>
+                      (RPLACD A NIL)
+                      (EDIT-SMASH TEMP
+                        (CONS (CAR TEMP) (CDR TEMP))
+                        B))
+                  (GO ILLG))
+                (GO NEXT)
+           NUMCARX
+                <COND ((ZEROP X) (GO ILLG))
+                      <(LESSP X 0)
+                        (COND ((EQ X -1)
+                                <SETQ L 
+                                      (NCONC L
+                                        (CONS
+                                          (CAR CL)
+                                          (CDR CL>
+                                (EDIT-SMASH CL (CAR L) (CDR L)))
+                              (<NLISTP
+                                 (SETQ A
+                                       (NTH CL
+                                            (MINUS (ADD1 X> 
+                                (GO EMPTY))
+                              (T (RPLACD A (NCONC L (CDR A> 
+                      <(EQ X 1)
+                        (COND <L (EDIT-SMASH CL
+                                   (CAR L)
+                                   (NCONC (CDR L) (CDR CL>
+                              ((NLISTP CL) (GO EMPTY))
+                              ((NLISTP (CDR CL))
+                                (SETQ TEMP
+                                      (LENGTH (CADR CTLS))) 
+                                (SETQ EDCOM
+                                      (NCONC
+                                        (LIST 0
+                                          (SELECTQ TEMP
+                                            (1 '(1 NIL))
+                                            (CONS TEMP)))
+                                        EDCOM)))
+                              (T (EDIT-SMASH CL
+                                   (CADR CL)
+                                   (CDDR CL>
+                      (<NLISTP (SETQ A (NTH CL (SUB1 X>
+                        (GO EMPTY))
+                      (T (RPLACD A
+                           (COND ((CDR A) (NCONC L (CDDR A)))
+                                 (T L>
+                (GO NEXT)
+           ATOML
+                (SETQ X L)
+                <COND <(NUMBERP X)
+                        (COND ((ZEROP X)
+                                (OR (CDR CTLS) (GO TOP))
+                                (SETQ CTLS (CDR CTLS))
+                                (SETQ CL (CAR CTLS)))
+                              (T (AND (LESSP X 0) 
+                                      (SETQ X
+                                        (PLUS (LENGTH CL) 1 X)))
+                                 (SETQ X (NTH CL X))
+                                 (OR (LISTP X) (GO EMPTY))
+                                 (SETQ CL (CAR X))
+                                 (SETQ CTLS (CONS CL CTLS>
+                      (T (SELECTQ X
+                           (P (EDIT-PRINT CL NIL 2))
+                           (PP (EDIT-PRINT CL T 2))
+                           (OK (RETURN S))
+                           <UP (COND ((TAILP CL (CADR CTLS)))
+                                     ((NULL (CDR CTLS))
+                                       (GO TOP))
+                                     (T (SETQ CTLS (CDR CTLS))
+                                        (SETQ CL
+                                          (MEMB CL (CAR CTLS)))
+                                        (OR (EQ CL (CAR CTLS))
+                                            (SETQ CTLS
+                                              (CONS CL CTLS>
+                           (E (SETQ X
+                                    (EVAL (COM-READ EDCOM *)))
+                              (OR EDCOM (PRINT X)))
+                           <F (SETQ TEMP
+                                    (EDIT-FIND
+                                      (COM-READ EDCOM *)
+                                      CL CTLS))
+                              <COND ((NULL TEMP)
+                                      (EDIT-MSG "NOT FOUND"))
+                                    (T (SETQ CTLS TEMP)
+                                       (SETQ CL (CAR TEMP>
+                              (COND ((ATOM CL)
+                                      (SETQ EDCOM 
+                                        (CONS 'UP EDCOM>
+                           (! (GO B))
+                           <NX (COND ((TAILP CL (CADR CTLS))
+                                       (SETQ CL (CDR CL))
+                                       (RPLACA CTLS CL))
+                                     (T (SETQ CTLS (CDR CTLS))
+                                        <SETQ CL
+                                          (CADR
+                                            (MEMB CL (CAR CTLS>
+                                        (SETQ CTLS
+                                          (CONS CL CTLS>
+                           (? (EDIT-PRINT CL NIL 100))
+                           (?? (EDIT-PRINT CL T 100))
+                           <S (SETQ A (COM-READ EDCOM *))
+                              (COND ((LITATOM A)
+                                      (PUT A 'EDITVALUE CL))
+                                    (T (GO ILLG>
+                           (COND ((GETP X 'DEEDITA)
+                                   (SETQ EDCOM
+                                     (APPEND
+                                       (EVAL (GETP X 'DEEDITA))
+                                       EDCOM)))
+                                 (T (GO ILLG>
+                (GO NEXT)
+           ILLG (EDIT-MSG "ILLEGAL COMMAND")
+           TOP  (EDIT-MSG "ON TOP LEVEL")
+           EMPTY
+                (EDIT-MSG "LIST EMPTY"))))
+  
+(EDIT-FIND
+  <LAMBDA (A S TRC) 
+          (PROG (TEMP)
+                (COND ((SETQ TEMP (MEMB A (CDR S)))
+                        (RETURN (CONS TEMP TRC))) 
+                      ((SETQ TEMP
+                             (EDIT-FIND1 A
+                               (COND ((EQUAL (CAR S) A)
+                                       (CDR S))
+                                     (S))
+                               TRC))
+                        (RETURN TEMP))) 
+           LOOP (SETQ S (CAR TRC))
+                (SETQ TRC (CDR TRC))
+                (COND ((NULL TRC) (RETURN))
+                      ((SETQ TEMP
+                             (EDIT-FIND1 A
+                               (CDR (MEMB S (CAR TRC)))
+                               TRC))
+                        (RETURN TEMP))
+                      ((GO LOOP>)
+  
+(EDIT-FIND1
+  <LAMBDA (A S TRC) 
+          (PROG (RES)
+           LOOP (COND ((NLISTP S) (RETURN))
+                      ((EQUAL A (CAR S))
+                        (RETURN (CONS (CAR S) TRC)))
+                      ((SETQ RES
+                             (EDIT-FIND1 A
+                               (CAR S)
+                               (CONS (CAR S) TRC)))
+                        (RETURN RES))
+                      ((SETQ S (CDR S)) (GO LOOP>)
+  
+(EDIT-MSG 
+  (LAMBDA (MSG)
+          (PRINTL MSG)
+          (READPOS (IOTAB 4)) 
+          (SETQ EDCOM)
+          (GO NEXT)))
+  
+(EDIT-PRINT
+  <LAMBDA (X PP DEPTH)
+          (PRINTLEVEL
+            (PRINTLEVEL DEPTH)
+            (COND ((TAILP CL (CADR CTLS))
+                    (PRIN1 "--- ")
+                    <MAPC X
+                          '(LAMBDA
+                             (Y)
+                             (COND (PP (PRIN0 Y T 0)
+                                       (TERPRI)
+                                       (SPACES 4))
+                                   (T (PRIN2 Y) (SPACES 1>
+                    (PRINTL '%)))
+                  (T (COND (PP (PRIN0 X T 0) (TERPRI))
+                           (T (PRINT X>)
+  
+(EDIT-SMASH
+  (LAMBDA (X A B) (RPLACA X A) (RPLACD X B)))
+  
+)
+(PRINT 'EDITFNS)
+(RPAQQ EDITFNS
+       (EDITF EDITS EDIT-FIND EDIT-FIND1 EDIT-MSG EDIT-PRINT EDIT-SMASH)
+       )
+(FILEHEADER MAKEF)
+(DEFINEQ
+(OPENF
+  <LAMBDA L
+          (COND ((NUMBERP (CAR L)) (CAR L))
+                (SYMBIO (APPLY 'SOPENF L))
+                ((APPLY 'LOPENF L>)
+  
+(ROLLOUT
+  <LAMBDA (FILE TEMP)
+          (SETQ TEMP (OPENF FILE 'O 'ROL 'BINARY))
+          (COND (TEMP ((SUBR . ROLLOUT) TEMP)) ('(NOT OPENED>)
+  
+(ROLLIN
+  <LAMBDA (FILE TEMP)
+          (SETQ TEMP (OPENF FILE 'I 'ROL 'BINARY))
+          (COND (TEMP ((SUBR . ROLLIN) TEMP)) ('(NOT OPENED>)
+  
+(SOPENF
+  <LAMBDA (FILE IO EXT MODE)
+          (PROG NIL 
+                (SETQ IO (SELECTQ IO (I T) (O NIL) (RETURN)))
+                (SETQ MODE
+                      (SELECTQ MODE
+                        ((NIL ASCII) NIL)
+                        (BINARY T)
+                        (RETURN)))
+                <OR (MEMB ': (UNPACK FILE))
+                    (SETQ FILE (PACK (LIST 'DSK: FILE>
+                <OR (MEMB '%. (UNPACK FILE))
+                    (SETQ FILE (PACK (LIST FILE '%. (OR EXT 'LSP>
+                (RETURN (OPEN0 FILE IO MODE>)
+  
+(LOPENF
+  <LAMBDA (FILE IO EXT MODE)
+          (COND ((GETP FILE IO))
+                (T (PROG ((I (INUNIT T)) (O (OUTUNIT T)) RD)
+                    L    (PRINTL-SP "LOGIC UNIT NO FOR FILE" FILE IO MODE)
+                         (COND ((NUMBERP (SETQ RD (READ)))
+                                 (PUT FILE IO RD) 
+                                 (INUNIT I)
+                                 (OUTUNIT O)
+                                 (RETURN RD))
+                               (T (PRINTL-SP
+                                    "ANSWER WITH NUMERIC LOGIC UNIT NUMBER")
+                                  (GO L>)
+  
+(CLOSE
+  (LAMBDA (FILE FLG)
+          (AND (CLOSE-1 'FILEIN (GETP FILE 'FILEIN)) (SETQ FLG T))
+          (AND (CLOSE-1 'FILEOUT (GETP FILE 'FILEOUT)) (SETQ FLG T))
+          (AND FLG FILE)))
+  
+(CLOSE-1
+  <LAMBDA (IND N)
+          (COND ((NUMBERP N) (REWIND N) (REMPROP FILE IND>) 
+  
+(CURFILE
+  (NLAMBDA (FILE)
+           (SETQ CURFILE FILE)
+           (SETQ CURFILEFNS (PACK (LIST FILE 'FNS)))
+           (SETQ FILELST (ADDLIST FILE FILELST))
+           (OR (ERRORSET CURFILEFNS NIL) (SET CURFILEFNS NIL))
+           FILE))
+<FILEHEADER (NLAMBDA (A)(APPLY* 'CURFILE A) (PRINT (LIST 'FILEHEADER A>
+  
+(LOAD
+  <LAMBDA (FILE LDFLG PRINTFLG)
+          (PROG (<AL (SUBST LDFLG '* '((LDFLG . *> FILENR UNIT X)
+                (COND ((SETQ FILENR (OPENF FILE 'I)))
+                      (T (PRINTL-SP FILE "CANNOT BE OPENED FOR INPUT")
+                         (RETURN)))
+                (SETQ UNIT (INUNIT FILENR))
+                (IOTAB 2 (IOTAB 4))
+           LOOP (SELECTQ
+                  (SETQ X (READ))
+                  ((NIL STOP) 
+                    (PRINTL-SP FILE '- FILENR 'LOADED)
+                    (INUNIT UNIT)
+                    (REWIND FILENR)
+                    (RETURN FILE))
+                  (COND (PRINTFLG (PRINT (EVALA X AL)) (GO LOOP))
+                        (T (EVALA X AL) (GO LOOP>)
+  
+(MAKEFILE 
+  (LAMBDA (FILE OPT)
+          (PROG ((FNS (PACK (LIST FILE 'FNS)))
+                  (VARS (PACK (LIST FILE 'VARS))) 
+                  UNIT FILENR FNSV VARSV
+                  (AL (BINDENV FILE))
+                  GBC DEPTH LENGTH)
+                (SETQ FNSV (CAR (ERRORSET FNS NIL)))
+                (SETQ VARSV (CAR (ERRORSET VARS NIL)))
+                (OR FNSV VARSV
+                    (PROGN (PRINTL-SP 'BOTH FNS 'AND VARS 'EMPTY)
+                           (RETURN)))
+                (OR (SETQ FILENR (OPENF FILE 'O)) 
+                    (PROGN (PRINTL-SP FILE "CANNOT BE OPENED FOR OUTPUT")
+                           (RETURN)))
+                (SETQ UNIT (OUTUNIT FILENR))
+                (SETQ GBC (SYSFLAG 1 NIL))
+                (SETQ DEPTH (PRINTLEVEL 150))
+                (SETQ LENGTH (PRINTLENGTH 1000))
+                (MAKEF-OUT FILEHEADER FILE)
+                (COND (FNSV (MAKEF-FNSX (LIST '* (LIST 'QUOTE FNSV))) 
+                            (MAKEF-OUT PRINT (LIST 'QUOTE FNS))
+                            (MAKEF-OUT RPAQQ FNS FNSV)))
+                <COND (VARSV (MAKEF-OUT PRINT (LIST 'QUOTE VARS))
+                             (MAKEF-OUT RPAQQ VARS VARSV)
+                             (MAPC VARSV
+                                   '(LAMBDA
+                                      (X)
+                                      (COND ((LITATOM X)
+                                              (MAKEF-VARSX (LIST X))) 
+                                            ((LISTP X)
+                                              (SELECTQ
+                                                (CAR X)
+                                                (FNS (MAKEF-FNSX (CDR X)))
+                                                (VARS
+                                                  (MAKEF-VARSX (CDR X)))
+                                                (PROP
+                                                  (MAKEF-PROPX
+                                                    (CADR X)
+                                                    (CDDR X)
+                                                    T))
+                                                (IFPROP
+                                                  (MAKEF-PROPX
+                                                    (CADR X)
+                                                    (CDDR X)))
+                                                (P (MAKEF-MAPC*
+                                                     (CDR X)
+                                                     'PRINT))
+                                                (E (OUTUNIT UNIT)
+                                                   (MAKEF-MAPC*
+                                                     (CDR X)
+                                                     'MAKEF-EVAL)
+                                                   (OUTUNIT FILENR))
+                                                (PROG1
+                                                  (OUTUNIT UNIT)
+                                                  (PRINTL "BAD PRETTYCOM: " X) 
+                                                  (OUTUNIT FILENR>
+                (PRINT 'STOP) 
+                (REWIND FILENR)
+                (OUTUNIT UNIT)
+                (SYSFLAG 1 GBC)
+                (PRINTLEVEL DEPTH)
+                (PRINTLENGTH DEPTH)
+                (PRINTL-SP FILE '- FILENR)
+                (RETURN FILE))))
+  
+(MAKEF-EVAL
+  (LAMBDA (X) (CAR (APPLYSTK 'ERRORSET (LIST X) AL))))
+  
+(MAKEF-FNSX
+  (LAMBDA (L) (PRINTL "(DEFINEQ") (PRETTYPRINT L OPT) (PRINTL ")")))
+  
+(MAKEF-GETPROPS
+  <LAMBDA (L)
+          (COND ((NLISTP L) NIL)
+                ((MEMB (CAR L) SYSPROPS) (MAKEF-GETPROPS (CDDR L)))
+                <(OR NIL* (CADR L))
+                  (CONS (CAR L)
+                        (CONS (CADR L) (MAKEF-GETPROPS (CDDR L>
+                (T (MAKEF-GETPROPS (CDDR L>)
+  
+(MAKEF-MAPC*
+  (LAMBDA (L FN)
+          (SELECTQ (AND (CDR L) (NULL (CDDR L)) (CAR L))
+                                                    (* (MAPC (MAKEF-EVAL (CADR L
+                                                    )) FN)) 
+                   (MAPC L FN))))
+  
+(MAKEF-OUT
+  (NLAMBDA LL
+           (PRIN0 (CONS (CAR LL) (EVLIS (CDR LL))) T OPT)
+           (TERPRI)))
+  
+(MAKEF-PROPX
+  <LAMBDA (PROPS L NIL*)
+          (COND <(EQ PROPS 'ALL)
+                  (MAKEF-MAPC* L
+                    '(LAMBDA (X)
+                             <SETQ X
+                                   (CONS X (MAKEF-GETPROPS (CDR X>
+                             (COND ((CDR X)
+                                     (PRIN0 (CONS 'PUTPROPS X) T OPT) 
+                                     (TERPRI>
+                ((ATOM PROPS) (MAKEF-PROPX (LIST PROPS) L NIL*))
+                (T (MAPC PROPS
+                         '(LAMBDA
+                            (P RES)
+                            <MAKEF-MAPC* L
+                              '(LAMBDA
+                                 (X)
+                                 (AND (OR NIL* (GETP X P))
+                                      (SETQ RES
+                                            (CONS 
+                                              (LIST X (GETP X P))
+                                              RES>
+                            (AND RES
+                                 (MAKEF-OUT DEFLIST
+                                   (LIST 'QUOTE (REVERSE RES))
+                                   (LIST 'QUOTE P>)
+  
+(MAKEF-VARSX
+  <LAMBDA (L)
+          (MAKEF-MAPC* L
+            '(LAMBDA (X) (MAKEF-OUT RPAQQ X (MAKEF-EVAL X>) 
+  
+(OPEN
+  (LAMBDA (FILE PROP NR)
+          (AND (NUMBERP NR)
+               (SELECTQ PROP
+                 ((I INPUT) (PUT FILE 'I NR))
+                 ((O OUTPUT) (PUT FILE 'O NR))
+                 (PROGN (PUT FILE 'I NR) (PUT FILE 'O NR))) 
+               FILE)))
+  
+(PP
+  (NLAMBDA L (PRETTYPRINT L T)))
+  
+(PRETTYPRINT
+  (LAMBDA (L OPT POS)
+          <SETQ POS (IOTAB 7 (PLUS 2 (IOTAB 7>
+          (MAKEF-MAPC* L
+            '(LAMBDA (X)
+                     (PRIN1 "(")
+                     (PRINT X)
+                     (PRIN0 (VIRGINFN X) T OPT)
+                     (PRINTL ")")
+                     (TERPRI) 
+                     (PRINTPOS POS)))
+          (IOTAB 7 POS)
+          L))
+  
+)
+(PRINT 'MAKEFFNS)
+(RPAQQ MAKEFFNS
+       (OPENF ROLLOUT ROLLIN SOPENF LOPENF CLOSE CLOSE-1 CURFILE
+              FILEHEADER LOAD MAKEFILE
+              MAKEF-EVAL MAKEF-FNSX MAKEF-GETPROPS MAKEF-MAPC* MAKEF-OUT
+              MAKEF-PROPX MAKEF-VARSX OPEN PP PRETTYPRINT)) 
+(PRINT 'MAKEFVARS)
+<RPAQQ MAKEFVARS
+       (CURFILE FILELST SYSPROPS (P (RPAQ CURFNS) (RPAQ SYMBIO>
+(RPAQQ CURFILE CUR) 
+(RPAQQ FILELST (CUR MAKEF EDIT DEBUG2 DEBUG1 FUNC1 IO1 BASIC2))
+(RPAQQ SYSPROPS
+       (ADVISED BROKEN EDITCHAIN EDITVALUE EXPR FNCELL TRACED VIRGINFN))
+(RPAQ CURFNS)
+(RPAQ SYMBIO)
+(SETQ SYMBIO T)
+(ROLLOUT (OPEN0 'LISPINI NIL T))
