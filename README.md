@@ -19,6 +19,7 @@ provided in Andras' repository.
 - &nbsp;&nbsp;[KFTC](#kftc-ntv)
 - &nbsp;&nbsp;[LDR](#ldr-ntv)
 - &nbsp;&nbsp;[LIB](#lib-ntv)
+- &nbsp;&nbsp;[LISPF4](#lisp-ntv)
 - [Installing Tools from NOS 2.8.7](#nos-tools)
 
 ## <a id="tools"></a> Supported Tools
@@ -27,9 +28,10 @@ Tools provided by this repo currently include:
 
 - __cal__. A cross-assembler supporting [Cray Assembly Language v2](http://www.bitsavers.org/pdf/cray/CAL/SR-2003_CAL_Assembler_Version_2_Feb86.pdf).
 - __dasm__. A disassembler able to disassemble executables produced by __ldr__.
-- __kftc__. A FORTRAN 77 cross-compiler
+- __kftc__. A FORTRAN 77 cross-compiler. See also the [fortran README file](https://github.com/kej715/COS-Tools/blob/main/fortran/README.md).
 - __ldr__. A linking loader producing executables from relocatables produced by the __cal__ cross-assembler and libraries managed by __lib__.
 - __lib__. A library manager supporting collections of relocatables produced by the __cal__ cross-assembler.
+- __lisp__. LISPF4 interpreter implementing a dialect of InterLisp, circa early 1980's. See also the [lisp README file](https://github.com/kej715/COS-Tools/blob/main/lisp/README.md).
 
 Use _make_ or _gmake_ without any arguments to build the tools for execution on MacOS or
 Linux, as in:
@@ -47,7 +49,7 @@ sudo make install
 By default, the tools are installed in the directory `/usr/local/bin`. Edit the `Makefile` if
 you want to install them elsewhere.
 
-### IMPORTANT NOTE ABOUT FORTRAN 77
+### IMPORTANT NOTE ABOUT FORTRAN 77 AND LISPF4
 __kftc__ (the FORTRAN 77 compiler) will not build successfully until
 [this fork of Amsterdam Compiler Kit (ACK)](https://github.com/kej715/ack) has been built and
 installed. A mutual dependency exists, however, between ACK and this (the COS-Tools)
@@ -57,6 +59,10 @@ repository first, then build and install ACK. After ACK has been built and insta
 successfully, return to this repository and build and install it again; __kftc__ should then
 build and install successfully too.
 
+In addition, __LISPF4__ is implemented in FORTRAN. It has a dependency upon __kftc__. __kftc__
+must be built and installed before __LISPF4__ will build successfully. __LISPF4__ is an
+interpreter of the InterLisp dialect of the LISP programming language and can be built
+only as a tool that runs natively on COS 1.17. 
 
 ### <a id="cal"></a> cal
 
@@ -536,6 +542,7 @@ To build the tools to run natively:
 - __kftc.abs__ : the FORTRAN 77 compiler
 - __ldr.abs__ : the linking loader
 - __lib.abs__ : the library manager
+- __lispf4.abs__ : the LISP interpreter
 
 `make cos` also generates a collection of native executables reproducing utility commands
 missing from the originally recovered copy of COS 1.17. These can be found in the
@@ -832,6 +839,18 @@ contents of a library, execute the __LIB__ command as in:
 LIB,L=$OUT,MATHLIB.
 ```
 
+### <a id="lisp-ntv"></a> LISPF4
+
+The synopsis of the __LISPF4__ command is simply:
+```
+LISPF4.
+```
+
+However, before executing the __LISPF4__ command, its file of system atom definitions,
+__LISPSYS__, must be made available as a local dataset because it reads this file at startup
+time to initialize itself internally. After initializing itsself, it begins reading
+expressions from __$IN__, and it writes output to __$OUT__.
+
 ## <a id="nos-tools"></a>Installing Tools from NOS 2.8.7
 
 Previous sections defined NOS CCL procedures enabling files to be transferred from NOS 2.8.7
@@ -839,8 +858,9 @@ to COS 1.17 and saved there. The NOS 2.8.7 system described earlier and provided
 [here](https://github.com/kej715/DtCyber/tree/main/NOS2.8.7#readme) supports an optionally
 installed product named `cos-tools`. When the product named `cos-tools` is installed on
 NOS 2.8.7, it installs all of the native tools described above (e.g., _CAL_, _KFTC_, _LDR_,
-etc.) on COS 1.17. It also installs a CCL procedure library named `CRAY` in the catalog
-of user INSTALL, and that library includes all of the CCL procedures described above.
+_LIB_, _LISPF4_, etc.) on COS 1.17. It also installs a CCL procedure library named `CRAY` in
+the catalog of user INSTALL, and that library includes all of the CCL procedures described
+above, plus others.
 See [COS Tools](https://github.com/kej715/DtCyber/tree/main/NOS2.8.7#cos-tools) in the
 [NOS 2.8.7](https://github.com/kej715/DtCyber/tree/main/NOS2.8.7#readme) repository for more
 details.
