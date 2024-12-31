@@ -12,7 +12,7 @@ made to enable it to be compiled by
 [kFTC](https://github.com/kej715/COS-Tools/tree/main/fortran)
 and run on COS 1.17. As in Blake's repo, this repo retains a copy of the original distribution
 file containing source code and documentation, and it also retains a copy of the original
-license file with copyright information.
+[license file with copyright information](https://github.com/kej715/COS-Tools/blob/main/lisp/LICENSE.txt).
 
 After building and installing _kFTC_, LISPF4 can be built by running the default rule of
 the Makefile in this directory,
