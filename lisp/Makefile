@@ -28,7 +28,12 @@ ACKDIR = /usr/local/share/ack
 COSDIR = $(ACKDIR)/cos
 FTNDIR = $(COSDIR)/fortran
 
-all: lispf4.abs
+all:
+ifneq ("$(wildcard $(BINDIR)/kftc)","")
+	$(MAKE) lispf4
+endif
+
+lispf4: lispf4.abs
 
 lispf4.abs: HEART.o FLOSOR.o COS.o
 	$(BINDIR)/ldr -o $@ -m lisp.map $+ $(FTNDIR)/libio.lib $(FTNDIR)/librt.lib $(FTNDIR)/libintf.lib $(COSDIR)/libem.a $(COSDIR)/libsys.a $(COSDIR)/libc.a
