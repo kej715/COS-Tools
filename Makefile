@@ -104,7 +104,8 @@ cos:
 	CC=ack EXTRAOBJS="$(COSOBJS)" $(MAKE) cal dasm ldr lib ; \
 	$(MAKE) -C cos-interface ; \
 	$(MAKE) -C cos-commands ; \
-	$(MAKE) -C fortran cos
+	$(MAKE) -C fortran cos ; \
+	$(MAKE) -C lisp
 
 cal: $(CALOBJS)
 	$(CC) $(LDFLAGS) -o $@ $+ $(EXTRAOBJS)
@@ -134,7 +135,8 @@ clean:
 	rm -f *.o *.abs cal dasm ldr lib ; \
 	$(MAKE) -C cos-interface clean ; \
 	$(MAKE) -C cos-commands clean ; \
-	$(MAKE) -C fortran clean
+	$(MAKE) -C fortran clean ; \
+	$(MAKE) -C lisp clean
 
 install: cal dasm ldr lib kftc-inst
 	install -b -o root -m 755 cal dasm ldr lib $(PREFIX)/bin
