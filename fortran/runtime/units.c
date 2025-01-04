@@ -46,6 +46,8 @@ static void refToCharPtr(ulong ref, char **s, int *len);
 static int trim(char *s, int len);
 static int writer(Unit *up, void *buf, size_t nbyte);
 
+extern int _exists(char *path);
+
 Unit *_allocu(int unitNum) {
     Unit *up;
 
@@ -635,6 +637,7 @@ static int openUnit(char *fileName, int unitNum, int flags, int recLen) {
         mode = 0640;
     }
     else if ((flags & MASK_OLD) != 0) {
+        if (_exists(fileName) == 0) return ENOENT;
         access = O_RDWR;
     }
     else {
