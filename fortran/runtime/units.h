@@ -32,22 +32,25 @@
  *  Unit flag bit definitions
  *
  *   Bit  Meaning
- *    0   NEW         : 0 if OLD, 1 if NEW
- *    1   DIRECT      : 0 if SEQUENTIAL, 1 if DIRECT
- *    2   UNFORMATTED : 0 if FORMATTED, 1 if UNFORMATTED
- *    3   BLANK       : 0 if NULL, 1 if ZERO
- *    4   SCRATCH     : 0 if ordinary file, 1 if scratch file
- *    5   IMMUTABLE   : 0 if mutable, 1 if immutable
- *    6   OPEN        : 0 if unit closed, 1 if open
+ *    0   OLD         : 1 if OLD
+ *    1   NEW         : 1 if NEW
+ *    2   DIRECT      : 0 if SEQUENTIAL, 1 if DIRECT
+ *    3   UNFORMATTED : 0 if FORMATTED, 1 if UNFORMATTED
+ *    4   BLANK       : 0 if NULL, 1 if ZERO
+ *    5   SCRATCH     : 0 if ordinary file, 1 if scratch file
+ *    6   IMMUTABLE   : 0 if mutable, 1 if immutable
+ *    7   OPEN        : 0 if unit closed, 1 if open
  */
-#define FLAG_NEW         0
-#define FLAG_DIRECT      1
-#define FLAG_UNFORMATTED 2
-#define FLAG_ZERO        3
-#define FLAG_SCRATCH     4
-#define FLAG_IMMUTABLE   5
-#define FLAG_OPEN        6
+#define FLAG_OLD         0
+#define FLAG_NEW         1
+#define FLAG_DIRECT      2
+#define FLAG_UNFORMATTED 3
+#define FLAG_ZERO        4
+#define FLAG_SCRATCH     5
+#define FLAG_IMMUTABLE   6
+#define FLAG_OPEN        7
 
+#define MASK_OLD         (1 << FLAG_OLD)
 #define MASK_NEW         (1 << FLAG_NEW)
 #define MASK_DIRECT      (1 << FLAG_DIRECT)
 #define MASK_UNFORMATTED (1 << FLAG_UNFORMATTED)

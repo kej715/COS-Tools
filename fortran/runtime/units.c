@@ -133,7 +133,7 @@ void _flufmt(int unitNum) {
     char *s;
     Unit *up;
 
-    up = getUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
+    up = getUnit(unitNum, 0, MAX_FMT_RECL);
     while (up->ioStat == 0) {
         _outfin(&eor);
         ref = _getrcd();
@@ -148,7 +148,7 @@ void _flulst(int unitNum) {
     char *s;
     Unit *up;
 
-    up = getUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
+    up = getUnit(unitNum, 0, MAX_FMT_RECL);
     if (up->ioStat == 0) {
         ref = _getrcd();
         refToCharPtr(ref, &s, &len);
@@ -274,26 +274,26 @@ void _openu(int unitNum, ulong fileNameRef, ulong statusRef, ulong accessRef, ul
     }
     else {
         sprintf(fileNameBuf, "UNIT%d", unitNum);
-        flags |= MASK_SCRATCH | MASK_NEW;
+        flags |= MASK_SCRATCH;
     }
     refToCharPtr(statusRef, &s, &len);
     len = trim(s, len);
-    if (len == 3 && strncasecmp(s, "NEW", len) == 0) {
+    if (len == 3 && strncasecmp(s, "OLD", len) == 0) {
+        flags |= MASK_OLD;
+    }
+    else if (len == 3 && strncasecmp(s, "NEW", len) == 0) {
         flags |= MASK_NEW;
     }
     else if (len == 6 && strncasecmp(s, "SCRATCH", len) == 0) {
         flags |= MASK_SCRATCH;
     }
-    else if (s == NULL || (len == 7 && strncasecmp(s, "UNKNOWN", len) == 0)) {
-        if (isNameDefined) {
-            flags &= ~MASK_NEW;
+    else if (s != NULL) {
+        if (len != 7 || strncasecmp(s, "UNKNOWN", len) != 0) {
+            fputs("Invalid file STATUS: ", stderr);
+            fwrite(s, 1, len, stderr);
+            fputs("\n", stderr);
+            exit(1);
         }
-    }
-    else if (len != 3 || strncasecmp(s, "OLD", len) != 0) {
-        fputs("Invalid file STATUS: ", stderr);
-        fwrite(s, 1, len, stderr);
-        fputs("\n", stderr);
-        exit(1);
     }
     refToCharPtr(accessRef, &s, &len);
     len = trim(s, len);
@@ -473,7 +473,7 @@ void _wrbchr(int unitNum, unsigned long ref) {
     char *s;
     Unit *up;
 
-    up = getUnit(unitNum, MASK_UNFORMATTED|MASK_NEW, MAX_FMT_RECL);
+    up = getUnit(unitNum, MASK_UNFORMATTED, MAX_FMT_RECL);
     if (up->ioStat != 0) return;
     s = (char *)(ref & 0xffffffff);
     len = ref >> 32;
@@ -493,7 +493,7 @@ void _wrbwrd(int unitNum, u64 *value) {
     int n;
     Unit *up;
 
-    up = getUnit(unitNum, MASK_UNFORMATTED|MASK_NEW, MAX_FMT_RECL);
+    up = getUnit(unitNum, MASK_UNFORMATTED, MAX_FMT_RECL);
     if (up->ioStat != 0) return;
     n = write(up->fd, (u8 *)value, sizeof(u64));
     if (n == sizeof(u64)) {
@@ -521,7 +521,7 @@ void _wrufmt(int unitNum, DataValue *value) {
     char *s;
     Unit *up;
 
-    up = getUnit(unitNum, MASK_NEW, MAX_FMT_RECL);
+    up = getUnit(unitNum, 0, MAX_FMT_RECL);
     _outfmt(value, &eor);
     while (eor && up->ioStat == 0) {
         eor = 0;
@@ -575,7 +575,7 @@ static Unit *getUnit(int unitNum, int flags, int recLen) {
     up = _findu(unitNum);
     if (up == NULL || (up->flags & MASK_OPEN) == 0) {
         if (unitNum == 102) {
-            rc = openUnit("$PUNCH", unitNum, MASK_NEW, 0);
+            rc = openUnit("$PUNCH", unitNum, 0, 0);
             if (rc != 0) {
                 fputs("$PUNCH: ", stderr);
                 fputs(strerror(rc), stderr);
@@ -631,12 +631,14 @@ static int openUnit(char *fileName, int unitNum, int flags, int recLen) {
     mode = 0;
 
     if ((flags & MASK_NEW) != 0) {
-        access = O_CREAT|O_TRUNC|O_WRONLY;
+        access = O_CREAT|O_TRUNC|O_RDWR;
         mode = 0640;
     }
+    else if ((flags & MASK_OLD) != 0) {
+        access = O_RDWR;
+    }
     else {
-        access = O_RDONLY;
-        up->fd = open(fileName, O_RDONLY);
+        access = O_CREAT|O_RDWR;
     }
     if ((flags & MASK_UNFORMATTED) != 0) access |= O_BINARY;
     up->fd = open(fileName, access, mode);
@@ -646,7 +648,7 @@ static int openUnit(char *fileName, int unitNum, int flags, int recLen) {
         return rc;
     }
 
-    up->flags = flags | MASK_OPEN;
+    up->flags = (flags & ~MASK_NEW) | MASK_OLD | MASK_OPEN;
 
     return 0;
 }
