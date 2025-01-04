@@ -1,4 +1,4 @@
-***********************************************************************
+**********************************************************************
 C*                                                                     *
 C*                           LISP F4 (FLOATING)                        *
 C*                           -------                                   *
@@ -580,9 +580,10 @@ C
 C      BELOW IS CODE THAT OPENS SYSATOMS AT RUNTIME SO YOU DON'T NEED
 C      TO ASSIGN IT.
 C
-       OPEN(UNIT=LUNSYS,FILE='LISPSYS',ERR=3)
+       OPEN(UNIT=LUNSYS,FILE='LISPSYS',STATUS='OLD',ERR=3,IOSTAT=IOS)
        GOTO 4
  3     WRITE(LUNUTS,5)
+       WRITE(103,5)
  5     FORMAT(' Can''t open LISPSYS')
        STOP
 C
@@ -2490,15 +2491,20 @@ C      DO 10 I = I1,I2,I3
 C        MAX = I+I3-1
 C        IF (MAX.GT.I2) MAX = I2
 C10      READ (LUN) (CARD(J), J = I,MAX)
-10       READ (LUN) (CARD(J), J = I1,I2)
+10       READ (LUN,ERR=999,IOSTAT=IOS) (CARD(J), J = I1,I2)
       RETURN
+999   WRITE(103,*) 'Error ',IOS,
+     &             '. DMPIN2 failed to read from unit ',LUN
+      STOP
       END
       SUBROUTINE RDA4(LUN,CARD,I1,I2)
       INTEGER CARD(I2)
 C             RDA4 IS CALLED FROM MESS
-      READ(LUN,100) (CARD(I),I=I1,I2)
+      READ(LUN,100,ERR=999,IOSTAT=IOS) (CARD(I),I=I1,I2)
 100   FORMAT (100A8)
       RETURN
+999   WRITE(103,*) 'Error ',IOS,
+     &             '. RDA4 failed to read from unit ',LUN
       END
       SUBROUTINE DMPIN (LUN,AREA,I1,I2)
         INCLUDE 'F4COM.FOR'
@@ -2507,8 +2513,11 @@ C      I3 = MAXREC/IBYTES
 C      DO 10 I = I1,I2,I3
 C        MAX = I+I3-1
 C        IF (MAX.GT.I2) MAX = I2
-10       READ (LUN) (AREA(J), J = I1,I2)
+10       READ (LUN,ERR=999,IOSTAT=IOS) (AREA(J), J = I1,I2)
         RETURN
+999     WRITE(103,*) 'Error ',IOS,
+     &               '. DMPIN failed to read from unit ',LUN
+        STOP
         END
       SUBROUTINE DMPOU2(LUN,LINE,I1,I2)
 C             DMPOU2 IS CALLED ONLY FROM ROLLOUT.
@@ -2523,20 +2532,26 @@ C      DO 10 I = I1,I2,I3
 C        MAX = I+I3-1
 C        IF (MAX.GT.I2) MAX = I2
 C10      WRITE (LUN) (LINE(J), J = I,MAX)
-10       WRITE (LUN) (LINE(J), J = I1,I2)
+10       WRITE (LUN,ERR=999,IOSTAT=IOS) (LINE(J), J = I1,I2)
       RETURN
+999   WRITE(103,*) 'Error ',IOS,
+     &             '. DMPOU2 failed to write to unit ',LUN
+      STOP
       END
       SUBROUTINE WRA1(LUN,LINE,I1,I2)
       INTEGER LINE(I2)
       INCLUDE 'F4COM.FOR'
 C INSERTED BY TR:
       IF(LUN.EQ.LUNUTS)GOTO 1
-      WRITE(LUN,100) (LINE(I),I=I1,I2)
+      WRITE(LUN,100,ERR=999,IOSTAT=IOS) (LINE(I),I=I1,I2)
       RETURN
-1      WRITE(LUN,101)(LINE(I),I=I1,I2)
+1      WRITE(LUN,101,ERR=999,IOSTAT=IOS)(LINE(I),I=I1,I2)
 101   FORMAT(1X,150A1)
 100   FORMAT(150A1)
       RETURN
+999   WRITE(103,*) 'Error ',IOS,
+     &             '. WRA1 failed to write to unit ',LUN
+      STOP
       END
       SUBROUTINE RDA1(LUN,CARD,I1,I2,IEOF)
 C             CALLED FROM SHIFT AND INIT2
@@ -2551,17 +2566,23 @@ C      WRITE (LUNUTS,10) (PROTXT(I),I=1,PROLEN)
 C10    FORMAT (1X,150A1)
       GOTO 40
 20    K=PRTPOS-1
-      WRITE(LUNUTS,101)(PRBUFF(I),I=1,K)
+      WRITE(LUNUTS,101,ERR=999,IOSTAT=IOS)(PRBUFF(I),I=1,K)
 101   FORMAT(1X,150A1)
       DO 21 I=1,K
 21    PRBUFF(I)=SPACE 
       PRTPOS=1
 40    CONTINUE
-      READ(LUN,100,END=1) (CARD(I),I=I1,I2)
+      READ(LUN,100,END=1,ERR=998,IOSTAT=IOS) (CARD(I),I=I1,I2)
 100   FORMAT(150A1)
       RETURN
 1     IEOF=2
       RETURN
+998   WRITE(103,*) 'Error ',IOS,
+     &             '. RDA1 failed to read from unit ',LUN
+      STOP
+999   WRITE(103,*) 'Error ',IOS,
+     &             '. RDA1 failed to write to unit ',LUNUTS
+      STOP
       END
       FUNCTION MPNAME(X,BUFFER,MAX,IPL)
 C-- MOVES THE PNAME OF X TO THE BUFFER IN PACKED FORM
@@ -2592,9 +2613,12 @@ C--        GT 0  TRUNCATION
         DO 10 I=I1,I2
           IF(LINE(I).NE.SPACE) I3=I
 10        CONTINUE
-        WRITE(LUN,101)(LINE(I),I=I1,I3)
+        WRITE(LUN,101,ERR=999,IOSTAT=IOS)(LINE(I),I=I1,I3)
 101   FORMAT(1X,100A8)
       RETURN
+999   WRITE(103,*) 'Error ',IOS,
+     &             '. WRA4 failed to write to unit ',LUN
+      STOP
       END
       SUBROUTINE DMPOUT(LUN,AREA,I1,I2)
         INCLUDE 'F4COM.FOR'
@@ -2603,6 +2627,9 @@ C      I3 = MAXREC/IBYTES
 C      DO 10 I = I1,I2,I3
 C        MAX = I+I3-1
 C        IF (MAX.GT.I2) MAX = I2
-10       WRITE (LUN) (AREA(J), J = I1,I2)
+10       WRITE (LUN,ERR=999,IOSTAT=IOS) (AREA(J), J = I1,I2)
         RETURN
+999     WRITE(103,*) 'Error ',IOS,
+     &               '. DMPOUT failed to write to unit ',LUN
+        STOP
         END
