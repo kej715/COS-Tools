@@ -922,7 +922,7 @@ void emitLoadConst(OperatorArgument *arg) {
         else if (l <= 017777777)
             emit("         S%o        %ld\n", arg->reg, l);
         else
-            emit("         S%o        =%ld,\n", arg->reg, l);
+            emit("         S%o        =O'%lo,\n", arg->reg, l);
         break;
     case BaseType_Integer:
         emitLoadConstInt(arg->reg, arg->details.constant.value.integer);
@@ -952,7 +952,7 @@ void emitLoadConstInt(Register reg, i64 value) {
         emit("         S%o        %ld\n", reg, value);
     }
     else {
-        emit("         S%o        =%ld,\n", reg, value);
+        emit("         S%o        =O'%lo,\n", reg, value);
     }
 }
 
