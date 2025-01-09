@@ -6983,7 +6983,7 @@ static char *readLine(void) {
         }
         else if (lp < limit) {
             *lp++ = c;
-            if (c != ' ') lineEnd = lp;
+            if (!isspace(c)) lineEnd = lp;
         }
     }
     *lineEnd = '\0';
