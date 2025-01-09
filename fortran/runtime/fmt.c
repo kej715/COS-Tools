@@ -753,19 +753,8 @@ static void fmtRealF(f64 value, FormatDesc *fdp) {
 }
 
 static void fmtRealG(f64 value, FormatDesc *fdp) {
-    int expLength;
-    FormatDesc fd;
-
     if (value >= 0.1 && fdp->minDigits < 20 && value < powers10[fdp->minDigits]) {
-        expLength = (fdp->expLength == 0) ? 2 : fdp->expLength;
-        expLength += 2; /* E+ */
-        fd = *fdp;
-        fd.width -= expLength;
-        fmtRealF(value, &fd);
-        while (expLength-- > 0) {
-            if (cursor < limit) *cursor = ' ';
-            cursor += 1;
-        }
+        fmtRealF(value, fdp);
     }
     else {
         fmtRealE(value, fdp);
