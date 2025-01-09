@@ -49,7 +49,7 @@ static void resetHeaderLine(void);
 
 static char *cpuType = "Cray X-MP";
 static char *ftcName = "kFTC";
-static char *ftcVersion = "1.9.6";
+static char *ftcVersion = "1.9.7";
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = LINES_PER_PAGE;
 static int  pageNumber = 0;
