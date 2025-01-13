@@ -134,7 +134,7 @@ void emitRealToIntReg(Register arg);
 void emitRestoreRegs(u16 mask);
 void emitSaveRegs(u16 mask);
 void emitStart(char *name);
-void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList);
+void emitStaticInitializer(StorageAttributes *attrs, ConstantListItem *constantList, int *cursor);
 void emitStoreArg(Symbol *sym, OperatorArgument *arg);
 void emitStoreByReference(OperatorArgument *target, OperatorArgument *value);
 void emitStoreFrame(Register reg, int offset);

@@ -487,27 +487,17 @@ void emitEndDo(DoStackEntry *entry) {
 void emitEpilog(Symbol *sym, int frameSize, int staticDataSize) {
     if (sym->class != SymClass_BlockData) {
         emitLabel(sym->details.progUnit.exitLabel);
-        if (sym->class == SymClass_Program) {
+        switch (sym->class) {
+        case SymClass_Program:
             emitPrimCall("@_endfio");
             emit("         S7        0\n");
-        }
-        else if (sym->class == SymClass_Function || sym->class == SymClass_StmtFunction) {
-            if (sym->details.progUnit.dt.type != BaseType_Character || sym->details.progUnit.dt.constraint == -1) {
-                emit("         S7        %d,A6\n", sym->details.progUnit.offset);
-            }
-            else {
-                emit("         A1        %d\n", sym->details.progUnit.offset);
-                emit("         A1        A1+A6\n");
-                emit("         S7        A1\n");
-                emit("         S7        S7<3\n");
-                emit("         S1        %d\n", sym->details.progUnit.dt.constraint);
-                emit("         S1        S1<32\n");
-                emit("         S7        S7!S1\n");
-                if (sym->details.progUnit.dt.firstChrOffset != 0) {
-                    emit("         S1        %d\n", sym->details.progUnit.dt.firstChrOffset);
-                    emit("         S7        S7+S1\n");
-                }
-            }
+            break;
+        case SymClass_Function:
+        case SymClass_StmtFunction:
+            emit("         S7        %d,A6\n", sym->details.progUnit.offset);
+            break;
+        default:
+            break;
         }
         emit("         A7        A6\n");
         emit("         A0        ,A7\n");
@@ -1129,6 +1119,7 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Function:
+        case SymClass_StmtFunction:
             if (dt->constraint == -1) {
                 if (object == NULL) {
                     fprintf(stderr, "No reference object for assumed-size %s\n", sym->identifier);
@@ -1147,18 +1138,12 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        S7\n", subject->reg);
             }
             else {
-                emit("         S%o        %d\n", subject->reg, sym->details.progUnit.offset);
-                if (progUnitSym->class != SymClass_StmtFunction) {
-                    emit("         S7        A6\n");
+                if (progUnitSym->class != SymClass_StmtFunction || sym->isShadow) {
+                    emit("         S%o        %d,A6\n", subject->reg, sym->details.progUnit.offset);
                 }
                 else {
-                    emit("         S7        1,A6\n");
-                }
-                emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
-                emit("         S%o        S%o<3\n", subject->reg, subject->reg);
-                if (dt->firstChrOffset != 0) {
-                    emit("         S7        %d\n", dt->firstChrOffset);
-                    emit("         S%o        S%o+S7\n", subject->reg, subject->reg);
+                    emit("         A1        1,A6\n");
+                    emit("         S%o        %d,A1\n", subject->reg, sym->details.progUnit.offset);
                 }
             }
             switch (subject->details.reference.offsetClass) {
@@ -1178,7 +1163,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
                 exit(1);
             }
-            break;
+            subject->class = ArgClass_Calculation;
+            subject->details.calculation = sym->details.progUnit.dt;
+            return;
         case SymClass_Global:
             emit("         S%o        %s+%d\n", subject->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset);
             emit("         S%o        S%o<3\n", subject->reg, subject->reg);
@@ -1868,6 +1855,8 @@ void emitPrimCall(char *label) {
 
 void emitProlog(Symbol *sym) {
     char buf[32];
+    DataType *dt;
+    Register reg;
 
     generateLabel(sym->details.progUnit.staticDataLabel);
     switch (sym->class) {
@@ -1900,8 +1889,28 @@ void emitProlog(Symbol *sym) {
     emit("         A6        A7\n");    /* set new base pointer */
     emit("         A1        %s,\n", sym->details.progUnit.frameSizeLabel);
     emit("         A7        A7-A1\n"); /* reserve space for local variables */
-    if (sym->class == SymClass_Program) {
+    switch (sym->class) {
+    case SymClass_Program:
         emitPrimCall("@_inifio");
+        break;
+    case SymClass_Function:
+    case SymClass_StmtFunction:
+        dt = getSymbolType(sym);
+        if (dt->type == BaseType_Character && dt->constraint != -1) {
+            /*
+             *  Get a buffer for the function result
+             */
+            reg = allocateRegister();
+            emitLoadConstInt(reg, dt->constraint);
+            emitPushReg(reg);
+            freeRegister(reg);
+            emitPrimCall("@_getstr");
+            emitAdjustSP(1);
+            emitStoreReg(sym, RESULT_REG);
+        }
+        break;
+    default:
+        break;
     }
 }
 
@@ -1998,86 +2007,104 @@ void emitStart(char *name) {
     emitActivateSection("TEXT", "CODE");
 }
 
-void emitStaticInitializers(DataInitializerItem *dList, ConstantListItem *cList) {
-    int charOffset;
+void emitStaticInitializer(StorageAttributes *attrs, ConstantListItem *constantList, int *cursor) {
     ConstantListItem *cListItem;
-    DataInitializerItem *dListItem;
+    int elementCount;
     int fieldLen;
+    int i;
     int len;
+    int repeatCount;
     char *s;
     int sLen;
     int wordOffset;
 
-    dListItem = dList;
-    cListItem = cList;
-    while (dListItem != NULL) {
-        emitActivateSection(dListItem->blockName, dListItem->blockType);
-        wordOffset = dListItem->blockOffset;
-        if (dListItem->type == BaseType_Character) {
-            wordOffset += dListItem->elementOffset / 8;
-            charOffset = dListItem->charOffset;
-        }
-        else {
-            wordOffset += dListItem->elementOffset;
-        }
-        emit("         ORG       %s+%d\n", dListItem->blockLabel, wordOffset);
-        while (dListItem->elementCount-- > 0) {
-            switch (dListItem->type) {
-            case BaseType_Character:
-                s = cListItem->details.value.character.string;
-                sLen = cListItem->details.value.character.length;
-                len = dListItem->charLength;
-                if (charOffset > 0) {
-                    emit("         BITW      %d\n", charOffset * 8);
-                }
-                fieldLen = 8 - charOffset;
-                if (fieldLen > len) fieldLen = len;
-                while (len > 0) {
-                    len -= fieldLen;
-                    if (fieldLen < 8) {
-                        emit("         VWD       %d/'", fieldLen * 8);
-                    }
-                    else {
-                        emit("         DATA      '");
-                    }
-                    while (fieldLen > 0 && sLen > 0) {
-                        if (*s == '\'')
-                            emit("''");
-                        else
-                            emit("%c", *s);
-                        s += 1;
-                        fieldLen -= 1;
-                        sLen -= 1;
-                    }
-                    while (fieldLen-- > 0) emit(" ");
-                    emit("'\n");
-                    fieldLen = (len < 8) ? len : 8;
-                }
-                break;
-            case BaseType_Logical:
-                emit("         CON       %d\n", cListItem->details.value.logical);
-                break;
-            case BaseType_Integer:
-                emit("         CON       %d\n", cListItem->details.value.integer);
-                break;
-            case BaseType_Double:
-            case BaseType_Real:
-                emit("         CON       ");
-                emitFloat(cListItem->details.value.real);
-                emit("\n");
-                break;
-            case BaseType_Complex:
-            default:
-                break;
+    cListItem = constantList;
+    repeatCount = cListItem->repeatCount;
+    for (i = 0; i < *cursor; i++) {
+        repeatCount -= 1;
+        if (repeatCount < 1) {
+            cListItem = cListItem->next;
+            if (cListItem == NULL) {
+                fprintf(stderr, "Not enough data values for %s", attrs->id);
+                exit(1);
             }
-            cListItem->repeatCount -= 1;
-            if (cListItem->repeatCount < 1) {
-                cListItem = cListItem->next;
-            }
+            repeatCount = cListItem->repeatCount;
         }
-        emitDeactivateSection(dListItem->blockName);
-        dListItem = dListItem->next;
     }
+    emitActivateSection(attrs->blockName, attrs->blockType);
+    wordOffset = attrs->blockOffset;
+    if (attrs->type == BaseType_Character) {
+        wordOffset += attrs->elementOffset / 8;
+    }
+    else {
+        wordOffset += attrs->elementOffset;
+    }
+    emit("         ORG       %s+%d\n", attrs->blockLabel, wordOffset);
+    elementCount = attrs->elementCount;
+    while (elementCount > 0 && cListItem != NULL) {
+        switch (attrs->type) {
+        case BaseType_Character:
+            s = cListItem->details.value.character.string;
+            sLen = cListItem->details.value.character.length;
+            len = attrs->charLength;
+            if (attrs->charOffset > 0) {
+                emit("         BITW      %d\n", attrs->charOffset * 8);
+            }
+            fieldLen = 8 - attrs->charOffset;
+            if (fieldLen > len) fieldLen = len;
+            while (len > 0) {
+                len -= fieldLen;
+                if (fieldLen < 8) {
+                    emit("         VWD       %d/'", fieldLen * 8);
+                }
+                else {
+                    emit("         DATA      '");
+                }
+                while (fieldLen > 0 && sLen > 0) {
+                    if (*s == '\'')
+                        emit("''");
+                    else
+                        emit("%c", *s);
+                    s += 1;
+                    fieldLen -= 1;
+                    sLen -= 1;
+                }
+                while (fieldLen-- > 0) emit(" ");
+                emit("'\n");
+                fieldLen = (len < 8) ? len : 8;
+            }
+            break;
+        case BaseType_Logical:
+            emit("         CON       %d\n", cListItem->details.value.logical);
+            break;
+        case BaseType_Integer:
+            emit("         CON       %d\n", cListItem->details.value.integer);
+            break;
+        case BaseType_Double:
+        case BaseType_Real:
+            emit("         CON       ");
+            emitFloat(cListItem->details.value.real);
+            emit("\n");
+            break;
+        case BaseType_Complex:
+        default:
+            break;
+        }
+        *cursor += 1;
+        elementCount -= 1;
+        repeatCount -= 1;
+        if (repeatCount < 1) {
+            cListItem = cListItem->next;
+            if (cListItem != NULL) {
+                repeatCount = cListItem->repeatCount;
+            }
+        }
+    }
+    if (elementCount > 0) {
+        fprintf(stderr, "Not enough data values for %s\n", attrs->id);
+        exit(1);
+    }
+    emitDeactivateSection(attrs->blockName);
 }
 
 void emitStoreArg(Symbol *sym, OperatorArgument *arg) {

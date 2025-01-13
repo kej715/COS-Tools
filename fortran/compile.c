@@ -47,7 +47,6 @@ typedef enum parsingState {
     STATE_EXECUTABLE
 } ParsingState;
 
-static void adjustDataInitializers(void);
 static char *appendLine(char *sp, char *lp);
 static void assignStorage(void);
 static char *baseTypeToStr(BaseType type);
@@ -57,6 +56,7 @@ static void copyCharValue(DataValue *to, DataValue *from);
 static Token *copyToken(Token *token);
 static Token *createIntegerConstant(int value);
 static void defineLocalVariable(Symbol *symbol);
+static Symbol *defineNameListDoVar(char *varId);
 static char *eatWsp(char *s);
 static void errArgType(OperatorId op, BaseType type, OperatorArgument *arg);
 static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, OperatorArgument *offset);
@@ -66,6 +66,9 @@ static bool evaluateFmtSpec(ControlInfoList *ciList);
 static bool evaluateFunction(Token *fn, Symbol *symbol, Symbol *intrinsic);
 static bool evaluateIdentifier(Token *id);
 static bool evaluateInquireReference(StorageReference *ref, int stackOffset);
+static IoListItem *evaluateStaticImplDoInitializer(IoListItem *nListItem);
+static StorageAttributes *evaluateStaticInitializer(StorageReference *ref);
+static void evaluateStaticInitializers(void);
 static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, OperatorArgument *object, bool *isScalar);
 static bool evaluateStringIndex(Token *expression, OperatorArgument *index);
 static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgument *offset, OperatorArgument *length);
@@ -75,12 +78,13 @@ static void freeCharValue(DataValue *charValue);
 static void freeCloseInfoList(CloseInfoList *ciList);
 static void freeConstantList(ConstantListItem *list);
 static void freeControlInfoList(ControlInfoList *list);
-static void freeDataInitializerList(DataInitializerItem *list);
+static void freeDataList(DataListItem *list);
 static void freeImpliedDoList(ImpliedDoList *doList);
 static void freeInquireInfoList(InquireInfoList *iiList);
 static void freeIoList(IoListItem *ioList);
 static void freeOpenInfoList(OpenInfoList *oiList);
 static void freeStaticInitializers(void);
+static void freeStorageAttrs(StorageAttributes *attrs);
 static void freeStorageReference(StorageReference *reference);
 static void freeStringRange(StringRange *range);
 static void freeToken(Token *token);
@@ -108,6 +112,7 @@ static void parseAssignment(char *s, Token *id);
 static char *parseCharConstraint(char *s, Token *token, DataType *dt);
 static char *parseCloseInfoList(char *s, CloseInfoList **ciList);
 static char *parseControlInfoList(char *s, ControlInfoList **ciList, int defaultUnit);
+static char *parseConstantList(char *s, ConstantListItem **list);
 static char *parseDataType(char *s, Token *token, DataType *type);
 static char *parseDimDecl(char *s, Symbol *symbol);
 static void parseDirective(char *s, int lineNo);
@@ -118,6 +123,7 @@ static char *parseFormalArguments(char *s, bool isStmtFn);
 static char *parseImpliedDo(char *s, Token *doVarId, ImpliedDoList *doList);
 static char *parseIoList(char *s, bool isWithinDo, IoListItem **ioList);
 static void parseLogicalIF(char *s, Register reg, bool isFromLogIf);
+static char *parseNameList(char *s, bool isWithinDo, IoListItem **nameList);
 static char *parseOpenInfoList(char *s, OpenInfoList **oiList);
 static void parseOutputStmt(char *s, int unitNum);
 static void parseStmtFunction(char *s, Token *id);
@@ -130,6 +136,7 @@ static void popSource(void);
 static void presetProgUnit(void); 
 static void processInputList(IoListItem *ioList, ControlInfoList *ciList);
 static void processOutputList(IoListItem *ioList, ControlInfoList *ciList);
+static void processStaticInitializers(void);
 static void pushArg(OperatorArgument *arg);
 static void pushOp(OperatorDetails *op);
 static void pushSource(void);
@@ -137,7 +144,9 @@ static char *readLine(void);
 static void setIntegerArg(OperatorArgument *arg, int value);
 static bool setupImpliedDoList(ImpliedDoList *doList, DoStackEntry *entry);
 static void transferCharValue(DataValue *to, DataValue *from);
-static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList);
+static bool validateDataImplDo(ImpliedDoList *doList, ConstantListItem *constantList, int *cursor);
+static bool validateDataInitializer(StorageReference *ref, ConstantListItem *constantList, int *cursor);
+static bool validateDataInitializers(IoListItem *nameList, ConstantListItem *constantList, int *cursor);
 static void verifyEOS(char *s);
 
 static void parseASSIGN(char *s);
@@ -226,18 +235,8 @@ static int opStkPtr = 0;
 static SourceStackEntry sourceStack[MAX_SRC_STACK_SIZE];
 static int sourceStkPtr = 0;
 
-static ConstantListItem *firstCListItem = NULL;
-static DataInitializerItem *firstDListItem = NULL;
-static ConstantListItem *lastCListItem = NULL;
-static DataInitializerItem *lastDListItem = NULL;
-
-static void adjustDataInitializers(void) {
-    DataInitializerItem *dListItem;
-
-    for (dListItem = firstDListItem; dListItem != NULL; dListItem = dListItem->next) {
-        dListItem->blockOffset = dListItem->symbol->details.variable.offset;
-    }
-}
+static DataListItem *firstDListItem = NULL;
+static DataListItem *lastDListItem = NULL;
 
 static char *appendLine(char *sp, char *lp) {
     char *nbp;
@@ -277,7 +276,7 @@ static void assignStorage(void) {
     autoOffset = -calculateAutoOffsets();
     staticOffset = calculateStaticOffsets();
     calculateCommonOffsets();
-    adjustDataInitializers();
+    evaluateStaticInitializers();
 }
 
 static int calculateConstOffset(Symbol *symbol, TokenListItem *subscriptList) {
@@ -455,7 +454,7 @@ void compile(char *name) {
         start = s = collectStmt();
         if (s == NULL) {
             emitCommonBlocks();
-            emitStaticInitializers(firstDListItem, firstCListItem);
+            processStaticInitializers();
             freeStaticInitializers();
             emitEnd();
             break;
@@ -882,6 +881,29 @@ static void defineLocalVariable(Symbol *symbol) {
         autoOffset -= calculateSize(symbol);
         symbol->details.variable.offset = autoOffset;
     }
+}
+
+static Symbol *defineNameListDoVar(char *varId) {
+    DataType *dt;
+    Symbol *symbol;
+
+    symbol = findSymbol(varId);
+    if (symbol == NULL) {
+        symbol = addSymbol(varId, SymClass_Parameter);
+        symbol->isShadow = TRUE;
+        defineType(symbol);
+    }
+    else if (symbol->shadow == NULL) {
+        dt = getSymbolType(symbol);
+        symbol = createShadow(symbol, SymClass_Parameter);
+        symbol->details.param.dt = *dt;
+    }
+    else {
+        err("Implied DO variable name not unique: %s", varId);
+        return NULL;
+    }
+
+    return symbol;
 }
 
 static char *eatWsp(char *s) {
@@ -1422,6 +1444,227 @@ static bool evaluateInquireReference(StorageReference *ref, int stackOffset) {
     return FALSE;
 }
 
+static IoListItem *evaluateStaticImplDoInitializer(IoListItem *nListItem) {
+    StorageAttributes *attrs;
+    ImpliedDoList *doList;
+    IoListItem *firstResultItem;
+    int incrValue;
+    int initValue;
+    StorageAttributes *lastAttrs;
+    IoListItem *lastResultItem;
+    int limitValue;
+    OperatorArgument result;
+    IoListItem *resultItem;
+    IoListItem *resultList;
+    Symbol *symbol;
+    int tripCount;
+
+    doList = nListItem->details.doList;
+    symbol = defineNameListDoVar(doList->loopVarId);
+    if (evaluateExpression(doList->initExpression, &result) == FALSE) {
+        initValue = result.details.constant.value.integer;
+    }
+    if (evaluateExpression(doList->limitExpression, &result) == FALSE) {
+        limitValue = result.details.constant.value.integer;
+    }
+    incrValue = 1;
+    if (doList->incrExpression != NULL && evaluateExpression(doList->incrExpression, &result) == FALSE) {
+        incrValue = result.details.constant.value.integer;
+    }
+    tripCount = (limitValue - initValue + incrValue) / incrValue;
+    firstResultItem = NULL;
+    lastResultItem = NULL;
+    while (tripCount > 0) {
+        symbol->details.param.value.integer = initValue;
+        tripCount -= 1;
+        initValue += incrValue;
+        nListItem = doList->ioList;
+        while (nListItem != NULL) {
+            switch (nListItem->class) {
+            case IoListClass_DoList:
+                resultList = evaluateStaticImplDoInitializer(nListItem);
+                if (firstResultItem == NULL) {
+                    firstResultItem = resultList;
+                }
+                else {
+                    lastResultItem->next = resultList;
+                }
+                resultItem = resultList;
+                while (resultItem->next != NULL) {
+                    resultItem = resultItem->next;
+                }
+                lastResultItem = resultItem;
+                break;
+            case IoListClass_StorageRef:
+                attrs = evaluateStaticInitializer(nListItem->details.storageRef);
+                resultItem = (IoListItem *)allocate(sizeof(IoListItem));
+                resultItem->class = IoListClass_StorageAttrs;
+                resultItem->details.storageAttrs = attrs;
+                if (firstResultItem == NULL) {
+                    firstResultItem = resultItem;
+                    lastResultItem  = resultItem;
+                }
+                else { 
+                    lastAttrs = lastResultItem->details.storageAttrs;
+                    if (strcmp(lastAttrs->blockName, attrs->blockName) == 0
+                        && strcmp(lastAttrs->blockType, attrs->blockType) == 0
+                        && lastAttrs->type == attrs->type && lastAttrs->type != BaseType_Character
+                        && (lastAttrs->blockOffset + lastAttrs->elementOffset + lastAttrs->elementCount) == (attrs->blockOffset + attrs->elementOffset)) {
+                        lastAttrs->elementCount += attrs->elementCount;
+                        freeStorageAttrs(attrs);
+                    }
+                    else {
+                        lastResultItem->next = resultItem;
+                        lastResultItem  = resultItem;
+                    }
+                }
+                break;
+            case IoListClass_StorageAttrs:
+                // Ignore these. They are produced by previously compiled subprograms.
+                break;
+            default:
+                fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+                exit(1);
+            }
+            nListItem = nListItem->next;
+        }
+    }
+
+    return firstResultItem;
+}
+
+static StorageAttributes *evaluateStaticInitializer(StorageReference *ref) {
+    StorageAttributes *attrs;
+    DataType *dt;
+    int len;
+    OperatorArgument result;
+    int rank;
+    Symbol *symbol;
+
+    symbol = ref->symbol;
+    attrs = (StorageAttributes *)allocate(sizeof(StorageAttributes));
+    if (symbol->class == SymClass_Static) {
+        attrs->blockName = "DATA";
+        attrs->blockType = "DATA";
+        memcpy(attrs->blockLabel, symbol->details.variable.staticBlock->details.progUnit.staticDataLabel, 8);
+    }
+    else if (symbol->class == SymClass_Global) {
+        attrs->blockName = symbol->details.variable.staticBlock->identifier;
+        attrs->blockType = "COMMON";
+        memcpy(attrs->blockLabel, symbol->details.variable.staticBlock->details.common.label, 8);
+    }
+    else {
+        fprintf(stderr, "%s is not static or common\n", symbol->identifier);
+        exit(1);
+    }
+    dt = getSymbolType(symbol);
+    len = strlen(symbol->identifier);
+    attrs->id = (char *)allocate(len + 1);
+    memcpy(attrs->id, symbol->identifier, len);
+    attrs->type = dt->type;
+    attrs->blockOffset = symbol->details.variable.offset;
+    rank = symbol->details.variable.dt.rank;
+    if (rank > 0) {
+        if (ref->expressionList != NULL) { // array element reference
+            if (evaluateArrayRef(symbol, ref->expressionList, &result) || !isConstant(result) || result.details.constant.dt.type != BaseType_Integer) {
+                fprintf(stderr, "Invalid subscript for %s\n", symbol->identifier);
+                exit(1);
+            }
+            attrs->elementOffset = result.details.constant.value.integer;
+            attrs->elementCount = 1;
+        }
+        else { // whole array reference
+            attrs->elementOffset = 0;
+            attrs->elementCount = countArrayElements(symbol);
+        }
+    }
+    else {
+        attrs->elementOffset = 0;
+        attrs->elementCount = 1;
+    }
+    if (attrs->type == BaseType_Character) {
+        attrs->charOffset = 0;
+        attrs->charLength = dt->constraint;
+        if (ref->strRange != NULL) {
+            if (ref->strRange->first != NULL) {
+                if (evaluateExpression(ref->strRange->first, &result)
+                    || !isConstant(result)
+                    || result.details.constant.dt.type != BaseType_Integer
+                    || result.details.constant.value.integer <= 0) {
+                    fprintf(stderr, "Invalid character index for %s\n", symbol->identifier);
+                    exit(1);
+                }
+                attrs->charOffset = result.details.constant.value.integer - 1;
+            }
+            if (ref->strRange->last != NULL) {
+                if (evaluateExpression(ref->strRange->last, &result)
+                    || !isConstant(result)
+                    ||  result.details.constant.dt.type != BaseType_Integer
+                    ||  result.details.constant.value.integer <= 0) {
+                    fprintf(stderr, "Invalid character index for %s\n", symbol->identifier);
+                    exit(1);
+                }
+                attrs->charLength = result.details.constant.value.integer - attrs->charOffset;
+            }
+            else {
+                attrs->charLength = dt->constraint - attrs->charOffset;
+            }
+        }
+    }
+
+    return attrs;
+}
+
+static void evaluateStaticInitializers(void) {
+    StorageAttributes *attrs;
+    DataListItem *dListItem;
+    IoListItem *next;
+    IoListItem *nListItem;
+    IoListItem *prev;
+    IoListItem *resultList;
+
+    for (dListItem = firstDListItem; dListItem != NULL; dListItem = dListItem->next) {
+        nListItem = dListItem->nameList;
+        prev = NULL;
+        while (nListItem != NULL) {
+            next = nListItem->next;
+            switch (nListItem->class) {
+            case IoListClass_DoList:
+                resultList = evaluateStaticImplDoInitializer(nListItem);
+                removeAllShadows();
+                freeImpliedDoList(nListItem->details.doList);
+                free(nListItem);
+                if (prev == NULL) {
+                    dListItem->nameList = resultList;
+                }
+                else {
+                    prev->next = resultList;
+                }
+                nListItem = resultList;
+                while (nListItem->next != NULL) {
+                    nListItem = nListItem->next;
+                }
+                nListItem->next = next;
+                break;
+            case IoListClass_StorageRef:
+                attrs = evaluateStaticInitializer(nListItem->details.storageRef);
+                freeStorageReference(nListItem->details.storageRef);
+                nListItem->class = IoListClass_StorageAttrs;
+                nListItem->details.storageAttrs = attrs;
+                break;
+            case IoListClass_StorageAttrs:
+                // Ignore these. They are produced by previously compiled subprograms.
+                break;
+            default:
+                fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+                exit(1);
+            }
+            prev = nListItem;
+            nListItem = next;
+        }
+    }
+}
+
 static bool evaluateStorageReference(StorageReference *reference, OperatorArgument *target, OperatorArgument *object, bool *isScalar) {
     DataType *dt;
     bool isAssumedSize;
@@ -1830,11 +2073,13 @@ static void freeControlInfoList(ControlInfoList *ciList) {
     }
 }
 
-static void freeDataInitializerList(DataInitializerItem *list) {
-    DataInitializerItem *nextItem;
+static void freeDataList(DataListItem *list) {
+    DataListItem *nextItem;
 
     while (list != NULL) {
         nextItem = list->next;
+        freeIoList(list->nameList);
+        freeConstantList(list->constantList);
         free(list);
         list = nextItem;
     }
@@ -1842,6 +2087,7 @@ static void freeDataInitializerList(DataInitializerItem *list) {
 
 static void freeImpliedDoList(ImpliedDoList *doList) {
     if (doList != NULL) {
+        if (doList->loopVarId       != NULL) free(doList->loopVarId);
         if (doList->ioList          != NULL) freeIoList(doList->ioList);
         if (doList->initExpression  != NULL) freeToken(doList->initExpression);
         if (doList->limitExpression != NULL) freeToken(doList->limitExpression);
@@ -1877,11 +2123,22 @@ static void freeIoList(IoListItem *ioList) {
     IoListItem *next;
 
     while (ioList != NULL) {
-        if (ioList->class == IoListClass_Expression) {
+        switch (ioList->class) {
+        case IoListClass_Expression:
             freeToken(ioList->details.expression);
-        }
-        else {
+            break;
+        case IoListClass_StorageRef:
+            freeStorageReference(ioList->details.storageRef);
+            break;
+        case IoListClass_StorageAttrs:
+            freeStorageAttrs(ioList->details.storageAttrs);
+            break;
+        case IoListClass_DoList:
             freeImpliedDoList(ioList->details.doList);
+            break;
+        default:
+            fprintf(stderr, "Invalid I/O list class: %d\n", ioList->class);
+            exit(1);
         }
         next = ioList->next;
         free(ioList);
@@ -1904,10 +2161,16 @@ static void freeOpenInfoList(OpenInfoList *oiList) {
 }
 
 static void freeStaticInitializers(void) {
-    freeDataInitializerList(firstDListItem);
-    freeConstantList(firstCListItem);
+    freeDataList(firstDListItem);
     firstDListItem = NULL;
-    firstCListItem = NULL;
+    lastDListItem  = NULL;
+}
+
+static void freeStorageAttrs(StorageAttributes *attrs) {
+    if (attrs != NULL) {
+        free(attrs->id);
+        free(attrs);
+    }
 }
 
 static void freeStorageReference(StorageReference *reference) {
@@ -2938,6 +3201,75 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
     }
 }
 
+static char *parseConstantList(char *s, ConstantListItem **list) {
+    int ec;
+    ConstantListItem *firstItem;
+    ConstantListItem *item;
+    ConstantListItem *lastItem;
+    int repeatCount;
+    OperatorArgument result;
+    Token token;
+
+    firstItem = NULL;
+    lastItem  = NULL;
+    *list     = NULL;
+    ec        = errorCount;
+    enableEmission(FALSE);
+    for (;;) {
+        s = getNextToken(s, &token, FALSE);
+        repeatCount = 1;
+        if (*s == '*') { // repeat count specified
+            if (evaluateExpression(&token, &result)) break;
+            if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
+                repeatCount = result.details.constant.value.integer;
+            }
+            else {
+                if (isCalculation(result)) freeRegister(result.reg);
+                err("Invalid repeat count");
+                break;
+            }
+            s = getNextToken(s + 1, &token, FALSE);
+        }
+        if (evaluateExpression(&token, &result)) break;
+        if (!isConstant(result)) {
+            if (isCalculation(result)) freeRegister(result.reg);
+            err("DATA value is not a constant");
+            break;
+        }
+        item = (ConstantListItem *)allocate(sizeof(ConstantListItem));
+        item->repeatCount = repeatCount;
+        item->details = result.details.constant;
+        if (firstItem == NULL) {
+            firstItem = item;
+        }
+        else {
+            lastItem->next = item;
+        }
+        lastItem = item;
+        s = eatWsp(s);
+        if (*s == '/') {
+            s += 1;
+            break;
+        }
+        else if (*s == ',') {
+            s += 1;
+        }
+        else {
+            err("Syntax");
+            break;
+        }
+    }
+    enableEmission(TRUE);
+    if (errorCount > ec) {
+        freeConstantList(firstItem);
+        return NULL;
+    }
+    else {
+        *list = firstItem;
+        return s;
+    }
+}
+
 static char *parseDataType(char *s, Token *token, DataType *dt) {
     int value;
 
@@ -3607,43 +3939,15 @@ static char *parseFormalArguments(char *s, bool isStmtFn) {
 
 static char *parseImpliedDo(char *s, Token *doVarId, ImpliedDoList *doList) {
     Token *expression;
+    int len;
     char *name;
-    int rank;
     char *start;
-    Symbol *sym;
     Token token;
-    BaseType type;
 
     name = doVarId->details.identifier.name;
-    sym = findSymbol(name);
-    if (sym == NULL) {
-        sym = addSymbol(name, SymClass_Undefined);
-    }
-    switch (sym->class) {
-    case SymClass_Undefined:
-        defineLocalVariable(sym);
-        /* fall through */
-    case SymClass_Auto:
-    case SymClass_Static:
-    case SymClass_Global:
-    case SymClass_Argument:
-        type = sym->details.variable.dt.type;
-        rank = sym->details.variable.dt.rank;
-        break;
-    case SymClass_Pointee:
-        type = sym->details.pointee.dt.type;
-        rank = sym->details.pointee.dt.rank;
-        break;
-    default:
-        type = BaseType_Undefined;
-        break;
-    }
-    if (type != BaseType_Integer || rank > 0) {
-        err("Invalid implied DO loop variable: %s", name);
-        return NULL;
-    }
-    doList->loopVariable = sym;
-
+    len = strlen(name);
+    doList->loopVarId = (char *)allocate(len + 1);
+    memcpy(doList->loopVarId, name, len);
     s = parseExpression(s, &expression);
     if (expression == NULL) {
         err("Invalid expression in implied DO");
@@ -3667,6 +3971,9 @@ static char *parseImpliedDo(char *s, Token *doVarId, ImpliedDoList *doList) {
             return NULL;
         }
         doList->incrExpression = expression;
+    }
+    else {
+        doList->incrExpression = NULL;
     }
     if (*s == ')') {
         return s + 1;
@@ -4128,6 +4435,107 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
         }
         emitLabel(label);
     }
+}
+
+static char *parseNameList(char *s, bool isWithinDo, IoListItem **nameList) {
+    IoListItem *currentItem;
+    ImpliedDoList *doList;
+    IoListItem *firstItem;
+    IoListItem *lastItem;
+    StorageReference *ref;
+    char *start;
+    Token token;
+
+    *nameList = NULL;
+    firstItem = NULL;
+    lastItem  = NULL;
+    s = eatWsp(s);
+    if (*s == '\0') return s;
+
+    for (;;) {
+        if (*s == '(') {
+            start = s;
+            s = parseNameList(s + 1, TRUE, &currentItem);
+            if (s == NULL) {
+                s = getNextToken(s, &token, FALSE);
+                if (token.type != TokenType_Identifier) {
+                    err("Syntax");
+                    freeIoList(firstItem);
+                    return NULL;
+                }
+                ref = (StorageReference *)allocate(sizeof(StorageReference));
+                s = parseStorageReference(s, &token, ref);
+                if (s == NULL) {
+                    freeIoList(firstItem);
+                    free(ref);
+                    return NULL;
+                }
+                currentItem = (IoListItem *)allocate(sizeof(IoListItem));
+                currentItem->class = IoListClass_StorageRef;
+                currentItem->details.storageRef = ref;
+            }
+        }
+        else {
+            if (isWithinDo) {
+                start = s;
+                s = getNextToken(s, &token, FALSE);
+                if (token.type == TokenType_Identifier && *s == '=') { // start of implied DO
+                    doList = (ImpliedDoList *)allocate(sizeof(ImpliedDoList));
+                    s = parseImpliedDo(s + 1, &token, doList);
+                    doList->ioList = firstItem;
+                    if (s == NULL) {
+                        freeImpliedDoList(doList);
+                        return NULL;
+                    }
+                    currentItem = (IoListItem *)allocate(sizeof(IoListItem));
+                    currentItem->class = IoListClass_DoList;
+                    currentItem->details.doList = doList;
+                    *nameList = currentItem;
+                    return s;
+                }
+                s = start;
+            }
+            s = getNextToken(s, &token, FALSE);
+            if (token.type != TokenType_Identifier) {
+                err("Syntax");
+                freeIoList(firstItem);
+                return NULL;
+            }
+            ref = (StorageReference *)allocate(sizeof(StorageReference));
+            s = parseStorageReference(s, &token, ref);
+            if (s == NULL) {
+                freeIoList(firstItem);
+                free(ref);
+                return NULL;
+            }
+            currentItem = (IoListItem *)allocate(sizeof(IoListItem));
+            currentItem->class = IoListClass_StorageRef;
+            currentItem->details.storageRef = ref;
+        }
+        if (firstItem == NULL) {
+            firstItem = currentItem;
+        }
+        else {
+            lastItem->next = currentItem;
+        }
+        lastItem = currentItem;
+        s = eatWsp(s);
+        if (*s == '/') {
+            break;
+        }
+        else if (*s == ',') {
+            s = eatWsp(s + 1);
+        }
+        else {
+            if (isWithinDo == FALSE) err("Syntax");
+            freeIoList(firstItem);
+            return NULL;
+        }
+    }
+
+    *nameList = firstItem;
+
+    return s;
 }
 
 static char *parseOpenInfoList(char *s, OpenInfoList **oiList) {
@@ -4896,203 +5304,40 @@ static void parseCOMMON(char *s) {
 }
 
 static void parseDATA(char *s) {
-    ConstantListItem *cListItem;
-    ConstantListItem *currentCList;
-    DataInitializerItem *currentDList;
-    DataInitializerItem *dListItem;
-    DataType *dt;
+    ConstantListItem *constantList;
+    int cursor;
+    DataListItem *dListItem;
     int ec;
-    int rank;
-    StorageReference ref;
-    int repeatCount;
-    OperatorArgument result;
-    char *start;
-    Symbol *symbol;
-    Token token;
-    int totalConstantCount;
-    int totalElementCount;
+    IoListItem *nameList;
 
     ec = errorCount;
     for (;;) {
         /*
          *  Parse the next list of variable references
          */
-        currentDList = NULL;
-        currentCList = NULL;
-        totalElementCount = 0;
-        for (;;) {
-            s = getNextToken(s, &token, FALSE);
-            if (token.type != TokenType_Identifier) {
-                err("Syntax");
-                break;
-            }
-            s = parseStorageReference(s, &token, &ref);
-            if (s == NULL) {
-                freeStaticInitializers();
-                return;
-            }
-            dListItem = (DataInitializerItem *)allocate(sizeof(DataInitializerItem));
-            if (firstDListItem == NULL) {
-                firstDListItem = dListItem;
-            }
-            else {
-                lastDListItem->next = dListItem;
-            }
-            lastDListItem = dListItem;
-            if (currentDList == NULL) currentDList = dListItem;
-            symbol = ref.symbol;
-            if (symbol->class == SymClass_Static) {
-                dListItem->blockName = "DATA";
-                dListItem->blockType = "DATA";
-                memcpy(dListItem->blockLabel, symbol->details.variable.staticBlock->details.progUnit.staticDataLabel, 8);
-            }
-            else if (symbol->class == SymClass_Global) {
-                dListItem->blockName = symbol->details.variable.staticBlock->identifier;
-                dListItem->blockType = "COMMON";
-                memcpy(dListItem->blockLabel, symbol->details.variable.staticBlock->details.common.label, 8);
-            }
-            else {
-                err("%s is not static or common", symbol->identifier);
-                freeStorageReference(&ref);
-                break;
-            }
-            dt = getSymbolType(symbol);
-            dListItem->symbol = symbol;
-            dListItem->type = dt->type;
-            dListItem->blockOffset = symbol->details.variable.offset;
-            rank = symbol->details.variable.dt.rank;
-            if (rank > 0) {
-                if (ref.expressionList != NULL) { // array element reference
-                    if (evaluateArrayRef(symbol, ref.expressionList, &result)) {
-                        freeStorageReference(&ref);
-                        break;
-                    }
-                    if (!isConstant(result)) {
-                        if (isCalculation(result)) freeAddrReg(result.reg);
-                        err("Non-constant array subscript");
-                        break;
-                    }
-                    else if (result.details.constant.dt.type != BaseType_Integer) {
-                        err("Non-integer array subscript");
-                        break;
-                    }
-                    dListItem->elementOffset = result.details.constant.value.integer;
-                    dListItem->elementCount = 1;
-                }
-                else { // whole array reference
-                    dListItem->elementOffset = 0;
-                    dListItem->elementCount = countArrayElements(symbol);
-                }
-            }
-            else {
-                dListItem->elementOffset = 0;
-                dListItem->elementCount = 1;
-            }
-            if (dt->type == BaseType_Character) {
-                dListItem->constraint = dt->constraint;
-                if (ref.strRange != NULL) {
-                    if (evaluateExpression(ref.strRange->first, &result)) {
-                        freeStorageReference(&ref);
-                        break;
-                    }
-                    if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
-                        dListItem->charOffset = result.details.constant.value.integer - 1;
-                    }
-                    else {
-                        err("Invalid character index");
-                        freeStorageReference(&ref);
-                        break;
-                    }
-                    if (ref.strRange->last != NULL) {
-                        if (evaluateExpression(ref.strRange->last, &result)) {
-                            freeStorageReference(&ref);
-                            break;
-                        }
-                        if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
-                            dListItem->charLength = result.details.constant.value.integer - dListItem->charOffset;
-                        }
-                        else {
-                            err("Invalid character index");
-                            freeStorageReference(&ref);
-                            break;
-                        }
-                    }
-                    else {
-                        dListItem->charLength = dt->constraint - dListItem->charOffset;
-                    }
-                }
-                else {
-                    dListItem->charOffset = 0;
-                    dListItem->charLength = dt->constraint;
-                }
-            }
-            freeStorageReference(&ref);
-            totalElementCount += dListItem->elementCount;
-            s = eatWsp(s);
-            if (*s != ',') break;
-            s += 1;
-        }
-        if (*s != '/') {
-            err("Syntax");
-        }
-        if (errorCount > ec) break;
-        /*
-         *  Parse the next list of constants
-         */
-        totalConstantCount = 0;
-        for (;;) {
-            start = s + 1;
-            s = getNextToken(start, &token, FALSE);
-            repeatCount = 1;
-            if (*s == '*') { // repeat count specified
-                start = s + 1;
-                if (evaluateExpression(&token, &result)) break;
-                if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
-                    repeatCount = result.details.constant.value.integer;
-                }
-                else {
-                    err("Invalid repeat count");
-                    break;
-                }
-            }
-            s = getNextToken(start, &token, FALSE);
-            if (evaluateExpression(&token, &result)) break;
-            if (!isConstant(result)) {
-                err("DATA value is not a constant");
-                break;
-            }
-            cListItem = (ConstantListItem *)allocate(sizeof(ConstantListItem));
-            cListItem->repeatCount = repeatCount;
-            totalConstantCount += repeatCount;
-            cListItem->details = result.details.constant;
-            if (firstCListItem == NULL) {
-                firstCListItem = cListItem;
-            }
-            else {
-                lastCListItem->next = cListItem;
-            }
-            lastCListItem = cListItem;
-            if (currentCList == NULL) currentCList = cListItem;
-            s = eatWsp(s);
-            if (*s == '/') {
-                s += 1;
-                break;
-            }
-            else if (*s != ',') {
-                err("Syntax");
-                break;
-            }
-        }
-        if (totalElementCount > totalConstantCount) {
-            err("Too few data values");
-        }
-        else if (totalElementCount < totalConstantCount) {
-            err("Too many data values");
-        }
-        else if (validateDataInitializers(currentDList, currentCList) == FALSE) {
+        s = parseNameList(s, FALSE, &nameList);
+        if (s == NULL) break;
+        s = parseConstantList(s + 1, &constantList);
+        if (s == NULL) {
+            freeIoList(nameList);
             break;
         }
-        if (errorCount > ec) break;
+        cursor = 0;
+        if (validateDataInitializers(nameList, constantList, &cursor) == FALSE) {
+            freeIoList(nameList);
+            freeConstantList(constantList);
+            break;
+        }
+        dListItem = (DataListItem *)allocate(sizeof(DataListItem));
+        dListItem->nameList = nameList;
+        dListItem->constantList = constantList;
+        if (firstDListItem == NULL) {
+            firstDListItem = dListItem;
+        }
+        else {
+            lastDListItem->next = dListItem;
+        }
+        lastDListItem = dListItem;
         s = eatWsp(s);
         if (*s == '\0') {
             break;
@@ -5100,11 +5345,8 @@ static void parseDATA(char *s) {
         else if (*s == ',') {
             s += 1;
         }
-        else {
-            err("Syntax");
-            break;
-        }
     }
+    removeAllShadows();
     if (errorCount > ec) freeStaticInitializers();
 }
 
@@ -5671,6 +5913,7 @@ static void parseFUNCTION(char *s, DataType *dt) {
             return;
         }
         if (dt != NULL) symbol->details.progUnit.dt = *dt;
+        symbol->details.progUnit.offset = -1;
         progUnitSym = symbol;
         emitProlog(progUnitSym);
     }
@@ -6920,6 +7163,30 @@ static void processOutputList(IoListItem *ioList, ControlInfoList *ciList) {
     }
 }
 
+static void processStaticInitializers(void) {
+    int cursor;
+    DataListItem *dListItem;
+    IoListItem *nListItem;
+
+    for (dListItem = firstDListItem; dListItem != NULL; dListItem = dListItem->next) {
+        nListItem = dListItem->nameList;
+        cursor = 0;
+        while (nListItem != NULL) {
+            switch (nListItem->class) {
+            case IoListClass_DoList:
+                break;
+            case IoListClass_StorageAttrs:
+                emitStaticInitializer(nListItem->details.storageAttrs, dListItem->constantList, &cursor);
+                break;
+            default:
+                fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+                exit(1);
+            }
+            nListItem = nListItem->next;
+        }
+    }
+}
+
 static void pushArg(OperatorArgument *arg) {
     if (argStkPtr < MAX_ARG_STACK_SIZE) {
         argStack[argStkPtr++] = *arg;
@@ -7011,11 +7278,43 @@ static bool setupImpliedDoList(ImpliedDoList *doList, DoStackEntry *entry) {
     bool isIncrNeg1;
     OperatorArgument limit;
     i64 limitValue;
+    char *name;
+    int rank;
     Register reg;
     OperatorArgument result;
+    Symbol *sym;
+    BaseType type;
 
+    name = doList->loopVarId;
+    sym = findSymbol(name);
+    if (sym == NULL) {
+        sym = addSymbol(name, SymClass_Undefined);
+    }
+    switch (sym->class) {
+    case SymClass_Undefined:
+        defineLocalVariable(sym);
+        /* fall through */
+    case SymClass_Auto:
+    case SymClass_Static:
+    case SymClass_Global:
+    case SymClass_Argument:
+        type = sym->details.variable.dt.type;
+        rank = sym->details.variable.dt.rank;
+        break;
+    case SymClass_Pointee:
+        type = sym->details.pointee.dt.type;
+        rank = sym->details.pointee.dt.rank;
+        break;
+    default:
+        type = BaseType_Undefined;
+        break;
+    }
+    if (type != BaseType_Integer || rank > 0) {
+        err("Invalid implied DO loop variable: %s", name);
+        return TRUE;
+    }
     memset(entry, 0, sizeof(DoStackEntry));
-    entry->loopVariable = doList->loopVariable;
+    entry->loopVariable = sym;
     entry->loopVariableType = BaseType_Integer;
     generateLabel(entry->startLabel);
     generateLabel(entry->endLabel);
@@ -7111,93 +7410,272 @@ static void transferCharValue(DataValue *to, DataValue *from) {
     from->character.string = NULL;
 }
 
-static bool validateDataInitializers(DataInitializerItem *dList, ConstantListItem *cList) {
-    ConstantListItem *cListItem;
-    DataInitializerItem *dListItem;
-    int elementCount;
-    int repeatCount;
+static bool validateDataImplDo(ImpliedDoList *doList, ConstantListItem *constantList, int *cursor) {
+    int ec;
+    int incrValue;
+    int initValue;
+    int limitValue;
+    OperatorArgument result;
+    Symbol *symbol;
+    int tripCount;
 
-    dListItem = dList;
-    cListItem = cList;
-    repeatCount = cListItem->repeatCount;
-    while (dListItem != NULL) {
-        for (elementCount = dListItem->elementCount; elementCount > 0; elementCount--) {
-            if (cListItem->details.dt.type != dListItem->type) {
-                switch (dListItem->type) {
-                case BaseType_Character:
-                    err("Data value for %s is not CHARACTER", dListItem->symbol->identifier);
-                    return FALSE;
-                case BaseType_Logical:
-                    switch (cListItem->details.dt.type) {
-                    case BaseType_Logical:
-                        break;
-                    case BaseType_Integer:
-                        cListItem->details.dt.type = BaseType_Logical;
-                        cListItem->details.value.logical = (cListItem->details.value.integer == 0) ? 0 : ~(u64)0;
-                        break;
-                    case BaseType_Real:
-                    case BaseType_Double:
-                    case BaseType_Character:
-                    case BaseType_Complex:
-                    default:
-                        err("Data value for %s cannot be coerced to LOGICAL", dListItem->symbol->identifier);
-                        return FALSE;
+    symbol = defineNameListDoVar(doList->loopVarId);
+    if (symbol == NULL) return FALSE;
+    enableEmission(FALSE);
+    ec = errorCount;
+    if (evaluateExpression(doList->initExpression, &result) == FALSE) {
+        if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer) {
+            initValue = result.details.constant.value.integer;
+        }
+        else {
+            if (isCalculation(result)) freeAddrReg(result.reg);
+            err("Invalid initial value of %s\n", doList->loopVarId);
+        }
+    }
+    if (evaluateExpression(doList->limitExpression, &result) == FALSE) {
+        if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer) {
+            limitValue = result.details.constant.value.integer;
+        }
+        else {
+            if (isCalculation(result)) freeAddrReg(result.reg);
+            err("Invalid limit value of %s\n", doList->loopVarId);
+        }
+    }
+    incrValue = 1;
+    if (doList->incrExpression != NULL && evaluateExpression(doList->incrExpression, &result) == FALSE) {
+        if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer != 0) {
+            incrValue = result.details.constant.value.integer;
+        }
+        else {
+            if (isCalculation(result)) freeAddrReg(result.reg);
+            err("Invalid increment value of %s\n", doList->loopVarId);
+        }
+    }
+    enableEmission(TRUE);
+    if (errorCount > ec) return FALSE;
+    tripCount = (limitValue - initValue + incrValue) / incrValue;
+    while (tripCount > 0) {
+        symbol->details.param.value.integer = initValue;
+        if (validateDataInitializers(doList->ioList, constantList, cursor) == FALSE) return FALSE;
+        tripCount -= 1;
+        initValue += incrValue;
+    }
+
+    return TRUE;
+}
+
+static bool validateDataInitializer(StorageReference *ref, ConstantListItem *constantList, int *cursor) {
+    int arraySize;
+    int charOffset;
+    int charLength;
+    ConstantListItem *cListItem;
+    DataType *dt;
+    int ec;
+    int elementCount;
+    int elementOffset;
+    int i;
+    bool isValid;
+    int rank;
+    int repeatCount;
+    OperatorArgument result;
+    Symbol *symbol;
+    BaseType type;
+
+    symbol = ref->symbol;
+    if (symbol->class != SymClass_Static && symbol->class != SymClass_Global) {
+        err("%s is not static or common", symbol->identifier);
+        return FALSE;
+    }
+    enableEmission(FALSE);
+    ec = errorCount;
+    dt = getSymbolType(symbol);
+    type = dt->type;
+    rank = symbol->details.variable.dt.rank;
+    if (rank > 0) {
+        arraySize = countArrayElements(symbol);
+        elementCount  = arraySize;
+        elementOffset = 0;
+        isValid = TRUE;
+        if (ref->expressionList != NULL) { // array element reference
+            if (evaluateArrayRef(symbol, ref->expressionList, &result) == FALSE) {
+                if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer) {
+                    elementOffset = result.details.constant.value.integer;
+                    if (type == BaseType_Character) elementOffset /= dt->constraint;
+                    elementCount = 1;
+                }
+                else {
+                    if (isCalculation(result)) freeAddrReg(result.reg);
+                    isValid = FALSE;
+                }
+            }
+        }
+        if (isValid == FALSE || elementOffset < 0 || elementOffset + elementCount > arraySize) {
+            err("Invalid array subscript for %s", symbol->identifier);
+        }
+    }
+    else {
+        elementCount = 1;
+    }
+    if (errorCount > ec) {
+        enableEmission(TRUE);
+        return FALSE;
+    }
+    if (type == BaseType_Character) {
+        charOffset = 0;
+        charLength = dt->constraint;
+        isValid = TRUE;
+        if (ref->strRange != NULL) {
+            if (ref->strRange->first != NULL) {
+                if (evaluateExpression(ref->strRange->first, &result) == FALSE) {
+                    if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
+                        charOffset = result.details.constant.value.integer - 1;
                     }
+                    else {
+                        if (isCalculation(result)) freeAddrReg(result.reg);
+                        isValid = FALSE;
+                    }
+                }
+            }
+            if (isValid && ref->strRange->last != NULL) {
+                if (evaluateExpression(ref->strRange->last, &result) == FALSE) {
+                    if (isConstant(result) && result.details.constant.dt.type == BaseType_Integer && result.details.constant.value.integer > 0) {
+                        charLength = result.details.constant.value.integer - charOffset;
+                    }
+                    else {
+                        if (isCalculation(result)) freeAddrReg(result.reg);
+                        isValid = FALSE;
+                    }
+                }
+            }
+            else {
+                charLength = dt->constraint - charOffset;
+            }
+        }
+        if (isValid == FALSE || charLength <= 0 || charOffset + charLength > dt->constraint) {
+            err("Invalid character index for %s", symbol->identifier);
+        }
+    }
+    enableEmission(TRUE);
+    if (errorCount > ec) return FALSE;
+    cListItem = constantList;
+    repeatCount = cListItem->repeatCount;
+    for (i = 0; i < *cursor; i++) {
+        repeatCount -= 1;
+        if (repeatCount < 1) {
+            cListItem = cListItem->next;
+            if (cListItem == NULL) {
+                err("Not enough data values for %s", symbol->identifier);
+                return FALSE;
+            }
+            repeatCount = cListItem->repeatCount;
+        }
+    }
+    while (elementCount > 0 && cListItem != NULL) {
+        if (cListItem->details.dt.type != type) {
+            switch (type) {
+            case BaseType_Character:
+                err("Data value for %s is not CHARACTER", symbol->identifier);
+                return FALSE;
+            case BaseType_Logical:
+                switch (cListItem->details.dt.type) {
+                case BaseType_Logical:
                     break;
                 case BaseType_Integer:
-                    switch (cListItem->details.dt.type) {
-                    case BaseType_Logical:
-                        cListItem->details.dt.type = BaseType_Integer;
-                        break;
-                    case BaseType_Integer:
-                        break;
-                    case BaseType_Real:
-                    case BaseType_Double:
-                        cListItem->details.dt.type = BaseType_Integer;
-                        cListItem->details.value.integer = (i64)cListItem->details.value.real;
-                        break;
-                    case BaseType_Character:
-                    case BaseType_Complex:
-                    default:
-                        err("Data value for %s cannot be coerced to INTEGER", dListItem->symbol->identifier);
-                        return FALSE;
-                    }
+                    cListItem->details.dt.type = BaseType_Logical;
+                    cListItem->details.value.logical = (cListItem->details.value.integer == 0) ? 0 : ~(u64)0;
                     break;
                 case BaseType_Real:
                 case BaseType_Double:
-                    switch (cListItem->details.dt.type) {
-                    case BaseType_Logical:
-                        cListItem->details.dt.type = dListItem->type;
-                        cListItem->details.value.real = (double)cListItem->details.value.logical;
-                        break;
-                    case BaseType_Integer:
-                        cListItem->details.dt.type = dListItem->type;
-                        cListItem->details.value.real = (double)cListItem->details.value.integer;
-                        break;
-                    case BaseType_Real:
-                    case BaseType_Double:
-                        cListItem->details.dt.type = dListItem->type;
-                        break;
-                    case BaseType_Character:
-                    case BaseType_Complex:
-                    default:
-                        err("Data value for %s cannot be coerced to %s", dListItem->symbol->identifier, baseTypeToStr(dListItem->type));
-                        return FALSE;
-                    }
-                    break;
+                case BaseType_Character:
                 case BaseType_Complex:
                 default:
-                    break;
+                    err("Data value for %s cannot be coerced to LOGICAL", symbol->identifier);
+                    return FALSE;
                 }
-            }
-            repeatCount -= 1;
-            if (repeatCount < 1) {
-                cListItem = cListItem->next;
-                if (cListItem != NULL) repeatCount = cListItem->repeatCount;
+                break;
+            case BaseType_Integer:
+                switch (cListItem->details.dt.type) {
+                case BaseType_Logical:
+                    cListItem->details.dt.type = BaseType_Integer;
+                    break;
+                case BaseType_Integer:
+                    break;
+                case BaseType_Real:
+                case BaseType_Double:
+                    cListItem->details.dt.type = BaseType_Integer;
+                    cListItem->details.value.integer = (i64)cListItem->details.value.real;
+                    break;
+                case BaseType_Character:
+                case BaseType_Complex:
+                default:
+                    err("Data value for %s cannot be coerced to INTEGER", symbol->identifier);
+                    return FALSE;
+                }
+                break;
+            case BaseType_Real:
+            case BaseType_Double:
+                switch (cListItem->details.dt.type) {
+                case BaseType_Logical:
+                    cListItem->details.dt.type = type;
+                    cListItem->details.value.real = (double)cListItem->details.value.logical;
+                    break;
+                case BaseType_Integer:
+                    cListItem->details.dt.type = type;
+                    cListItem->details.value.real = (double)cListItem->details.value.integer;
+                    break;
+                case BaseType_Real:
+                case BaseType_Double:
+                    cListItem->details.dt.type = type;
+                    break;
+                case BaseType_Character:
+                case BaseType_Complex:
+                default:
+                    err("Data value for %s cannot be coerced to %s", symbol->identifier, baseTypeToStr(type));
+                    return FALSE;
+                }
+                break;
+            case BaseType_Complex:
+            default:
+                break;
             }
         }
-        dListItem = dListItem->next;
+        *cursor += 1;
+        elementCount -= 1;
+        repeatCount -= 1;
+        if (repeatCount < 1) {
+            cListItem = cListItem->next;
+            if (cListItem != NULL) {
+                repeatCount = cListItem->repeatCount;
+            }
+        }
     }
+    if (elementCount > 0) {
+        err("Not enough data values for %s", symbol->identifier);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static bool validateDataInitializers(IoListItem *nameList, ConstantListItem *constantList, int *cursor) {
+    IoListItem *nListItem;
+
+    nListItem = nameList;
+    while (nListItem != NULL) {
+        switch (nListItem->class) {
+        case IoListClass_DoList:
+            if (validateDataImplDo(nListItem->details.doList, constantList, cursor) == FALSE) return FALSE;
+            break;
+        case IoListClass_StorageRef:
+            if (validateDataInitializer(nListItem->details.storageRef, constantList, cursor) == FALSE) return FALSE;
+            break;
+        default:
+            fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+            exit(1);
+        }
+        nListItem = nListItem->next;
+    }
+
     return TRUE;
 }
 

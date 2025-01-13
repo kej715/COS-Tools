@@ -397,6 +397,19 @@ typedef struct storageReference {
     StringRange *strRange;
 } StorageReference;
 
+typedef struct storageAttributes {
+    char *id;
+    BaseType type;
+    char *blockName;
+    char *blockType;
+    char blockLabel[8];
+    int blockOffset;
+    int elementOffset;
+    int elementCount;
+    int charOffset;
+    int charLength;
+} StorageAttributes;
+
 typedef union argumentDetails {
     ConstantDetails constant;
     DataType calculation;
@@ -425,11 +438,15 @@ typedef struct doStackEntry {
 
 typedef enum ioListItemClass {
     IoListClass_Expression = 0,
+    IoListClass_StorageRef,
+    IoListClass_StorageAttrs,
     IoListClass_DoList
 } IoListItemClass;
 
 typedef union ioListItemDetails {
     Token *expression;
+    StorageReference *storageRef;
+    StorageAttributes *storageAttrs;
     struct impliedDoList *doList;
 } IoListItemDetails;
 
@@ -441,7 +458,7 @@ typedef struct ioListItem {
 
 typedef struct impliedDoList {
     IoListItem *ioList;
-    Symbol *loopVariable;
+    char *loopVarId;
     Token *initExpression;
     Token *limitExpression;
     Token *incrExpression;
@@ -510,20 +527,11 @@ typedef struct openInfoList {
     Symbol *errLabel;
 } OpenInfoList;
 
-typedef struct dataInitializerItem {
-    struct dataInitializerItem *next;
-    Symbol *symbol;
-    BaseType type;
-    int constraint;
-    char *blockName;
-    char *blockType;
-    char blockLabel[8];
-    int blockOffset;
-    int elementOffset;
-    int elementCount;
-    int charOffset;
-    int charLength;
-} DataInitializerItem;
+typedef struct dataListItem {
+    struct dataListItem *next;
+    IoListItem *nameList;
+    ConstantListItem *constantList;
+} DataListItem;
 
 #define isCalculation(arg) ((arg).class == ArgClass_Calculation)
 #define isConstant(arg) ((arg).class == ArgClass_Constant)
