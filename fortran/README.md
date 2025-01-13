@@ -152,7 +152,6 @@ The following additional intrinsic functions are provided by _kFTC_:
 
 FORTRAN 77 features not yet implemented by _kFTC_ include:
 
-- Implied DO loops in DATA statements (implied DO in I/O statements *is* supported)
 - Direct access files
 - Alternate return points in SUBROUTINE and RETURN
 - EXTERNAL
