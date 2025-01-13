@@ -24,41 +24,53 @@
 **--------------------------------------------------------------------------
 */
 
+#include <stdio.h>
 #include <stdlib.h>
 
 /*
+ * This module provides a pool of pointers to re-usable string storage.
  * A basic premise is that strings allocated by this module have very short
- * lifetimes. They are usually used as temporary storage of the string
- * concatentation function with a statement, or they are used in returning
- * results of assumed-size functions. They are usually copied almost
- * immediately to variables that have explicitly allocated storage. Thus,
- * this module implements a simple round-robin algorithm for allocating and
- * reusing character strings.
+ * lifetimes. They are usually used as temporary storage of function results
+ * or the string concatentation function within a statement. They are usually
+ * copied almost immediately to variables that have explicitly allocated storage.
+ * Thus, this module implements a simple round-robin algorithm for allocating
+ * and reusing character strings.
  */
 
-#define MAX_STRINGS 16
+#define MAX_STRINGS 24
 
-static unsigned char *strings[MAX_STRINGS] = {
+static char *strings[MAX_STRINGS] = {
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 };
 static int stringSizes[MAX_STRINGS] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0
 };
 static int nextStringIndex = 0;
 
 unsigned long _getStr(int size) {
     unsigned long ptr;
+    char *s;
 
-    if (strings[nextStringIndex] == NULL) {
-        strings[nextStringIndex] = (unsigned char *)malloc(size);
+    s = strings[nextStringIndex];
+    if (s == NULL) {
+        s = (char *)malloc(size);
+        strings[nextStringIndex] = s;
         stringSizes[nextStringIndex] = size;
     }
     else if (stringSizes[nextStringIndex] < size) {
-        strings[nextStringIndex] = (unsigned char *)realloc(strings[nextStringIndex], size);
+        s = (char *)realloc(strings[nextStringIndex], size);
+        strings[nextStringIndex] = s;
         stringSizes[nextStringIndex] = size;
     }
-    ptr = ((long)size << 32) | (unsigned long)strings[nextStringIndex];
+    if (s == NULL) {
+        fputs("Out of memory\n", stderr);
+        exit(1);
+    }
+    ptr = ((long)size << 32) | (unsigned long)s;
     nextStringIndex += 1;
     if (nextStringIndex >= MAX_STRINGS) nextStringIndex = 0;
 
