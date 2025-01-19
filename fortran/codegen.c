@@ -1120,32 +1120,27 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             break;
         case SymClass_Function:
         case SymClass_StmtFunction:
+            freeRegister(subject->reg);
+            mask = getRegisterMap();
+            emitSaveRegs(mask);
             if (dt->constraint == -1) {
                 if (object == NULL) {
                     fprintf(stderr, "No reference object for assumed-size %s\n", sym->identifier);
                     exit(1);
                 }
-                freeRegister(subject->reg);
-                mask = getRegisterMap();
-                emitSaveRegs(mask);
                 emit("         S%o        S%o>32\n", object->reg, object->reg);
                 emitPushReg(object->reg);
-                emitPrimCall("@_getstr");
-                emitAdjustSP(1);
-                emitRestoreRegs(mask);
-                emitStoreReg(sym, RESULT_REG);
-                subject->reg = allocateRegister();
-                emit("         S%o        S7\n", subject->reg);
             }
             else {
-                if (progUnitSym->class != SymClass_StmtFunction || sym->isShadow) {
-                    emit("         S%o        %d,A6\n", subject->reg, sym->details.progUnit.offset);
-                }
-                else {
-                    emit("         A1        1,A6\n");
-                    emit("         S%o        %d,A1\n", subject->reg, sym->details.progUnit.offset);
-                }
+                emit("         S7        %d\n", dt->constraint);
+                emitPushReg(RESULT_REG);
             }
+            emitPrimCall("@_getstr");
+            emitAdjustSP(1);
+            emitRestoreRegs(mask);
+            emitStoreReg(sym, RESULT_REG);
+            subject->reg = allocateRegister();
+            emit("         S%o        S7\n", subject->reg);
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 /* do nothing */
@@ -1855,7 +1850,6 @@ void emitPrimCall(char *label) {
 
 void emitProlog(Symbol *sym) {
     char buf[32];
-    DataType *dt;
     Register reg;
 
     generateLabel(sym->details.progUnit.staticDataLabel);
@@ -1889,28 +1883,8 @@ void emitProlog(Symbol *sym) {
     emit("         A6        A7\n");    /* set new base pointer */
     emit("         A1        %s,\n", sym->details.progUnit.frameSizeLabel);
     emit("         A7        A7-A1\n"); /* reserve space for local variables */
-    switch (sym->class) {
-    case SymClass_Program:
+    if (sym->class == SymClass_Program) {
         emitPrimCall("@_inifio");
-        break;
-    case SymClass_Function:
-    case SymClass_StmtFunction:
-        dt = getSymbolType(sym);
-        if (dt->type == BaseType_Character && dt->constraint != -1) {
-            /*
-             *  Get a buffer for the function result
-             */
-            reg = allocateRegister();
-            emitLoadConstInt(reg, dt->constraint);
-            emitPushReg(reg);
-            freeRegister(reg);
-            emitPrimCall("@_getstr");
-            emitAdjustSP(1);
-            emitStoreReg(sym, RESULT_REG);
-        }
-        break;
-    default:
-        break;
     }
 }
 

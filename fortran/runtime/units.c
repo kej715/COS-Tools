@@ -469,6 +469,27 @@ void _rdurec(int unitNum) {
     }
 }
 
+void _rewndu(int unitNum) {
+    Unit *up;
+
+    if (unitNum <= 0) {
+        fprintf(stderr, "Invalid unit number: %d\n", unitNum);
+        exit(1);
+    }
+    up = _findu(unitNum);
+    if (up == NULL) return;
+    if ((up->flags & MASK_OPEN) == 0) {
+        up->ioStat = EBADF;
+        return;
+    }
+    if (lseek(up->fd, 0, SEEK_SET) == -1) {
+        up->ioStat = errno;
+    }
+    else {
+        up->ioStat = 0;
+    }
+}
+
 void _wrbchr(int unitNum, unsigned long ref) {
     int len;
     int n;

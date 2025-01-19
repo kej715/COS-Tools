@@ -75,7 +75,7 @@ static bool evaluateStringRange(Symbol *symbol, StringRange *range, OperatorArgu
 static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int idx, OperatorArgument *subscript);
 static bool executeOperator(OperatorId op);
 static void freeCharValue(DataValue *charValue);
-static void freeCloseInfoList(CloseInfoList *ciList);
+static void freeFileInfoList(FileInfoList *ciList);
 static void freeConstantList(ConstantListItem *list);
 static void freeControlInfoList(ControlInfoList *list);
 static void freeDataList(DataListItem *list);
@@ -110,7 +110,6 @@ static char *parseActualArguments(char *s, int *frameSize);
 static void parseArithmeticIF(char *s, Register reg);
 static void parseAssignment(char *s, Token *id);
 static char *parseCharConstraint(char *s, Token *token, DataType *dt);
-static char *parseCloseInfoList(char *s, CloseInfoList **ciList);
 static char *parseControlInfoList(char *s, ControlInfoList **ciList, int defaultUnit);
 static char *parseConstantList(char *s, ConstantListItem **list);
 static char *parseDataType(char *s, Token *token, DataType *type);
@@ -118,6 +117,7 @@ static char *parseDimDecl(char *s, Symbol *symbol);
 static void parseDirective(char *s, int lineNo);
 static char *parseExpression(char *s, Token **expression);
 static char *parseExpressionList(char *s, TokenListItem **list);
+static char *parseFileInfoList(char *s, FileInfoList **ciList);
 static char *parseFmtSpec(char *s, ControlInfoList *ciList);
 static char *parseFormalArguments(char *s, bool isStmtFn);
 static char *parseImpliedDo(char *s, Token *doVarId, ImpliedDoList *doList);
@@ -186,6 +186,7 @@ static void parsePROGRAM(char *s);
 static void parsePUNCH(char *s);
 static void parseREAD(char *s);
 static void parseRETURN(char *s);
+static void parseREWIND(char *s);
 static void parseWRITE(char *s);
 
 #if DEBUG
@@ -645,6 +646,7 @@ void compile(char *name) {
                     parseDIMENSION(s);
                     continue;
                 case END:
+                    assignStorage(); /* no executable statements occurred in this subprogram */
                     parseEND(s);
                     presetProgUnit();
                     continue;
@@ -752,6 +754,7 @@ void compile(char *name) {
                     parseRETURN(s);
                     break;
                 case REWIND:
+                    parseREWIND(s);
                     break;
                 case STOP:
                     parseSTOP(s);
@@ -1397,6 +1400,7 @@ static bool evaluateIdentifier(Token *id) {
                 break;
             default:
                 fprintf(stderr, "Invalid class of array reference offset: %d\n", offset.class);
+                printStackTrace(stderr);
                 exit(1);
             }
             if (id->details.identifier.range != NULL) {
@@ -1524,6 +1528,7 @@ static IoListItem *evaluateStaticImplDoInitializer(IoListItem *nListItem) {
                 break;
             default:
                 fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+                printStackTrace(stderr);
                 exit(1);
             }
             nListItem = nListItem->next;
@@ -1555,6 +1560,7 @@ static StorageAttributes *evaluateStaticInitializer(StorageReference *ref) {
     }
     else {
         fprintf(stderr, "%s is not static or common\n", symbol->identifier);
+        printStackTrace(stderr);
         exit(1);
     }
     dt = getSymbolType(symbol);
@@ -1568,6 +1574,7 @@ static StorageAttributes *evaluateStaticInitializer(StorageReference *ref) {
         if (ref->expressionList != NULL) { // array element reference
             if (evaluateArrayRef(symbol, ref->expressionList, &result) || !isConstant(result) || result.details.constant.dt.type != BaseType_Integer) {
                 fprintf(stderr, "Invalid subscript for %s\n", symbol->identifier);
+                printStackTrace(stderr);
                 exit(1);
             }
             attrs->elementOffset = result.details.constant.value.integer;
@@ -1592,6 +1599,7 @@ static StorageAttributes *evaluateStaticInitializer(StorageReference *ref) {
                     || result.details.constant.dt.type != BaseType_Integer
                     || result.details.constant.value.integer <= 0) {
                     fprintf(stderr, "Invalid character index for %s\n", symbol->identifier);
+                    printStackTrace(stderr);
                     exit(1);
                 }
                 attrs->charOffset = result.details.constant.value.integer - 1;
@@ -1602,6 +1610,7 @@ static StorageAttributes *evaluateStaticInitializer(StorageReference *ref) {
                     ||  result.details.constant.dt.type != BaseType_Integer
                     ||  result.details.constant.value.integer <= 0) {
                     fprintf(stderr, "Invalid character index for %s\n", symbol->identifier);
+                    printStackTrace(stderr);
                     exit(1);
                 }
                 attrs->charLength = result.details.constant.value.integer - attrs->charOffset;
@@ -1657,6 +1666,7 @@ static void evaluateStaticInitializers(void) {
                 break;
             default:
                 fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+                printStackTrace(stderr);
                 exit(1);
             }
             prev = nListItem;
@@ -1712,6 +1722,7 @@ static bool evaluateStorageReference(StorageReference *reference, OperatorArgume
             break;
         default:
             fprintf(stderr, "Invalid class of array reference offset: %d\n", offset.class);
+            printStackTrace(stderr);
             exit(1);
         }
         if (reference->strRange == NULL) {
@@ -2054,7 +2065,7 @@ static void freeConstantList(ConstantListItem *list) {
     }
 }
 
-static void freeCloseInfoList(CloseInfoList *ciList) {
+static void freeFileInfoList(FileInfoList *ciList) {
     if (ciList != NULL) {
         if (ciList->unit != NULL) freeToken(ciList->unit);
         if (ciList->fileStatus != NULL) freeToken(ciList->fileStatus);
@@ -2138,6 +2149,7 @@ static void freeIoList(IoListItem *ioList) {
             break;
         default:
             fprintf(stderr, "Invalid I/O list class: %d\n", ioList->class);
+            printStackTrace(stderr);
             exit(1);
         }
         next = ioList->next;
@@ -2862,139 +2874,6 @@ static char *parseCharConstraint(char *s, Token *token, DataType *dt) {
     return s;
 }
 
-static char *parseCloseInfoList(char *s, CloseInfoList **ciList) {
-    DataType *dt;
-    int ec;
-    Token *expression;
-    CloseInfoList *list;
-    Symbol *labelSym;
-    int len;
-    char lineLabel[16];
-    char keyword[16];
-    int n;
-    StorageReference reference;
-    char *start;
-    Token token;
-
-    list = (CloseInfoList *)allocate(sizeof(CloseInfoList));
-    *ciList = list;
-    s = eatWsp(s);
-    if (*s != '(') {
-        err("Close info list syntax");
-        return NULL;
-    }
-    ec = errorCount;
-    expression = NULL;
-    s = eatWsp(s + 1);
-    start = s;
-    n = 0;
-    for (;;) {
-        s = getNextToken(s, &token, FALSE);
-        if (token.type == TokenType_Identifier && *s == '=') {
-            s = eatWsp(s + 1);
-            len = strlen(token.details.identifier.name);
-            if (len >= sizeof(keyword)) len = sizeof(keyword) - 1;
-            memcpy(keyword, token.details.identifier.name, len);
-            keyword[len] = '\0';
-            start = s;
-            s = parseExpression(s, &expression);
-            if (expression == NULL) {
-                err("Invalid expression in close info list");
-                break;
-            }
-            if (strcasecmp(keyword, "UNIT") == 0) {
-                if (list->unit != NULL) {
-                    err("UNIT specified more than once");
-                    break;
-                }
-                list->unit = expression;
-            }
-            else if (strcasecmp(keyword, "STATUS") == 0) {
-                if (list->fileStatus != NULL) {
-                    err("STATUS specified more than once");
-                    break;
-                }
-                list->fileStatus = expression;
-            }
-            else if (strcasecmp(keyword, "ERR") == 0) {
-                if (list->errLabel != NULL) {
-                    err("ERR specified more than once");
-                    break;
-                }
-                else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
-                    sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
-                    labelSym = findLabel(lineLabel);
-                    if (labelSym != NULL) {
-                        if (labelSym->details.label.class != StmtClass_Executable
-                            && (labelSym->details.label.class != StmtClass_None || labelSym->details.label.forwardRef == FALSE)) {
-                            err("ERR= label does not reference executable statement");
-                            break;
-                        }
-                    }
-                    else {
-                        labelSym = addLabel(lineLabel);
-                        labelSym->details.label.class = StmtClass_None;
-                        labelSym->details.label.forwardRef = TRUE;
-                    }
-                    list->errLabel = labelSym;
-                    freeToken(expression);
-                }
-                else {
-                    err("Invalid statement label in ERR=");
-                    break;
-                }
-            }
-            else if (strcasecmp(keyword, "IOSTAT") == 0) {
-                if (list->iostat.symbol != NULL) {
-                    err("IOSTAT specified more than once");
-                    break;
-                }
-                s = getStorageReference(start, "IOSTAT", BaseType_Integer, &reference);
-                if (s == NULL) break;
-                list->iostat = reference;
-            }
-            else {
-                err("Invalid keyword: %s", token.details.identifier.name);
-                break;
-            }
-            n += 1;
-        }
-        else if (n == 0) {
-            s = parseExpression(start, &expression);
-            if (expression == NULL) {
-                err("Invalid expression in close list");
-                break;
-            }
-            list->unit = expression;
-            n += 1;
-        }
-        else {
-            err("Close list syntax");
-            break;
-        }
-        expression = NULL;
-        s = eatWsp(s);
-        if (*s == ',') {
-            s += 1;
-        }
-        else if (*s == ')') {
-            break;
-        }
-        else {
-            err("Close list syntax");
-            break;
-        }
-    }
-    if (ec != errorCount) {
-        if (expression != NULL) freeToken(expression);
-        freeCloseInfoList(list);
-        return NULL;
-    }
-    else {
-        return s + 1;
-    }
-}
-
 static char *parseControlInfoList(char *s, ControlInfoList **ciList, int defaultUnit) {
     DataType *dt;
     int ec;
@@ -3202,9 +3081,11 @@ static char *parseControlInfoList(char *s, ControlInfoList **ciList, int default
 }
 
 static char *parseConstantList(char *s, ConstantListItem **list) {
+    DataType *dt;
     int ec;
     ConstantListItem *firstItem;
     ConstantListItem *item;
+    bool isNeg;
     ConstantListItem *lastItem;
     int repeatCount;
     OperatorArgument result;
@@ -3230,11 +3111,42 @@ static char *parseConstantList(char *s, ConstantListItem **list) {
             }
             s = getNextToken(s + 1, &token, FALSE);
         }
+        isNeg = FALSE;
+        while (token.type == TokenType_Operator) {
+            if (token.details.operator.id == OP_SUB) {
+                isNeg = !isNeg;
+            }
+            else if (token.details.operator.id != OP_ADD) {
+                err("Invalid expression");
+                break;
+            }
+            s = getNextToken(s, &token, FALSE);
+        }
+        if (errorCount > ec) break;
         if (evaluateExpression(&token, &result)) break;
         if (!isConstant(result)) {
             if (isCalculation(result)) freeRegister(result.reg);
             err("DATA value is not a constant");
             break;
+        }
+        if (isNeg) {
+            dt = getDataType(&result);
+            switch (dt->type) {
+            case BaseType_Integer:
+                result.details.constant.value.integer = -result.details.constant.value.integer;
+                break;
+            case BaseType_Double:
+            case BaseType_Real:
+                result.details.constant.value.real = -result.details.constant.value.real;
+                break;
+            case BaseType_Logical:
+                result.details.constant.value.logical = ~result.details.constant.value.logical;
+                break;
+            default:
+                err("Invalid expression");
+                break;
+            }
+            if (errorCount > ec) break;
         }
         item = (ConstantListItem *)allocate(sizeof(ConstantListItem));
         item->repeatCount = repeatCount;
@@ -3843,6 +3755,139 @@ static char *parseExpressionList(char *s, TokenListItem **list) {
     return s;
 }
 
+static char *parseFileInfoList(char *s, FileInfoList **ciList) {
+    DataType *dt;
+    int ec;
+    Token *expression;
+    FileInfoList *list;
+    Symbol *labelSym;
+    int len;
+    char lineLabel[16];
+    char keyword[16];
+    int n;
+    StorageReference reference;
+    char *start;
+    Token token;
+
+    list = (FileInfoList *)allocate(sizeof(FileInfoList));
+    *ciList = list;
+    s = eatWsp(s);
+    if (*s != '(') {
+        err("Close info list syntax");
+        return NULL;
+    }
+    ec = errorCount;
+    expression = NULL;
+    s = eatWsp(s + 1);
+    start = s;
+    n = 0;
+    for (;;) {
+        s = getNextToken(s, &token, FALSE);
+        if (token.type == TokenType_Identifier && *s == '=') {
+            s = eatWsp(s + 1);
+            len = strlen(token.details.identifier.name);
+            if (len >= sizeof(keyword)) len = sizeof(keyword) - 1;
+            memcpy(keyword, token.details.identifier.name, len);
+            keyword[len] = '\0';
+            start = s;
+            s = parseExpression(s, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in file info list");
+                break;
+            }
+            if (strcasecmp(keyword, "UNIT") == 0) {
+                if (list->unit != NULL) {
+                    err("UNIT specified more than once");
+                    break;
+                }
+                list->unit = expression;
+            }
+            else if (strcasecmp(keyword, "STATUS") == 0) {
+                if (list->fileStatus != NULL) {
+                    err("STATUS specified more than once");
+                    break;
+                }
+                list->fileStatus = expression;
+            }
+            else if (strcasecmp(keyword, "ERR") == 0) {
+                if (list->errLabel != NULL) {
+                    err("ERR specified more than once");
+                    break;
+                }
+                else if (expression->type == TokenType_Constant && expression->details.constant.dt.type == BaseType_Integer) {
+                    sprintf(lineLabel, "%ld", expression->details.constant.value.integer);
+                    labelSym = findLabel(lineLabel);
+                    if (labelSym != NULL) {
+                        if (labelSym->details.label.class != StmtClass_Executable
+                            && (labelSym->details.label.class != StmtClass_None || labelSym->details.label.forwardRef == FALSE)) {
+                            err("ERR= label does not reference executable statement");
+                            break;
+                        }
+                    }
+                    else {
+                        labelSym = addLabel(lineLabel);
+                        labelSym->details.label.class = StmtClass_None;
+                        labelSym->details.label.forwardRef = TRUE;
+                    }
+                    list->errLabel = labelSym;
+                    freeToken(expression);
+                }
+                else {
+                    err("Invalid statement label in ERR=");
+                    break;
+                }
+            }
+            else if (strcasecmp(keyword, "IOSTAT") == 0) {
+                if (list->iostat.symbol != NULL) {
+                    err("IOSTAT specified more than once");
+                    break;
+                }
+                s = getStorageReference(start, "IOSTAT", BaseType_Integer, &reference);
+                if (s == NULL) break;
+                list->iostat = reference;
+            }
+            else {
+                err("Invalid keyword: %s", token.details.identifier.name);
+                break;
+            }
+            n += 1;
+        }
+        else if (n == 0) {
+            s = parseExpression(start, &expression);
+            if (expression == NULL) {
+                err("Invalid expression in file info list");
+                break;
+            }
+            list->unit = expression;
+            n += 1;
+        }
+        else {
+            err("File info list syntax");
+            break;
+        }
+        expression = NULL;
+        s = eatWsp(s);
+        if (*s == ',') {
+            s += 1;
+        }
+        else if (*s == ')') {
+            break;
+        }
+        else {
+            err("File info list syntax");
+            break;
+        }
+    }
+    if (ec != errorCount) {
+        if (expression != NULL) freeToken(expression);
+        freeFileInfoList(list);
+        return NULL;
+    }
+    else {
+        return s + 1;
+    }
+}
+
 static char *parseFmtSpec(char *s, ControlInfoList *ciList) {
     Token *expression;
 
@@ -4414,6 +4459,7 @@ static void parseLogicalIF(char *s, Register reg, bool isFromLogIf) {
                 parseRETURN(s);
                 break;
             case REWIND:
+                parseREWIND(s);
                 break;
             case SAVE:
                 break;
@@ -5154,7 +5200,7 @@ static void parseCLOSE(char *s) {
     int ec;
     bool isScalar;
     char label[8];
-    CloseInfoList *ciList;
+    FileInfoList *ciList;
     Register reg;
     OperatorArgument target;
 
@@ -5163,7 +5209,7 @@ static void parseCLOSE(char *s) {
         err("Syntax");
         return;
     }
-    s = parseCloseInfoList(s, &ciList);
+    s = parseFileInfoList(s, &ciList);
     if (s == NULL) return;
     emitAdjustSP(-2);
     ec = errorCount;
@@ -5201,6 +5247,10 @@ static void parseCLOSE(char *s) {
 
         break;
     }
+    if (errorCount > ec) {
+        freeFileInfoList(ciList);
+        return;
+    }
     emitPrimCall("@_closeu");
     emitPrimCall("@_iostat");
     emitAdjustSP(2);
@@ -5210,6 +5260,7 @@ static void parseCLOSE(char *s) {
         emitCopyRegister(reg, RESULT_REG);
         if (evaluateStorageReference(&ciList->iostat, &target, NULL, &isScalar)) {
             freeRegister(reg);
+            freeFileInfoList(ciList);
             return;
         }
         if (isScalar) {
@@ -5225,7 +5276,7 @@ static void parseCLOSE(char *s) {
     emitBranchOnFalse(reg, label);
     emitBranch(ciList->errLabel != NULL ? ciList->errLabel->details.label.label : "@_fioerr");
     emitLabel(label);
-    freeCloseInfoList(ciList);
+    freeFileInfoList(ciList);
     verifyEOS(s);
 }
 
@@ -6762,6 +6813,83 @@ static void parseRETURN(char *s) {
     emitBranch(progUnitSym->details.progUnit.exitLabel);
 }
 
+static void parseREWIND(char *s) {
+    OperatorArgument arg;
+    DataType *dt;
+    int ec;
+    bool isScalar;
+    char label[8];
+    FileInfoList *ciList;
+    Token *expression;
+    Register reg;
+    OperatorArgument target;
+
+    ec = errorCount;
+    s = eatWsp(s);
+    for (;;) {
+        if (*s == '(') {
+            s = parseFileInfoList(s, &ciList);
+            if (s == NULL) return;
+        }
+        else {
+            ciList = (FileInfoList *)allocate(sizeof(FileInfoList));
+            s = parseExpression(s, &expression);
+            if (expression == NULL) {
+                err("Expression syntax");
+                break;
+            }
+            ciList->unit = expression;
+        }
+        if (ciList->unit == NULL) {
+            err("UNIT missing");
+            break;
+        }
+        if (evaluateExpression(ciList->unit, &arg)) break;
+        loadValue(&arg);
+        dt = getDataType(&arg);
+        if (dt->type != BaseType_Integer) {
+            err("UNIT not integer");
+            freeRegister(arg.reg);
+            break;
+        }
+        emitAdjustSP(-1);
+        emitStoreStack(arg.reg, 0);
+        freeRegister(arg.reg);
+        break;
+    }
+    if (errorCount > ec) {
+        freeFileInfoList(ciList);
+        return;
+    }
+    emitPrimCall("@_rewndu");
+    emitPrimCall("@_iostat");
+    emitAdjustSP(1);
+    reg = RESULT_REG;
+    if (ciList->iostat.symbol != NULL) {
+        reg = allocateRegister();
+        emitCopyRegister(reg, RESULT_REG);
+        if (evaluateStorageReference(&ciList->iostat, &target, NULL, &isScalar)) {
+            freeRegister(reg);
+            freeFileInfoList(ciList);
+            return;
+        }
+        if (isScalar) {
+            emitStoreReg(ciList->iostat.symbol, reg);
+        }
+        else {
+            emitStoreRegByReference(&target, reg);
+            freeRegister(target.reg);
+        }
+        freeRegister(reg);
+    }
+    generateLabel(label);
+    emitBranchOnFalse(reg, label);
+    emitBranch(ciList->errLabel != NULL ? ciList->errLabel->details.label.label : "@_fioerr");
+    emitLabel(label);
+    freeFileInfoList(ciList);
+    verifyEOS(s);
+}
+
 static void parseSAVE(char *s) {
     char *name;
     Symbol *symbol;
@@ -6901,6 +7029,7 @@ static void popArg(OperatorArgument *arg) {
     }
     else {
         fputs("Argument stack underflow\n", stderr);
+        printStackTrace(stderr);
         exit(1);
     }
 }
@@ -6914,6 +7043,7 @@ static void popOp(OperatorDetails *op) {
     }
     else {
         fputs("Operator stack underflow\n", stderr);
+        printStackTrace(stderr);
         exit(1);
     }
 }
@@ -7172,14 +7302,12 @@ static void processStaticInitializers(void) {
         nListItem = dListItem->nameList;
         cursor = 0;
         while (nListItem != NULL) {
-            switch (nListItem->class) {
-            case IoListClass_DoList:
-                break;
-            case IoListClass_StorageAttrs:
+            if (nListItem->class == IoListClass_StorageAttrs) {
                 emitStaticInitializer(nListItem->details.storageAttrs, dListItem->constantList, &cursor);
-                break;
-            default:
+            }
+            else {
                 fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+                printStackTrace(stderr);
                 exit(1);
             }
             nListItem = nListItem->next;
@@ -7193,6 +7321,7 @@ static void pushArg(OperatorArgument *arg) {
     }
     else {
         fputs("Argument stack overflow\n", stderr);
+        printStackTrace(stderr);
         exit(1);
     }
 }
@@ -7203,6 +7332,7 @@ static void pushOp(OperatorDetails *op) {
     }
     else {
         fputs("Operator stack overflow\n", stderr);
+        printStackTrace(stderr);
         exit(1);
     }
 }
@@ -7671,6 +7801,7 @@ static bool validateDataInitializers(IoListItem *nameList, ConstantListItem *con
             break;
         default:
             fprintf(stderr, "Invalid name list item class: %d\n", nListItem->class);
+            printStackTrace(stderr);
             exit(1);
         }
         nListItem = nListItem->next;

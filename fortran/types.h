@@ -476,13 +476,6 @@ typedef enum fileStatus {
     FileStatus_Scratch
 } FileStatus;
 
-typedef struct closeInfoList {
-    Token *unit;
-    Token *fileStatus;
-    StorageReference iostat;
-    Symbol *errLabel;
-} CloseInfoList;
-
 typedef struct controlInfoList {
     Token *unit;
     BaseType unitType;
@@ -493,6 +486,13 @@ typedef struct controlInfoList {
     Token *recordNumber;
     StorageReference iostat;
 } ControlInfoList;
+
+typedef struct fileInfoList {
+    Token *unit;
+    Token *fileStatus;
+    StorageReference iostat;
+    Symbol *errLabel;
+} FileInfoList;
 
 typedef struct inquireInfoList {
     Token *unit;
