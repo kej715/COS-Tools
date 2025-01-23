@@ -1,0 +1,24 @@
+         TITLE     'CALB01'
+         SUBTITLE  'Call subprogram referenced by B01'
+         IDENT     CALB01
+         COMMENT   'CALB01 - Call subprogram referenced by B01'
+
+TEXT     SECTION   CODE
+
+**
+*  @%calb01 - Call subprogram referenced by B01
+*
+*    This is used by FORTRAN to call subprograms whose addresses are passed
+*    as arguments to subprograms. These are usually referenced in EXTERNAL
+*    and INTRINSIC statements.
+*
+*  Entry:
+*    (B01) address of subprogram to call
+*
+         ENTRY     @%calb01
+@%calb01 BSS       0
+         J         B01
+
+         SECTION   *
+
+         END
