@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rasin(double *x) {
-    return asin(*x);
+double _rasin(unsigned long waddr) {
+    return asin(*((double *)(waddr << 3)));
 }

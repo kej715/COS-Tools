@@ -49,7 +49,7 @@ libio.a: $(IO_OBJS)
 libio.lib: $(IO_OBJS) fio.o
 	$(AR) $(ARFLAGS) $@ $+
 
-librt.lib: daryof.o darysz.o
+librt.lib: calb01.o daryof.o darysz.o
 	$(AR) $(ARFLAGS) $@ $+ $(COSOBJS)
 
 install: cos
@@ -62,6 +62,9 @@ clean:
 
 test: test.o libio.a
 	$(CC) $(LDFLAGS) -o $@ $+
+
+calb01.o: calb01.cal
+	$(BINDIR)/cal -o calb01.o $<
 
 test.o: test.c $(HDRS)
 	$(CC) $(CFLAGS) -c $<

@@ -1,4 +1,4 @@
-double _rreal(double *x) {
+double _rreal(unsigned long waddr) {
 
-return *x;
+return *((double *)(waddr << 3));
 }

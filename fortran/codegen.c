@@ -265,6 +265,23 @@ static void emitBranchTarget(char *label) {
     }
 }
 
+void emitCalcAdjArraySz(Symbol *symbol) {
+    /*
+     *  Call runtime library function @_darysz to calculate array size.
+     *    Arguments:
+     *      A1 = address lower bound of first dimension
+     *      A2 = rank of array (number of dimensions)
+     *    Returns:
+     *      A1 = size of array (number of elements)
+     */
+    emit("         A1        %d\n", (-symbol->details.adjustable.offset) - 1);
+    emit("         A1        A6-A1\n");
+    emit("         A2        %d\n", symbol->details.adjustable.dt.rank);
+    emitPrimCall("@_darysz");
+    emit("         S7        A1\n");
+}
+
+
 /*
  *  emitCalcTrip - emit code to calculate initial trip count for DO loop
  *
@@ -868,6 +885,11 @@ Register emitLoadAdjBoundsRef(Symbol *symbol) {
     return reg;
 }
 
+void emitLoadByReference(OperatorArgument *ref) {
+    emit("         A1        S%o\n", ref->reg);
+    emit("         S%o        ,A1\n", ref->reg);
+}
+
 void emitLoadByteReference(OperatorArgument *subject, OperatorArgument *object) {
     DataType *dt;
 
@@ -997,7 +1019,9 @@ static void emitLoadPointer(Symbol *pointee, char *regName) {
 }
 
 void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
+    char buf[32];
     DataType *dt;
+    Symbol *intrinsic;
     char *label;
     u16 mask;
     char regName[3];
@@ -1041,7 +1065,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Static:
-            label = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym->details.progUnit.staticDataLabel : progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel;
+            label = (progUnitSym->class != SymClass_StmtFunction)
+                    ? progUnitSym->details.progUnit.staticDataLabel
+                    : progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel;
             emit("         S%o        %s+%d\n", subject->reg, label, sym->details.variable.offset);
             emit("         S%o        S%o<3\n", subject->reg, subject->reg);
             if (dt->firstChrOffset != 0) {
@@ -1272,7 +1298,9 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
             }
             break;
         case SymClass_Static:
-            label = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym->details.progUnit.staticDataLabel : progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel;
+            label = (progUnitSym->class != SymClass_StmtFunction)
+                    ? progUnitSym->details.progUnit.staticDataLabel
+                    : progUnitSym->details.progUnit.parentUnit->details.progUnit.staticDataLabel;
             switch (subject->details.reference.offsetClass) {
             case ArgClass_Undefined:
                 emit("         S%o        %s+%d\n", subject->reg, label, sym->details.variable.offset);
@@ -1402,7 +1430,8 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 emit("         S%o        %s+%d\n", subject->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset);
                 break;
             case ArgClass_Constant:
-                emit("         S%o        %s+%d\n", subject->reg, sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset + subject->details.reference.offset.constant);
+                emit("         S%o        %s+%d\n", subject->reg, sym->details.variable.staticBlock->details.common.label,
+                                                    sym->details.variable.offset + subject->details.reference.offset.constant);
                 break;
             case ArgClass_Calculation:
                 emit("         A1        %s+%d\n", sym->details.variable.staticBlock->details.common.label, sym->details.variable.offset);
@@ -1435,6 +1464,20 @@ void emitLoadReference(OperatorArgument *subject, OperatorArgument *object) {
                 fprintf(stderr, "Invalid offset class in reference to %s: %d\n", sym->identifier, subject->details.reference.offsetClass);
                 exit(1);
             }
+            break;
+        case SymClass_Intrinsic:
+            intrinsic = findIntrinsicFunction(sym->identifier);
+            if (intrinsic != NULL) {
+                normalizeLabel(intrinsic->details.intrinsic.externName, buf);
+                emit("         S%o        =P.%s,\n", subject->reg, buf);
+            }
+            else {
+                emit("         S%o        0\n", subject->reg);
+            }
+            break;
+        case SymClass_External:
+            normalizeLabel(sym->identifier, buf);
+            emit("         S%o        =P.%s,\n", subject->reg, buf);
             break;
         default:
             fprintf(stderr, "Invalid class for load request: %d\n", sym->class);
@@ -1848,9 +1891,10 @@ void emitPrimCall(char *label) {
     emit("\n");
 }
 
-void emitProlog(Symbol *sym) {
+void emitProlog(Symbol *sym, bool isEntry) {
     char buf[32];
     Register reg;
+    char skipLabel[8];
 
     generateLabel(sym->details.progUnit.staticDataLabel);
     switch (sym->class) {
@@ -1862,6 +1906,10 @@ void emitProlog(Symbol *sym) {
         break;
     case SymClass_Function:
     case SymClass_Subroutine:
+        if (isEntry) {
+            generateLabel(skipLabel);
+            emitBranch(skipLabel);
+        }
         normalizeLabel(sym->identifier, buf);
         emit("         ENTRY     %s\n", buf);
         emit("%-8s BSS       0\n", buf);
@@ -1873,16 +1921,21 @@ void emitProlog(Symbol *sym) {
     default:
         break;
     }
-    generateLabel(sym->details.progUnit.exitLabel);
-    generateLabel(sym->details.progUnit.frameSizeLabel);
+    if (isEntry == FALSE) {
+        generateLabel(sym->details.progUnit.exitLabel);
+        generateLabel(sym->details.progUnit.frameSizeLabel);
+    }
     emit("         A7        A7-1\n");  /* push base pointer    */
     emit("         ,A7       A6\n");
     emit("         A6        B00\n");   /* push return address  */
     emit("         A7        A7-1\n");
     emit("         ,A7       A6\n");
     emit("         A6        A7\n");    /* set new base pointer */
-    emit("         A1        %s,\n", sym->details.progUnit.frameSizeLabel);
+    emit("         A1        %s,\n", isEntry ? progUnitSym->details.progUnit.frameSizeLabel : sym->details.progUnit.frameSizeLabel);
     emit("         A7        A7-A1\n"); /* reserve space for local variables */
+    if (isEntry) {
+        emit("%-8s BSS       0\n", skipLabel);
+    }
     if (sym->class == SymClass_Program) {
         emitPrimCall("@_inifio");
     }
@@ -2231,6 +2284,19 @@ void emitSubprogramCall(char *id, char *qualifier) {
         sprintf(buf, "/%s/%s", qualifier, normalizedId);
         emitPrimCall(buf);
     }
+}
+
+void emitSubprogramRefCall(Symbol *sym) {
+    if (progUnitSym->class != SymClass_StmtFunction || sym->isShadow) {
+        emit("         A1        %d,A6\n", sym->details.variable.offset);
+    }
+    else {
+        emit("         A1        1,A6\n");
+        emit("         A1        %d,A1\n", sym->details.variable.offset);
+    }
+    emit("         A0        ,A1\n");
+    emit("         B01       A0\n");
+    emitPrimCall("@_calb01");
 }
 
 void emitSubReal(OperatorArgument *leftArg, OperatorArgument *rightArg) {

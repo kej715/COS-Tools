@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _iexp(long *x) {
-    return exp((double)*x);
+double _iexp(unsigned long waddr) {
+    return exp((double)*((long *)(waddr << 3)));
 }

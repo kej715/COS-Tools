@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _racos(double *x) {
-    return acos(*x);
+double _racos(unsigned long waddr) {
+    return acos(*((double *)(waddr << 3)));
 }

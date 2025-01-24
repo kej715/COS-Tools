@@ -1,5 +1,5 @@
-long _iabs(long *x);
+long _iabs(unsigned long waddr);
 
-long _isign(long *a, long *b) {
-    return (*b >= 0) ?  _iabs(a) : -(_iabs(a));
+long _isign(unsigned long waddra, unsigned long waddrb) {
+    return (*((double *)(waddrb << 3)) >= 0) ? _iabs(waddra) : -(_iabs(waddra));
 }

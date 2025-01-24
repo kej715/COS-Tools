@@ -1,4 +1,4 @@
-long _iint(long *x) {
+long _iint(unsigned long waddr) {
 
-return *x;
+return *((long *)(waddr << 3));
 }

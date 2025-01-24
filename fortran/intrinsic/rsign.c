@@ -1,5 +1,5 @@
-double _rabs(double *x);
+double _rabs(unsigned long waddr);
 
-double _rsign(double *a, double *b) {
-    return (*b >= 0.0) ?  _rabs(a) : -(_rabs(a));
+double _rsign(unsigned long waddra, unsigned long waddrb) {
+    return (*((double *)(waddrb << 3)) >= 0.0) ?  _rabs(waddra) : -(_rabs(waddra));
 }

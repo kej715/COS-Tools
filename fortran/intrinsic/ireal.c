@@ -1,4 +1,3 @@
-double _ireal(long *x) {
-
-return (double)(*x);
+double _ireal(unsigned long waddr) {
+    return (double)(*((long *)(waddr << 3)));
 }

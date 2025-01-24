@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rexp(double *x) {
-    return exp(*x);
+double _rexp(unsigned long waddr) {
+    return exp(*((double *)(waddr << 3)));
 }

@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _ratan2(double *a, double *b) {
-    return atan2(*a, *b);
+double _ratan2(unsigned long waddra, unsigned long waddrb) {
+    return atan2(*((double *)(waddra << 3)), *((double *)(waddrb << 3)));
 }

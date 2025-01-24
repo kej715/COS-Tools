@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rlog(double *x) {
-    return log(*x);
+double _rlog(unsigned long waddr) {
+    return log(*((double *)(waddr << 3)));
 }

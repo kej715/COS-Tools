@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _icosh(long *x) {
-    return cosh((double)*x);
+double _icosh(unsigned long waddr) {
+    return cosh((double)*((long *)(waddr << 3)));
 }

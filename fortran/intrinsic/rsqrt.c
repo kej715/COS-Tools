@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rsqrt(double *x) {
-    return sqrt(*x);
+double _rsqrt(unsigned long waddr) {
+    return sqrt(*((double *)(waddr << 3)));
 }

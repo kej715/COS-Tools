@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _ilog(long *x) {
-    return log((double)*x);
+double _ilog(unsigned long waddr) {
+    return log((double)*((long *)(waddr << 3)));
 }

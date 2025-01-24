@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rcos(double *x) {
-    return cos(*x);
+double _rcos(unsigned long waddr) {
+    return cos(*((double *)(waddr << 3)));
 }

@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _icos(long *x) {
-    return cos((double)*x);
+double _icos(unsigned long waddr) {
+    return cos((double)*((long *)(waddr << 3)));
 }

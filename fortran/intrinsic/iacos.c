@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _iacos(long *x) {
-    return acos((double)*x);
+double _iacos(unsigned long waddr) {
+    return acos((double)*((long *)(waddr << 3)));
 }

@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _iasin(long *x) {
-    return asin((double)*x);
+double _iasin(unsigned long waddr) {
+    return asin((double)*((long *)(waddr << 3)));
 }

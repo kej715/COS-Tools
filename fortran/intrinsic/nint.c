@@ -1,11 +1,13 @@
-long _nint(double *x) {
+long _nint(unsigned long waddr) {
     long res;
+    double x;
 
-    if (*x > 0)
-        res = (long)(*x + 0.5);
-    else if (*x < 0)
-        res = (long)(*x - 0.5);
+    x = *((double *)(waddr << 3));
+    if (x > 0)
+        res = (long)(x + 0.5);
+    else if (x < 0)
+        res = (long)(x - 0.5);
     else
-        res = (long)*x;
+        res = (long)x;
     return res;
 }

@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rsin(double *x) {
-    return sin(*x);
+double _rsin(unsigned long waddr) {
+    return sin(*((double *)(waddr << 3)));
 }

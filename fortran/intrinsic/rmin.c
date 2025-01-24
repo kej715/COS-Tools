@@ -1,14 +1,16 @@
 #include <stdarg.h>
 
-double _rmin(int count, ...) {
+double _rmin(unsigned long waddr, ...) {
     va_list ap;
+    long count;
     double item;
     double res;
 
-    va_start(ap, count);
-    res = *va_arg(ap, double *);
+    count = *((long *)(waddr << 3));
+    va_start(ap, waddr);
+    res = *((double *)(va_arg(ap, unsigned long) << 3));
     while (--count > 0) {
-        item = *va_arg(ap, double *);
+        item = *((double *)(va_arg(ap, unsigned long) << 3));
         if (item < res) res = item;
     }
     va_end(ap);

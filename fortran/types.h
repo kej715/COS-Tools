@@ -153,7 +153,8 @@ typedef enum argumentClass {
     ArgClass_Adjustable,
     ArgClass_Global,
     ArgClass_Argument,
-    ArgClass_Pointee
+    ArgClass_Pointee,
+    ArgClass_ProcedureRef
 } ArgumentClass;
 
 typedef enum baseType {
@@ -175,6 +176,7 @@ typedef enum symbolClass {
     SymClass_Function,
     SymClass_StmtFunction,
     SymClass_Intrinsic,
+    SymClass_External,
     SymClass_BlockData,
     SymClass_NamedCommon,
     SymClass_Auto,
@@ -310,7 +312,6 @@ typedef struct intrinsicDetails {
     int isGeneric;
     char *externName;
     BaseType resultType;
-    int hasCifc;
     int argc;
     BaseType argumentTypes[MAX_INTRINSIC_ARGS];
 } IntrinsicDetails;

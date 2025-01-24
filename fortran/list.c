@@ -49,7 +49,7 @@ static void resetHeaderLine(void);
 
 static char *cpuType = "Cray X-MP";
 static char *ftcName = "kFTC";
-static char *ftcVersion = "1.9.9";
+static char *ftcVersion = "1.9.10";
 static char headerLine[LISTING_LINE_LENGTH+2];
 static int  lineNumber = LINES_PER_PAGE;
 static int  pageNumber = 0;
@@ -261,6 +261,7 @@ char *symClassToStr(SymbolClass class) {
     case SymClass_Function:     return "Function";
     case SymClass_StmtFunction: return "Function";
     case SymClass_Intrinsic:    return "Intrinsic";
+    case SymClass_External:     return "External";
     case SymClass_NamedCommon:  return "Common";
     case SymClass_Auto:         return "Auto";
     case SymClass_Static:       return "Static";

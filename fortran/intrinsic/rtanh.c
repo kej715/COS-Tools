@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rtanh(double *x) {
-    return tanh(*x);
+double _rtanh(unsigned long waddr) {
+    return tanh(*((double *)(waddr << 3)));
 }

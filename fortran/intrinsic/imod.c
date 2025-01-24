@@ -1,3 +1,8 @@
-long _imod(long *a, long *b) {
-    return *a % *b;
+long _imod(unsigned long waddra, unsigned long waddrb) {
+    long a;
+    long b;
+
+    a = *((long *)(waddra << 3));
+    b = *((long *)(waddrb << 3));
+    return a % b;
 }

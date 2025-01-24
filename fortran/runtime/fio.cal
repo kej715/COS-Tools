@@ -4,7 +4,7 @@
          COMMENT   'FIO - Miscellaneous FORTRAN Utility Interfaces'
          EXT       @%exit
 
-FIO      SECTION   CODE
+TEXT     SECTION   CODE
 
 **
 *  @%fioeof - Default end-of-file condition handler

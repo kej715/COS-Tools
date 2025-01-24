@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _rtan(double *x) {
-    return tan(*x);
+double _rtan(unsigned long waddr) {
+    return tan(*((double *)(waddr << 3)));
 }

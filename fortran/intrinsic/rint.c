@@ -1,6 +1,8 @@
 #include <math.h>
 
-long _rint(double *x) {
+long _rint(unsigned long waddr) {
+    double x;
 
-return (*x > 0) ? (long)floor(*x) : (long)(-floor(-*x));
+    x = *((double *)(waddr << 3));
+    return (x > 0) ? (long)floor(x) : (long)(-floor(-x));
 }

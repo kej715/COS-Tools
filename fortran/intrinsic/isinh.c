@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _isinh(long *x) {
-    return sinh((double)*x);
+double _isinh(unsigned long waddr) {
+    return sinh((double)*((long *)(waddr << 3)));
 }

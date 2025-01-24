@@ -1,5 +1,5 @@
 #include <math.h>
 
-double _isin(long *x) {
-    return sin((double)*x);
+double _isin(unsigned long waddr) {
+    return sin((double)*((long *)(waddr << 3)));
 }
