@@ -534,6 +534,7 @@ static void putParcel(Section *section, u32 parcelAddress, u16 parcel) {
     }
     block->image[addr] = parcel >> 8;
     block->image[addr + 1] = parcel & 0xff;
+    block->isNotEmpty = TRUE;
     if (parcelAddress < block->lowestParcelAddress) block->lowestParcelAddress = parcelAddress;
     if (parcelAddress > block->highestParcelAddress) block->highestParcelAddress = parcelAddress;
 }
@@ -571,13 +572,6 @@ void reserveStorage(Section *section, u32 firstAddress, u32 count) {
         block->image = (u8 *)reallocate(block->image, block->imageSize, newSize);
         block->imageSize = newSize;
     }
-/*  -- original, inefficient code
-    while (addr + 1 >= block->imageSize) {
-        if (block->image == NULL) block->lowestParcelAddress = firstAddress;
-        block->image = (u8 *)reallocate(block->image, block->imageSize, block->imageSize + IMAGE_INCREMENT);
-        block->imageSize += IMAGE_INCREMENT;
-    }
-*/
     if (firstAddress < block->lowestParcelAddress) block->lowestParcelAddress = firstAddress;
     if (lastAddress > block->highestParcelAddress) block->highestParcelAddress = lastAddress;
 }
@@ -669,7 +663,9 @@ static int writeCommonBlockEntry(ObjectBlock *block, Dataset *ds) {
     word |= blockType << 54;
     if (block->location == SectionLocation_EM) word |= (u64)2 << 48;
     blockOrigin = block->lowestParcelAddress & 0xfffffc;
-    blockSize = (block->lowestParcelAddress != block->highestParcelAddress) ? (((block->highestParcelAddress + 4) & 0xfffffc) - blockOrigin) >> 2 : 0;
+    blockSize = (block->isNotEmpty || block->lowestParcelAddress != block->highestParcelAddress)
+        ? (((block->highestParcelAddress + 4) & 0xfffffc) - blockOrigin) >> 2
+        : 0;
     word |= blockSize;
     if (cosDsWriteWord(ds, word) == -1) return -1;
     return 0;
@@ -741,7 +737,7 @@ int writeObjectRecord(Module *module, Dataset *ds) {
      */
     index = 0;
     for (block = module->firstObjectBlock; block != NULL; block = block->next) {
-        if (block->lowestParcelAddress != block->highestParcelAddress) { // block is not empty
+        if (block->isNotEmpty || block->lowestParcelAddress != block->highestParcelAddress) {
             if (writeTXT(block, index++, (block->type == SectionType_Mixed || block->type == SectionType_Code) && module->isAbsolute, ds) == -1) {
                 return -1;
             }
@@ -852,7 +848,7 @@ static int writeProgramEntry(ObjectBlock *block, Dataset *ds) {
     if (writeName(block->id, ds) == -1) return -1;
     word = (u64)1 << 63;
     programOrigin = block->lowestParcelAddress >> 2;
-    if (block->lowestParcelAddress != block->highestParcelAddress) {
+    if (block->isNotEmpty || block->lowestParcelAddress != block->highestParcelAddress) {
         programSize = ((block->highestParcelAddress + 4) >> 2) - programOrigin;
     }
     else {
@@ -953,7 +949,7 @@ static int writeTXT(ObjectBlock *block, u8 index, bool isAbsolute, Dataset *ds) 
     //
     //  Write header word
     //
-    if (block->lowestParcelAddress != block->highestParcelAddress) { // block not empty
+    if (block->isNotEmpty || block->lowestParcelAddress != block->highestParcelAddress) {
         firstParcelAddress = block->lowestParcelAddress & 0xfffffc;
         parcelCount = ((block->highestParcelAddress + 4) & 0xfffffc) - firstParcelAddress;
         loadAddress = isAbsolute ? firstParcelAddress : 0;

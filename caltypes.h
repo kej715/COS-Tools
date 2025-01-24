@@ -253,6 +253,7 @@ typedef struct objectBlock {
     u8 *image;
     u32 imageSize;
     u32 offset;
+    int isNotEmpty;
     u32 lowestParcelAddress;
     u32 highestParcelAddress;
     RelocationTableEntry *relocationTable;
