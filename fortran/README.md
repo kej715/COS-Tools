@@ -154,9 +154,6 @@ FORTRAN 77 features not yet implemented by _kFTC_ include:
 
 - Direct access files
 - Alternate return points in SUBROUTINE and RETURN
-- EXTERNAL
-- ENTRY
-- INTRINSIC
 - DOUBLE PRECISION is handled the same as REAL
 - COMPLEX
 
