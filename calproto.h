@@ -181,6 +181,7 @@ void listValue(Value *val);
 void listWord(u64 bits, u16 attributes);
 char *parseExpression(char *s, Token **expression);
 ErrorCode parseSourceLine(void);
+void printStackTrace(FILE *file);
 void printToken(FILE *file, Token *token);
 ErrorCode processMachineInstruction(void);
 void readNextLine(void);

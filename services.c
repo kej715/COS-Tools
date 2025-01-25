@@ -30,6 +30,25 @@
 #if defined(__cos)
 #include <sys/syslog.h>
 #endif
+#if defined(__APPLE__)
+#include <execinfo.h>
+#endif
+
+void printStackTrace(FILE *fp) {
+#if defined(__APPLE__)
+    void *callstack[128];
+    int  i;
+    int  frames;
+    char **strs;
+
+    frames = backtrace(callstack, 128);
+    strs   = backtrace_symbols(callstack, frames);
+    for (i = 1; i < frames; ++i) {
+        fprintf(fp, "%s\n", strs[i]);
+    }
+    free(strs);
+#endif
+}
 
 void *allocate(int size) {
     void *new;
@@ -37,6 +56,7 @@ void *allocate(int size) {
     new = malloc((size_t)size);
     if (new == NULL) {
         eprintf("Failed to allocate %d bytes", size);
+        printStackTrace(stderr);
         exit(1);
     }
     memset(new, 0, (size_t)size);
@@ -75,6 +95,7 @@ void *reallocate(void *old, int oldSize, int newSize) {
     new = realloc(old, (size_t)newSize);
     if (new == NULL) {
         eprintf("Failed to reallocate %d bytes", newSize);
+        printStackTrace(stderr);
         exit(1);
     }
     memset((unsigned char *)new + oldSize, 0, newSize - oldSize);
