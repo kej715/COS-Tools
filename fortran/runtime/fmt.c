@@ -149,6 +149,7 @@ void _inpfmt(void *value) {
     int fieldWidth;
     int len;
     char *s;
+    u64 word;
 
     if (nextDesc == NULL) return;
 
@@ -172,38 +173,77 @@ void _inpfmt(void *value) {
             s = (char *)(charRef & 0xffffffff);
             len = charRef >> 32;
             if (len == 0) { // value is not type CHARACTER
-                len = 8;
-            }
-            fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
-            while (fieldWidth > 0 && len > 0) {
-                if (cursor < limit) {
-                    *s++ = *cursor++;
-                    len -= 1;
+                word = 0;
+                fieldWidth = (nextDesc->width == 0) ? 8 : nextDesc->width;
+                while (fieldWidth > 0) {
+                    word <<= 8;
+                    if (cursor < limit) {
+                        word |= (*cursor++) & 0xff;
+                    }
+                    else {
+                        word |= ' ';
+                    }
+                    fieldWidth -= 1;
                 }
-                fieldWidth -= 1;
+                s += 7;
+                len = 8;
+                while (len-- > 0) {
+                    *s-- = word & 0xff;
+                    word >>= 8;
+                }
             }
-            while (len-- > 0) *s++ = ' ';
+            else {
+                fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
+                while (fieldWidth > 0 && len > 0) {
+                    if (cursor < limit) {
+                        *s++ = *cursor++;
+                        len -= 1;
+                    }
+                    fieldWidth -= 1;
+                }
+                while (len-- > 0) *s++ = ' ';
+            }
             return;
         case Fmt_R:
             charRef = (unsigned long)value;
             s = (char *)(charRef & 0xffffffff);
             len = charRef >> 32;
             if (len == 0) { // value is not type CHARACTER
+                word = 0x2020202020202020;
+                fieldWidth = (nextDesc->width == 0) ? 8 : nextDesc->width;
+                while (fieldWidth > 0) {
+                    word <<= 8;
+                    if (cursor < limit) {
+                        word |= (*cursor++) & 0xff;
+                    }
+                    else {
+                        word |= ' ';
+                    }
+                    fieldWidth -= 1;
+                }
+                s += 7;
                 len = 8;
+                while (len-- > 0) {
+                    *s-- = word & 0xff;
+                    word >>= 8;
+                }
+
             }
-            fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
-            while (len > fieldWidth) {
-                *s++ = ' ';
-                len -= 1;
-            }
-            while (fieldWidth > 0 && len > 0) {
-                if (cursor < limit) {
-                    *s++ = *cursor++;
+            else {
+                fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
+                while (len > fieldWidth) {
+                    *s++ = ' ';
                     len -= 1;
                 }
-                fieldWidth -= 1;
+                while (fieldWidth > 0 && len > 0) {
+                    if (cursor < limit) {
+                        *s++ = *cursor++;
+                        len -= 1;
+                    }
+                    fieldWidth -= 1;
+                }
+                while (len-- > 0) *s++ = ' ';
             }
-            while (len-- > 0) *s++ = ' ';
             return;
         case Fmt_B:
         case Fmt_BN:
@@ -997,6 +1037,11 @@ static void outfmtHelper(void *value, int doEndOnRep, int *eor) {
                 len = charRef >> 32;
                 if (len == 0) { // value is not type CHARACTER
                     len = 8;
+                    while (len > 1) {
+                        if (*s != 0) break;
+                        len -= 1;
+                        s += 1;
+                    }
                 }
                 fieldWidth = (nextDesc->width == 0) ? len : nextDesc->width;
                 if (len < fieldWidth) {
