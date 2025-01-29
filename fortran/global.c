@@ -27,6 +27,7 @@
 #include "const.h"
 #include "types.h"
 
+int   autoOffset;
 char  currentDate[9];
 char  currentTime[9];
 bool  doEchoSource          = FALSE;
@@ -40,6 +41,7 @@ FILE *listingFile           = NULL;
 FILE *objectFile            = NULL;
 FILE *sourceFile            = NULL;
 char *sourcePath            = NULL;
+int  staticOffset;
 char stmtBuf[MAX_STMT_LENGTH+1];
 int  totalErrors            = 0;
 int warningCount            = 0;

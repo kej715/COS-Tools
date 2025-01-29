@@ -55,7 +55,6 @@ static char *collectStmt(void);
 static void copyCharValue(DataValue *to, DataValue *from);
 static Token *copyToken(Token *token);
 static Token *createIntegerConstant(int value);
-static void defineLocalVariable(Symbol *symbol);
 static Symbol *defineNameListDoVar(char *varId);
 static char *eatWsp(char *s);
 static void errArgType(OperatorId op, BaseType type, OperatorArgument *arg);
@@ -224,10 +223,8 @@ static ArgumentClass argClassForSymClass[] = {
 static Symbol defaultProgSym = {
     NULL, NULL, NULL, NULL, "MAIN", SymClass_Program
 };
-static int autoOffset = 0;
 static Symbol *currentLabel;
 static char lineBuf[MAX_LINE_LENGTH+1];
-static int staticOffset = 0;
 static ParsingState state;
 
 static OperatorArgument argStack[MAX_ARG_STACK_SIZE];
@@ -594,6 +591,9 @@ void compile(char *name) {
         case STATE_IMPLICIT:
             if (token.type == TokenType_Keyword) {
                 switch (token.details.keyword.id) {
+                case DATA: /* DATA may occur almost anywhere */
+                    parseDATA(s);
+                    continue;
                 case END:
                     parseEND(s);
                     presetProgUnit();
@@ -645,7 +645,7 @@ void compile(char *name) {
                 case COMMON:
                     parseCOMMON(s);
                     continue;
-                case DATA:
+                case DATA: /* DATA may occur almost anywhere */
                     parseDATA(s);
                     continue;
                 case DIMENSION:
@@ -708,6 +708,9 @@ void compile(char *name) {
                 case CLOSE:
                     parseCLOSE(s);
                     break;
+                case DATA: /* DATA may occur almost anywhere */
+                    parseDATA(s);
+                    continue;
                 case DO:
                     parseDO(s);
                     break;
@@ -876,22 +879,6 @@ static Token *createIntegerConstant(int value) {
     token->details.constant.dt.type = BaseType_Integer;
     token->details.constant.value.integer = value;
     return token;
-}
-
-static void defineLocalVariable(Symbol *symbol) {
-    if (doStaticLocals) {
-        symbol->class = SymClass_Static;
-        defineType(symbol);
-        symbol->details.variable.offset = staticOffset;
-        symbol->details.variable.staticBlock = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym : progUnitSym->details.progUnit.parentUnit;
-        staticOffset += calculateSize(symbol);
-    }
-    else {
-        symbol->class = SymClass_Auto;
-        defineType(symbol);
-        autoOffset -= calculateSize(symbol);
-        symbol->details.variable.offset = autoOffset;
-    }
 }
 
 static Symbol *defineNameListDoVar(char *varId) {
@@ -1334,7 +1321,8 @@ static bool evaluateIdentifier(Token *id) {
     }
     switch (symbol->class) {
     case SymClass_Undefined:
-        if (id->details.identifier.qualifiers == NULL) { // simple variable reference
+        dt = getSymbolType(symbol);
+        if (id->details.identifier.qualifiers == NULL || dt->rank > 0) { // variable reference
             defineLocalVariable(symbol);
         }
         else {
@@ -2437,6 +2425,7 @@ static bool isAssignment(char *s, bool *isDefn, bool *hasError) {
     bool isId;
     TokenListItem *member;
     StringRange *strRange;
+    Symbol *symbol;
     Token token;
 
     *isDefn = FALSE;
@@ -2444,9 +2433,10 @@ static bool isAssignment(char *s, bool *isDefn, bool *hasError) {
     s = getNextToken(s, &token, FALSE);
     if (token.type != TokenType_Identifier) return FALSE;
     if (*s == '(') {
+        symbol = findSymbol(token.details.identifier.name);
         s = parseExpressionList(s, &expressionList);
         if (s == NULL) return FALSE;
-        if (state < STATE_EXECUTABLE) {
+        if ((symbol == NULL || symbol->class == SymClass_Undefined) && state < STATE_EXECUTABLE) {
             isId = TRUE;
             member = expressionList;
             while (member != NULL && member->item != NULL && isId) {
@@ -3294,7 +3284,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
                 err("Invalid expression in dimension declaration");
                 break;
             }
-            if (symbol->class != SymClass_Argument) {
+            if (symbol->class != SymClass_Argument && symbol->class != SymClass_Undefined) {
                 err("Invalid assumed-size array declaration");
                 break;
             }
@@ -4815,8 +4805,14 @@ static void parseProcIdList(char *s, SymbolClass class) {
                     err("Unknown intrinsic function: %s", token.details.identifier.name);
                 }
             }
-            symbol = addSymbol(token.details.identifier.name, class);
+            symbol = findSymbol(token.details.identifier.name);
             if (symbol == NULL) {
+                symbol = addSymbol(token.details.identifier.name, class);
+            }
+            else if (symbol->class == SymClass_Undefined) {
+                symbol->class = class;
+            }
+            else {
                 err("Name not unique: %s", token.details.identifier.name);
             }
         }
@@ -5118,12 +5114,6 @@ static char *parseTypeDecl(char *s, DataType *dt) {
                     err("Duplicate dimension declaration of %s", id);
                 }
                 s = parseDimDecl(s + 1, symbol);
-                if (symbol->class == SymClass_Undefined) {
-                    defineLocalVariable(symbol);
-                }
-                else {
-                    defineType(symbol);
-                }
                 s = eatWsp(s);
                 if (*s == ',')
                     s = eatWsp(s + 1);
@@ -5493,6 +5483,7 @@ static void parseDATA(char *s) {
 }
 
 static void parseDIMENSION(char *s) {
+    DataType *dt;
     char *id;
     Symbol *symbol;
     Token token;
@@ -5512,45 +5503,17 @@ static void parseDIMENSION(char *s) {
         if (symbol == NULL) {
             symbol = addSymbol(id, SymClass_Undefined);
         }
+        dt = getSymbolType(symbol);
         switch (symbol->class) {
         case SymClass_Undefined:
-            if (doStaticLocals) {
-                symbol->class = SymClass_Static;
-                symbol->details.variable.staticBlock = progUnitSym;
-            }
-            else {
-                symbol->class = SymClass_Auto;
-            }
-            /* fall through */
         case SymClass_Auto:
         case SymClass_Static:
         case SymClass_Global:
-            if (symbol->details.variable.dt.rank != 0) {
-                err("Duplicate declaration of %s", id);
-                return;
-            }
-            break;
         case SymClass_Pointee:
-            if (symbol->details.pointee.dt.rank != 0) {
-                err("Duplicate declaration of %s", id);
-                return;
-            }
-            break;
         case SymClass_Argument:
-            if (symbol->details.variable.dt.type == BaseType_Undefined) {
-                defineType(symbol);
-            }
-            else if (symbol->details.variable.dt.rank != 0) {
-                err("Duplicate declaration of %s", id);
-                return;
-            }
-            break;
         case SymClass_Function:
-            if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
-                defineType(symbol);
-            }
-            else if (symbol->details.progUnit.dt.rank != 0) {
-                err("Duplicate declaration of %s", id);
+            if (dt->rank != 0) {
+                err("Dumplicate dimension declaration of %s\n", symbol->identifier);
                 return;
             }
             break;
@@ -5919,8 +5882,14 @@ static void parseENTRY(char *s) {
     }
     s = getNextToken(s, &token, FALSE);
     if (token.type == TokenType_Identifier) {
-        symbol = addSymbol(token.details.identifier.name, progUnitSym->class);
+        symbol = findSymbol(token.details.identifier.name);
         if (symbol == NULL) {
+            symbol = addSymbol(token.details.identifier.name, progUnitSym->class);
+        }
+        else if (symbol->class == SymClass_Undefined) {
+            symbol->class = progUnitSym->class;
+        }
+        else {
             err("Entry name not unique");
             return;
         }
@@ -6225,11 +6194,12 @@ static void parseGOTO(char *s) {
         s = eatWsp(s);
         if (*s == ',') s = eatWsp(s + 1);
         if (*s == '(') {
+            s += 1;
             /*
              * Parse and ignore optional label list
              */
             for (;;) {
-                s = getLabel(s + 1, lineLabel);
+                s = getLabel(s, lineLabel);
                 if (s == NULL) {
                     err("Invalid line label");
                     return;

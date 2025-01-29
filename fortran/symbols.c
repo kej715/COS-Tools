@@ -630,6 +630,22 @@ int countArrayElements(Symbol *symbol) {
     return count;
 }
 
+void defineLocalVariable(Symbol *symbol) {
+    if (doStaticLocals) {
+        symbol->class = SymClass_Static;
+        defineType(symbol);
+        symbol->details.variable.offset = staticOffset;
+        symbol->details.variable.staticBlock = (progUnitSym->class != SymClass_StmtFunction) ? progUnitSym : progUnitSym->details.progUnit.parentUnit;
+        staticOffset += calculateSize(symbol);
+    }
+    else {
+        symbol->class = SymClass_Auto;
+        defineType(symbol);
+        autoOffset -= calculateSize(symbol);
+        symbol->details.variable.offset = autoOffset;
+    }
+}
+
 void defineType(Symbol *symbol) {
     DataType *dt;
 
