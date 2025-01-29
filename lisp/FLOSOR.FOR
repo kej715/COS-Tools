@@ -2233,9 +2233,7 @@ C-- THIS FUNCTION MAY NEED TO BE REWRITTEN FOR EFFICIENT
 C-- HASHING ON SOME COMPUTERS (E.G. VAX-11)
 C--
 C     IHADR=MOD(IABS(ICH1/7+ICH2/3+ICH3/5),NHTAB)+1
-      ISUM=SHIFTR(ICH1,56)/7
-     &    +SHIFTR(ICH2,56)/3
-     &    +SHIFTR(ICH3,56)/5
+      ISUM=ICH1/7 + ICH2/3 + ICH3/5
       IHADR=MOD(ISUM,NHTAB)+1
       RETURN
       END
@@ -2398,7 +2396,7 @@ C                                      SMALL INT. -- DON'T CONVERT
       INTEGER FUNCTION GETCHT(IC)
         INCLUDE 'F4COM.FOR'
 C     I = IC/CHDIV+1
-      I = SHIFTR(IC,56)+1
+      I = IC+1
       IF (IC.LT.0) I = NBYTES+I-1
       GETCHT=CHTAB(I)
       RETURN
@@ -2412,7 +2410,7 @@ C     IF (IC.LT.0) I = NBYTES+I-1
       IF (IC.LT.0) THEN
         I = NBYTES+I-1
       ELSE
-        I = SHIFTR(IC,56)+1
+        I = IC+1
       END IF
       CHTAB(I)=IT
       ICH(IT)=IC

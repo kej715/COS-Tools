@@ -84,10 +84,9 @@ C                           UPPERCASE THE CHARACTERS IN ABUFF
 C                           NUMBER OF CHARACTERS = L
 C                           FORMAT IS A1 FORMAT
       DO I = 1,L
-        IC = SHIFTR(BUFF(I),56)
+        IC = BUFF(I)
         IF (IC.GE.97.AND.IC.LE.122) THEN
-          IC = IC - 32
-          BUFF(I) = SHIFTL(IC,56).OR.401002004010020040B
+          BUFF(I) = IC - 32
         END IF
       END DO
       END
