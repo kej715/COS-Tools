@@ -595,7 +595,6 @@ static char *getNumber(char *s, Token *token) {
             if (i < 8) value = (value << 8) | *s;
             s += 1;
         }
-        while (n++ < 8) value = (value << 8) | ' ';
         break;
     case 'L':
     case 'l':
