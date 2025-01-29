@@ -577,6 +577,7 @@ void emitEqvInt(OperatorArgument *leftArg, OperatorArgument *rightArg) {
 }
 
 void emitExit(int status) {
+    emitPrimCall("@_endfio");
     emit("         S%o        %d\n", RESULT_REG, status);
     emitPushReg(RESULT_REG);
     emitPrimCall("@exit");
