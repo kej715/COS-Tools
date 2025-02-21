@@ -53,10 +53,7 @@ Register allocateAddrReg(void) {
     Register reg;
 
     if (addrRegMap == 0xff) {
-        fputs("All -A- registers allocated\n", stderr);
-#if DEBUG
-        emit("* All -A- registers allocated\n");
-#endif
+        err("All -A- registers allocated");
         printStackTrace(stderr);
         exit(1);
     }
@@ -66,7 +63,7 @@ Register allocateAddrReg(void) {
         if ((addrRegMap & mask) == 0) {
             addrRegMap |= mask;
 #if DEBUG
-            emit("*  allocateAddrReg: A%o -> %02X%02X\n", reg, addrRegMap, registerMap);
+            fprintf(objectFile, "*  allocateAddrReg: A%o -> %02X%02X\n", reg, addrRegMap, registerMap);
 #endif
             return reg;
         }
@@ -78,10 +75,7 @@ Register allocateRegister(void) {
     u8 mask;
 
     if (registerMap == 0xff) {
-        fputs("All -S- registers allocated\n", stderr);
-#if DEBUG
-        emit("* All -S- registers allocated\n");
-#endif
+        err("All -S- registers allocated");
         printStackTrace(stderr);
         exit(1);
     }
@@ -90,7 +84,7 @@ Register allocateRegister(void) {
         if ((registerMap & mask) == 0) {
             registerMap |= mask;
 #if DEBUG
-            emit("* allocateRegister: S%o -> %02X%02X\n", lastReg, addrRegMap, registerMap);
+            fprintf(objectFile, "* allocateRegister: S%o -> %02X%02X\n", lastReg, addrRegMap, registerMap);
 #endif
             return lastReg;
         }
@@ -1939,6 +1933,15 @@ void emitProlog(Symbol *sym, bool isEntry) {
     }
     if (sym->class == SymClass_Program) {
         emitPrimCall("@_inifio");
+        emit("         A7        A7-1\n");
+        emit("         A7        A7-1\n");
+        emit("         S7        2,A6\n");
+        emit("         0,A7      S7\n");
+        emit("         S7        3,A6\n");
+        emit("         1,A7      S7\n");
+        emitPrimCall("@_setarg");
+        emit("         A7        A7+1\n");
+        emit("         A7        A7+1\n");
     }
 }
 
@@ -1979,7 +1982,7 @@ void emitRestoreRegs(u16 mask) {
     u8 selector;
 
 #if DEBUG
-    emit("* restoreRegisters: mask %04X map %02X%02X\n", mask, addrRegMap, registerMap);
+    fprintf(objectFile, "* restoreRegisters: mask %04X map %02X%02X\n", mask, addrRegMap, registerMap);
 #endif
     mask2 = mask >> 8;
     for (reg = 4; reg > 1; reg--) {
@@ -1997,7 +2000,7 @@ void emitRestoreRegs(u16 mask) {
         }
     }
 #if DEBUG
-    emit("* restoreRegisters:            -> %02X%02X\n", addrRegMap, registerMap);
+    fprintf(objectFile, "* restoreRegisters:            -> %02X%02X\n", addrRegMap, registerMap);
 #endif
 }
 
@@ -2007,7 +2010,7 @@ void emitSaveRegs(u16 mask) {
     u8 selector;
 
 #if DEBUG
-    emit("*    saveRegisters: mask %04X map %02X%02X\n", mask, addrRegMap, registerMap);
+    fprintf(objectFile, "*    saveRegisters: mask %04X map %02X%02X\n", mask, addrRegMap, registerMap);
 #endif
     for (reg = 1; reg < 7; reg++) {
         selector = 1 << reg;
@@ -2025,7 +2028,7 @@ void emitSaveRegs(u16 mask) {
         }
     }
 #if DEBUG
-    emit("*    saveRegisters:            -> %02X%02X\n", addrRegMap, registerMap);
+    fprintf(objectFile, "*    saveRegisters:            -> %02X%02X\n", addrRegMap, registerMap);
 #endif
 }
 
@@ -2356,12 +2359,12 @@ void freeAddrReg(Register reg) {
         }
 #if DEBUG
         else {
-            emit("*      freeAddrReg: A%o already free\n", reg);
+            fprintf(objectFile, "*      freeAddrReg: A%o already free\n", reg);
         }
 #endif
     }
 #if DEBUG
-    emit("*      freeAddrReg: A%o -> %02X%02X\n", reg, addrRegMap, registerMap);
+    fprintf(objectFile, "*      freeAddrReg: A%o -> %02X%02X\n", reg, addrRegMap, registerMap);
 #endif
 }
 
@@ -2370,7 +2373,7 @@ void freeAllRegisters(void) {
     addrRegMap = 0xE3;
     lastReg = 0;
 #if DEBUG
-    emit("* freeAllRegisters: %02X%02X\n", addrRegMap, registerMap);
+    fprintf(objectFile, "* freeAllRegisters: %02X%02X\n", addrRegMap, registerMap);
 #endif
 }
 
@@ -2385,12 +2388,12 @@ void freeRegister(Register reg) {
         }
 #if DEBUG
         else {
-            emit("*     freeRegister: S%o already free\n", reg);
+            fprintf(objectFile, "*     freeRegister: S%o already free\n", reg);
         }
 #endif
     }
 #if DEBUG
-    emit("*     freeRegister: S%o -> %02X%02X\n", reg, addrRegMap, registerMap);
+    fprintf(objectFile, "*     freeRegister: S%o -> %02X%02X\n", reg, addrRegMap, registerMap);
 #endif
 }
 

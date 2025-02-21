@@ -1319,9 +1319,9 @@ static bool evaluateIdentifier(Token *id) {
     if (symbol == NULL) {
         symbol = addSymbol(name, SymClass_Undefined);
     }
+    dt = getSymbolType(symbol);
     switch (symbol->class) {
     case SymClass_Undefined:
-        dt = getSymbolType(symbol);
         if (id->details.identifier.qualifiers == NULL || dt->rank > 0) { // variable reference
             defineLocalVariable(symbol);
         }
@@ -1341,9 +1341,9 @@ static bool evaluateIdentifier(Token *id) {
     case SymClass_Argument:
         if (symbol->details.variable.dt.type == BaseType_Undefined) {
             symbol->details.variable.dt = implicitTypes[toupper(name[0]) - 'A'];
+            dt = &symbol->details.variable.dt;
         }
         if (id->details.identifier.qualifiers != NULL) {
-            dt = getSymbolType(symbol);
             if (dt->rank == 0) { // indirect function call
                 return evaluateFunction(id, symbol, NULL);
             }
@@ -1352,6 +1352,7 @@ static bool evaluateIdentifier(Token *id) {
     case SymClass_Function:
         if (symbol->details.progUnit.dt.type == BaseType_Undefined) {
             symbol->details.progUnit.dt = implicitTypes[toupper(name[0]) - 'A'];
+            dt = &symbol->details.progUnit.dt;
             autoOffset -= calculateSize(symbol);
             symbol->details.progUnit.offset = autoOffset;
         }
@@ -1370,17 +1371,16 @@ static bool evaluateIdentifier(Token *id) {
     arg.class = argClassForSymClass[symbol->class];
     switch (symbol->class) {
     case SymClass_Function:
-        if (symbol->details.progUnit.dt.constraint == -1) {
-            err("Invalid reference to assumed-size %s", symbol->identifier);
-            return TRUE;
-        }
     case SymClass_Auto:
     case SymClass_Static:
     case SymClass_Adjustable:
     case SymClass_Global:
-    case SymClass_Argument:
     case SymClass_Pointee:
-        dt = getSymbolType(symbol);
+        if (dt->constraint == -1) {
+            err("Invalid reference to assumed-size %s", symbol->identifier);
+            return TRUE;
+        }
+    case SymClass_Argument:
         arg.details.reference.symbol = symbol;
         if (id->details.identifier.qualifiers == NULL) {
             arg.details.reference.offsetClass = ArgClass_Undefined;
@@ -1693,9 +1693,13 @@ static bool evaluateStorageReference(StorageReference *reference, OperatorArgume
     symbol = reference->symbol;
     dt = getSymbolType(symbol);
     isAssumedSize = dt->type == BaseType_Character && dt->constraint == -1;
-    if (isAssumedSize && (object == NULL || getDataType(object)->type != BaseType_Character)) {
-        err("Invalid reference to assumed-size variable %s", symbol->identifier);
-        return TRUE;
+    if (isAssumedSize) {
+        if (object == NULL
+            || getDataType(object)->type != BaseType_Character
+            || (symbol->class != SymClass_Argument && symbol->class != SymClass_Function)) {
+            err("Invalid reference to assumed-size %s", symbol->identifier);
+            return TRUE;
+        }
     }
     *isScalar = FALSE;
     target->class = argClassForSymClass[reference->symbol->class];
@@ -1863,6 +1867,7 @@ static bool evaluateSubscript(Symbol *symbol, TokenListItem *subscriptList, int 
         emitCopyToOffset(reg, subscript->reg);
         freeRegister(subscript->reg);
         subscript->reg = reg;
+        subscript->class = ArgClass_Calculation;
     }
     return FALSE;
 }
@@ -2523,7 +2528,7 @@ static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
                 return NULL;
             }
             if (evaluateExpression(qualifier->item, &results[argc])) return NULL;
-            if (isCalculation(results[argc])) freeRegister(results[argc].reg);
+            freeAllRegisters();
             argc += 1;
         }
         if (argc != intrinsic->details.intrinsic.argc) {
@@ -2535,7 +2540,7 @@ static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic) {
         for (qualifier = fn->details.identifier.qualifiers; qualifier != NULL; qualifier = qualifier->next) {
             if (qualifier->item == NULL) continue;
             if (evaluateExpression(qualifier->item, &r)) return NULL;
-            if (isCalculation(r)) freeRegister(r.reg);
+            freeAllRegisters();
             if (argc == 0) {
                 results[argc++] = r;
                 type = getDataType(&r)->type;
@@ -3285,11 +3290,11 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
                 break;
             }
             if (symbol->class != SymClass_Argument && symbol->class != SymClass_Undefined) {
-                err("Invalid assumed-size array declaration");
+                err("Invalid assumed-size array declaration of %s", symbol->identifier);
                 break;
             }
             if (dt->rank >= MAX_DIMENSIONS) {
-                err("Too many dimensions");
+                err("%s has too many dimensions", symbol->identifier);
                 break;
             }
             rank += 1;
@@ -3297,7 +3302,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
         }
         s = parseExpression(s, &expression);
         if (expression == NULL) {
-            err("Invalid expression in dimension declaration");
+            err("Invalid expression in dimension declaration of %s", symbol->identifier);
             break;
         }
         if (evaluateExpression(expression, &result)) break;
@@ -3308,7 +3313,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
         if (*s == ':') {
             s = parseExpression(s + 1, &expression);
             if (expression == NULL) {
-                err("Invalid expression in dimension declaration");
+                err("Invalid expression in dimension declaration of %s", symbol->identifier);
                 break;
             }
             if (evaluateExpression(expression, &result)) break;
@@ -3317,7 +3322,7 @@ static char *parseDimDecl(char *s, Symbol *symbol) {
             freeToken(expression);
         }
         if (rank >= MAX_DIMENSIONS) {
-            err("Too many dimensions");
+            err("%s has too many dimensions", symbol->identifier);
             break;
         }
         rank += 1;
@@ -4812,7 +4817,7 @@ static void parseProcIdList(char *s, SymbolClass class) {
             else if (symbol->class == SymClass_Undefined) {
                 symbol->class = class;
             }
-            else {
+            else if (symbol->class != SymClass_Argument) {
                 err("Name not unique: %s", token.details.identifier.name);
             }
         }
@@ -5061,11 +5066,6 @@ static char *parseTypeDecl(char *s, DataType *dt) {
             sdt = NULL;
             switch (symbol->class) {
             case SymClass_Undefined:
-                if (dt->type == BaseType_Character && dt->constraint == -1) {
-                    err("Invalid assumed-length CHARACTER declaration of %s", id);
-                }
-                sdt = &symbol->details.variable.dt;
-                break;
             case SymClass_Argument:
             case SymClass_Auto:
             case SymClass_Static:
@@ -5097,9 +5097,6 @@ static char *parseTypeDecl(char *s, DataType *dt) {
                 s = eatWsp(s);
                 if (*s == '*') {
                     s = parseCharConstraint(s + 1, &token, sdt);
-                    if (sdt->constraint == -1 && symbol->class != SymClass_Argument && symbol->class != SymClass_Function) {
-                        err("Invalid assumed-length CHARACTER declaration of %s", id);
-                    }
                 }
             }
             s = eatWsp(s);

@@ -47,16 +47,23 @@ _kFTC_ implements all ANSI-standard FORTRAN 77 intrinsic functions. The followin
 intrinsic functions defined by Cray as extensions are supported too, as documented by
 [CFT77 Reference Manual](http://bitsavers.trailing-edge.com/pdf/cray/CFT/SR-0018B_CFT77_Reference_Feb88.pdf).
 
-- **CLOCK** return current time of day as ASCII-encoded INTEGER value
-- **DATE** return current date as ASCII-encoded INTEGER value
-- **IRTC** return the current value of the real-time clock as an INTEGER value
-- **JDATE** return current Julian date as ASCII-encoded INTEGER value
-- **LOC** return location (address) of argument as a POINTER value
-- **MASK** generate bit masks (e.g., for use in BOOLEAN expressions)
-- **RTC** return the low 46 bits of the current value of the real-time clock as a REAL value
+- **CLOCK** returns the current time of day as an ASCII-encoded INTEGER value
+- **DATE** returns the current date as an ASCII-encoded INTEGER value
+- **IRTC** returns the current value of the real-time clock as an INTEGER value
+- **JDATE** returns the current Julian date as an ASCII-encoded INTEGER value
+- **LOC** returns the location (address) of its argument as a POINTER value
+- **MASK** generates bit masks (e.g., for use in BOOLEAN expressions)
+- **RTC** returns the low 46 bits of the current value of the real-time clock as a REAL value
 - **SHIFT** circular left shift
 - **SHIFTL** end-off left shift
 - **SHIFTR** end-off right shift
+
+The following intrinsic functions are also provided:
+
+- **ARGC** returns the number of command line arguments passed to the program (including the
+program name itself)
+- **ARGV** accepts an integer value between 1 and ARGC, inclusive, and returns the command
+line argument indexed by the given value
 
 Additionally, logical operators such as .AND., .OR., and .NOT. apply to INTEGER values, as
 documented for BOOLEAN values by [CFT77 Reference Manual](http://bitsavers.trailing-edge.com/pdf/cray/CFT/SR-0018B_CFT77_Reference_Feb88.pdf).

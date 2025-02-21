@@ -249,6 +249,9 @@ static IntrinsicFnDefn intrinsicFnDefns[] = {
     {"IRTC",   NULL,    "_irtc",   BaseType_Integer,  0},
     {"CPUTIME",NULL,    "_cputim", BaseType_Real,     0},
 
+    {"ARGC",   NULL,    "_argc",   BaseType_Integer,  0},
+    {"ARGV",   NULL,    "_argv",   BaseType_Character,1, {BaseType_Integer}},
+
     {"SHIFT",  NULL,    "_shift",  BaseType_Integer,  2, {BaseType_Integer, BaseType_Integer}},
     {"SHIFT", "SHIFT",  "_shift",  BaseType_Integer,  2, {BaseType_Real,    BaseType_Integer}},
     {"SHIFT", "SHIFT",  "_shift",  BaseType_Integer,  2, {BaseType_Pointer, BaseType_Integer}},

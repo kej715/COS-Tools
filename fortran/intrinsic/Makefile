@@ -32,7 +32,7 @@ ACKROOT = $(PREFIX)/share/ack
 
 COBJS =	aint.o amax0.o amin0.o anint.o chari.o ichar.o imax.o imax1.o imin.o imin1.o index.o len.o lge.o lgt.o lle.o llt.o nint.o rmax.o rmin.o \
         iabs.o iacos.o iasin.o iatan.o iatan2.o icos.o icosh.o idim.o iexp.o iint.o ilog.o ilog10.o imod.o ireal.o isign.o isin.o isinh.o isqrt.o itan.o itanh.o \
-	rabs.o racos.o rasin.o ratan.o ratan2.o rcos.o rcosh.o rdim.o rexp.o rint.o rlog.o rlog10.o rmod.o rreal.o rsign.o rsin.o rsinh.o rsqrt.o rtan.o rtanh.o \
+	pgmarg.o rabs.o racos.o rasin.o ratan.o ratan2.o rcos.o rcosh.o rdim.o rexp.o rint.o rlog.o rlog10.o rmod.o rreal.o rsign.o rsin.o rsinh.o rsqrt.o rtan.o rtanh.o \
 	rtc.o
 
 CALOBJS = cosclk.o cputime.o date.o jdate.o irtc.o loc.o mask.o shift.o shiftl.o shiftr.o \
@@ -182,16 +182,10 @@ loc.o: loc.cal
 mask.o: mask.cal
 	$(BINDIR)/cal -o mask.o $<
 
-shift.o: shift.cal
-	$(BINDIR)/cal -o shift.o $<
-
-shiftl.o: shiftl.cal
-	$(BINDIR)/cal -o shiftl.o $<
-
-shiftr.o: shiftr.cal
-	$(BINDIR)/cal -o shiftr.o $<
-
 nint.o: nint.c
+	$(CC) $(CFLAGS) -c $<
+
+pgmarg.o: pgmarg.c
 	$(CC) $(CFLAGS) -c $<
 
 rabs.o: rabs.c
@@ -262,6 +256,15 @@ rtanh.o: rtanh.c
 
 rtc.o: rtc.c
 	$(CC) $(CFLAGS) -c $<
+
+shift.o: shift.cal
+	$(BINDIR)/cal -o shift.o $<
+
+shiftl.o: shiftl.cal
+	$(BINDIR)/cal -o shiftl.o $<
+
+shiftr.o: shiftr.cal
+	$(BINDIR)/cal -o shiftr.o $<
 
 vlen.o: vlen.cal
 	$(BINDIR)/cal -o vlen.o $<
