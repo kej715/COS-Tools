@@ -1373,7 +1373,6 @@ static bool evaluateIdentifier(Token *id) {
     case SymClass_Function:
     case SymClass_Auto:
     case SymClass_Static:
-    case SymClass_Adjustable:
     case SymClass_Global:
     case SymClass_Pointee:
         if (dt->constraint == -1) {
@@ -1381,6 +1380,7 @@ static bool evaluateIdentifier(Token *id) {
             return TRUE;
         }
     case SymClass_Argument:
+    case SymClass_Adjustable:
         arg.details.reference.symbol = symbol;
         if (id->details.identifier.qualifiers == NULL) {
             arg.details.reference.offsetClass = ArgClass_Undefined;
@@ -1696,7 +1696,7 @@ static bool evaluateStorageReference(StorageReference *reference, OperatorArgume
     if (isAssumedSize) {
         if (object == NULL
             || getDataType(object)->type != BaseType_Character
-            || (symbol->class != SymClass_Argument && symbol->class != SymClass_Function)) {
+            || (symbol->class != SymClass_Argument && symbol->class != SymClass_Adjustable && symbol->class != SymClass_Function)) {
             err("Invalid reference to assumed-size %s", symbol->identifier);
             return TRUE;
         }
