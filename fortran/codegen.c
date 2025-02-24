@@ -2338,6 +2338,10 @@ void emitWordBlock(char *label, int size) {
     emit("%-8s BSS       %d\n", label, size);
 }
 
+void emitWordBlockZ(char *label, int size) {
+    emit("%-8s BSSZ      %d\n", label, size);
+}
+
 void emitWordLabel(char *label) {
     emit("%-8s BSS       0\n", label);
 }
