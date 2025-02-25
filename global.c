@@ -30,7 +30,7 @@
 int baseStack[BASE_STACK_SIZE];
 int baseStackPtr = 0;
 char *calName = "kCAL";
-char *calVersion = "1.1";
+char *calVersion = "1.2";
 int currentBase = 10;
 Section *currentSection = NULL;
 char currentDate[9];

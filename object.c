@@ -568,7 +568,7 @@ void reserveStorage(Section *section, u32 firstAddress, u32 count) {
     block = section->objectBlock;
     newSize = (((addr + 1) + (IMAGE_INCREMENT - 1)) / IMAGE_INCREMENT) * IMAGE_INCREMENT;
     if (newSize > block->imageSize) {
-    if (block->image == NULL) block->lowestParcelAddress = firstAddress;
+        if (block->image == NULL) block->lowestParcelAddress = firstAddress;
         block->image = (u8 *)reallocate(block->image, block->imageSize, newSize);
         block->imageSize = newSize;
     }
@@ -949,14 +949,14 @@ static int writeTXT(ObjectBlock *block, u8 index, bool isAbsolute, Dataset *ds) 
     //
     //  Write header word
     //
-    if (block->isNotEmpty || block->lowestParcelAddress != block->highestParcelAddress) {
+    if (block->isNotEmpty) {
         firstParcelAddress = block->lowestParcelAddress & 0xfffffc;
         parcelCount = ((block->highestParcelAddress + 4) & 0xfffffc) - firstParcelAddress;
         loadAddress = isAbsolute ? firstParcelAddress : 0;
         word = ((u64)LDR_TT_TXT << 60) | (((parcelCount >> 2) + 1) << 36) | (index << 25) | (loadAddress >> 2);
     }
     else {
-        word = ((u64)LDR_TT_TXT << 60) | ((u64)1 << 36) | (index << 25);
+        return 0;
     }
     if (cosDsWriteWord(ds, word) == -1) return -1;
     byteCount = parcelCount * 2;
