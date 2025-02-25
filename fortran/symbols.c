@@ -687,7 +687,7 @@ static void emitCommonTree(Symbol *symbol) {
     if (symbol != NULL) {
         emitCommonTree(symbol->left);
         emitActivateSection(symbol->identifier, "COMMON");
-        emitWordBlockZ(symbol->details.common.label, symbol->details.common.limit);
+        emitWordBlock(symbol->details.common.label, symbol->details.common.limit);
         emitDeactivateSection(symbol->identifier);
         emitCommonTree(symbol->right);
     }

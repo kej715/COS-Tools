@@ -153,7 +153,6 @@ void emitSubprogramRefCall(Symbol *sym);
 void emitSubReal(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitUpdateStringRef(OperatorArgument *strRef, OperatorArgument *strOffset, OperatorArgument *strLength);
 void emitWordBlock(char *label, int size);
-void emitWordBlockZ(char *label, int size);
 void emitWordLabel(char *label);
 void enableEmission(bool isEnabled);
 void freeAddrReg(Register register);
