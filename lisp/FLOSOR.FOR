@@ -1,4 +1,4 @@
-**********************************************************************
+C***********************************************************************
 C*                                                                     *
 C*                           LISP F4 (FLOATING)                        *
 C*                           -------                                   *
@@ -493,6 +493,7 @@ C ARRAY INDEX OUT OF BOUNDS
 C             AFTER CALLING INIT1 YOU MAY CALL ROLLIN INSTEAD OF INIT2
 C             THE FOLLOWING VARIABLES ARE MACHINE DEPENDENT AND ARE TO BE
 C             SET BY THE IMPLEMENTOR OF LISPF4
+      ECHO=.FALSE.
       NATOM=3000
       NFREET=28000
       NSTACK=1500
@@ -2233,7 +2234,9 @@ C-- THIS FUNCTION MAY NEED TO BE REWRITTEN FOR EFFICIENT
 C-- HASHING ON SOME COMPUTERS (E.G. VAX-11)
 C--
 C     IHADR=MOD(IABS(ICH1/7+ICH2/3+ICH3/5),NHTAB)+1
-      ISUM=ICH1/7 + ICH2/3 + ICH3/5
+      ISUM=SHIFTL(ICH1.AND.15,8)
+     &  .OR.SHIFTL(ICH2.AND.15,4)
+     &  .OR.(ICH3.AND.15)
       IHADR=MOD(ISUM,NHTAB)+1
       RETURN
       END
@@ -2403,15 +2406,11 @@ C     I = IC/CHDIV+1
       END
          SUBROUTINE SETCHT(IC,IT)
         INCLUDE 'F4COM.FOR'
-      DIMENSION ICH(24)
+      DIMENSION ICH(26)
       EQUIVALENCE (SPACE,ICH(1))
 C     I = IC/CHDIV+1
-C     IF (IC.LT.0) I = NBYTES+I-1
-      IF (IC.LT.0) THEN
-        I = NBYTES+I-1
-      ELSE
-        I = IC+1
-      END IF
+      I = IC+1
+      IF (IC.LT.0) I = NBYTES+I-1
       CHTAB(I)=IT
       ICH(IT)=IC
       RETURN
@@ -2572,6 +2571,12 @@ C10    FORMAT (1X,150A1)
 40    CONTINUE
       READ(LUN,100,END=1,ERR=998,IOSTAT=IOS) (CARD(I),I=I1,I2)
 100   FORMAT(150A1)
+      IF (ECHO) THEN
+        WRITE(LUNUTS,'(1X,150A1)')
+     &        (PROTXT(I),I=1,PROLEN),
+     &        ' ',
+     &        (CARD(I),I=I1,I2)
+      ENDIF
       RETURN
 1     IEOF=2
       RETURN
