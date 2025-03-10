@@ -182,7 +182,7 @@ void emit_g_h_i_jkm(Section *section, u8 g, u8 h, u8 i, Value *jkm) {
         addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
     }
     else if (isRelocatable(jkm)) {
-        addStdRelocationEntry(section, jkm, FALSE);
+        addStdRelocationEntry(section, jkm, isParcelAddress(jkm));
     }
     listCodeLocation(section);
     listCode10_22(instr, jkm->attributes);
@@ -240,7 +240,7 @@ void emit_gh_i_jkm(Section *section, u8 gh, u8 i, Value *jkm) {
         addExternalEntry(section, jkm, FALSE, section->originCounter * 16 + 31, 22);
     }
     else if (isRelocatable(jkm)) {
-        addStdRelocationEntry(section, jkm, FALSE);
+        addStdRelocationEntry(section, jkm, isParcelAddress(jkm));
     }
     listCodeLocation(section);
     listCode10_22(instr, jkm->attributes);
