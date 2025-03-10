@@ -100,6 +100,7 @@ static void inputInit(ControlInfoList *ciList);
 static bool isAssignment(char *s, bool *isDefn, bool *hasError);
 static bool isAssumedSize(DataType *dt);
 static void loadValue(OperatorArgument *value);
+static void makeAllStatic(Symbol *symbol);
 static Symbol *matchIntrinsic(Token *fn, Symbol *intrinsic);
 static void notSupported(char *s);
 static char *opIdToStr(OperatorId id);
@@ -2499,6 +2500,19 @@ static void loadValue(OperatorArgument *value) {
     }
     else if (value->class >= ArgClass_Function) {
         emitLoadValue(value);
+    }
+}
+
+static void makeAllStatic(Symbol *symbol) {
+    if (symbol != NULL) {
+        makeAllStatic(symbol->left);
+        makeAllStatic(symbol->right);
+        if (symbol->class == SymClass_Auto) {
+            symbol->class = SymClass_Static;
+            symbol->details.variable.offset = staticOffset;
+            symbol->details.variable.staticBlock = progUnitSym;
+            staticOffset += calculateSize(symbol);
+        }
     }
 }
 
@@ -6990,16 +7004,7 @@ static void parseSAVE(char *s) {
     if (*s == '\0') {
         // all variables are saved
         doStaticLocals = TRUE;
-        symbol = getSymbolRoot();
-        while (symbol != NULL) {
-            if (symbol->class == SymClass_Auto) {
-                symbol->class = SymClass_Static;
-                symbol->details.variable.offset = staticOffset;
-                symbol->details.variable.staticBlock = progUnitSym;
-                staticOffset += calculateSize(symbol);
-            }
-            symbol = symbol->next;
-        }
+        makeAllStatic(getSymbolRoot());
         return;
     }
     for (;;) {
