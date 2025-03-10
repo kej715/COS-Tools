@@ -989,7 +989,7 @@ static int writeXRT(Module *module, Dataset *ds) {
             word = (u64)block->index << 51;
             if (entry->isParcelRelocation) word |= (u64)1 << 50;
             word |= (u64)entry->externalIndex << 36;
-            word |= (u64)entry->fieldLength << 30;
+            word |= (u64)(entry->fieldLength & 077) << 30;
             word |= (u64)entry->bitAddress;
             if (cosDsWriteWord(ds, word) == -1) return -1;
         }
