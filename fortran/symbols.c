@@ -879,24 +879,25 @@ bool linkVariables(Symbol *fromSym, int fromOffset, Symbol *toSym, int toOffset)
 
     if (fromSym == toSym) return FALSE;
 
-    leftDt         = getSymbolType(fromSym);
-    rightDt        = getSymbolType(toSym);
+    leftDt  = getSymbolType(fromSym);
+    rightDt = getSymbolType(toSym);
     if (leftDt->type != BaseType_Character) {
         fromOffset = fromOffset << 3;
     }
     if (rightDt->type != BaseType_Character) {
         toOffset = toOffset << 3;
     }
+
+    left   = fromSym;
+    right  = toSym;
     offset = fromOffset - toOffset;
-    if (toSym->class == SymClass_Global && fromSym->class != SymClass_Global) {
-        left   = toSym;
-        right  = fromSym;
+    if (offset == 0) {
+        if (calculateSize(fromSym) < calculateSize(toSym)) {
+            left  = toSym;
+            right = fromSym;
+        }
     }
-    else if (offset >= 0) {
-        left   = fromSym;
-        right  = toSym;
-    }
-    else {
+    else if (offset < 0) {
         left   = toSym;
         right  = fromSym;
         offset = -offset;
@@ -934,8 +935,6 @@ void presetOffsetCalculation(void) {
         case SymClass_Auto:
         case SymClass_Static:
         case SymClass_Global:
-            size = calculateSize(symbol);
-            break;
         case SymClass_Function:
             size = calculateSize(symbol);
             break;
