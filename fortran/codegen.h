@@ -58,6 +58,7 @@ void emitCalcTripNeg1(DoStackEntry *entry, BaseType type);
 void emitCatChar(OperatorArgument *leftArg, OperatorArgument *rightArg);
 void emitConvertToByteAddress(Register reg);
 void emitCopyAddrReg(Register r1, Register r2);
+void emitCopyFromOffset(Register r1, Register r2);
 void emitCopyRegister(Register r1, Register r2);
 void emitCopyToOffset(Register r1, Register r2);
 void emitDeactivateQualifier(char *name);

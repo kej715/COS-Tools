@@ -444,8 +444,8 @@ void compile(char *name) {
     for (;;) {
 #if DEBUG
         checkRegisterMap();
-        freeAllRegisters();
 #endif
+        freeAllRegisters();
         if (errorCount > MAX_ERRS_PER_UNIT) {
             list(" Too many errors, compilation terminated");
             if (progUnitSym != NULL) {
@@ -968,10 +968,11 @@ static bool evaluateArrayRef(Symbol *symbol, TokenListItem *subscriptList, Opera
         emitPushAddrReg(reg);
         freeAddrReg(reg);
         emitPrimCall("@_daryof");
-        reg = allocateAddrReg();
-        emitCopyAddrReg(reg, ADDR_RESULT_REG);
+        emitCopyFromOffset(RESULT_REG, ADDR_RESULT_REG);
         emitAdjustSP(rank + 2);
         emitRestoreRegs(registerMap);
+        reg = allocateAddrReg();
+        emitCopyToOffset(reg, RESULT_REG);
         sum.class = ArgClass_Calculation;
         sum.reg = reg;
     }
@@ -5825,14 +5826,14 @@ static void parseEND(char *s) {
 
     emitEpilog(progUnitSym, -autoOffset, staticOffset);
 
-    if (ifStackPtr > 0) err("Missing ENDIF");
+    if (ifStackPtr > 0) err("Missing END IF");
     if (doStackPtr > 0) {
         entry = &doStack[doStackPtr - 1];
         if (entry->termLabelSym != NULL) {
             err("Missing DO termination label %s", entry->termLabelSym->identifier);
         }
         else {
-            err("Missing ENDDO");
+            err("Missing END DO");
         }
     }
     reportUnresolvedLabels();
@@ -5856,7 +5857,7 @@ static void parseENDDO(char *s) {
     DoStackEntry *entry;
 
     if (doStackPtr < 1) {
-        err("ENDDO without DO");
+        err("END DO without DO");
         return;
     }
     for (;;) {
@@ -5873,7 +5874,7 @@ static void parseENDIF(char *s) {
     IfStackEntry *entry;
 
     if (ifStackPtr < 1) {
-        err("ENDIF without IF");
+        err("END IF without IF");
         return;
     }
     entry = &ifStack[--ifStackPtr];

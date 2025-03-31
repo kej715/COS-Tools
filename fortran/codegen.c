@@ -43,10 +43,13 @@ static Register emitLoadStackAddr(int offset);
 static void emitPopAddrReg(Register reg);
 static void normalizeLabel(char *label, char *result);
 
-static u8 addrRegMap = 0xE3;
+#define ClearAddrRegMap  0xE3
+#define ClearRegisterMap 0x81
+
+static u8 addrRegMap = ClearAddrRegMap;
 static int emissionInhibitDepth = 0;
 static Register lastReg = 0;
-static u8 registerMap = 0x81;
+static u8 registerMap = ClearRegisterMap;
 
 Register allocateAddrReg(void) {
     u8 mask;
@@ -411,6 +414,10 @@ void emitConvertToByteAddress(Register reg) {
 
 void emitCopyAddrReg(Register r1, Register r2) {
     emit("         A%o        A%o\n", r1, r2);
+}
+
+void emitCopyFromOffset(Register r1, Register r2) {
+    emit("         S%o        A%o\n", r1, r2);
 }
 
 void emitCopyRegister(Register r1, Register r2) {
