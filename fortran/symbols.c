@@ -45,6 +45,7 @@ static Symbol *labels = NULL;
 static int labelCounter = 0;
 static int labelPrefixIdx = 0;
 static char labelPrefixes[] = {'H','I','G','J','F','K','E','L','D','M','C','N','B','O','A','P'};
+static Symbol *lastCommonBlock = NULL;
 static Symbol *lastLabel = NULL;
 static Symbol *lastSymbol = NULL;
 static DataType undefinedType = { BaseType_Undefined };
@@ -270,9 +271,16 @@ static IntrinsicFnDefn intrinsicFnDefns[] = {
 };
 
 Symbol *addCommonBlock(char *name) {
-    Symbol *symbol;
+    Symbol *new;
 
-    return addNode(name, SymClass_NamedCommon, &commonBlocks);
+    new = addNode(name, SymClass_NamedCommon, &commonBlocks);
+    if (new != NULL) {
+        if (lastCommonBlock != NULL) {
+            lastCommonBlock->next = new;
+        }
+        lastCommonBlock = new;
+    }
+    return new;
 }
 
 Symbol *addLabel(char *label) {
@@ -288,7 +296,6 @@ Symbol *addLabel(char *label) {
             lastLabel = new;
         }
     }
-
     return new;
 }
 
@@ -468,56 +475,56 @@ void calculateCommonOffsets(void) {
      *  Pass 1. Calculate sizes of all common blocks and the offsets of variables
      *          defined within them.
      */
-    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        if (symbol->class == SymClass_Global
-            && symbol->details.variable.isStorageAssigned == FALSE
-            && symbol->details.variable.isSubordinate == FALSE) {
-            commonBlock = symbol->details.variable.staticBlock;
-            symbol->details.variable.offset = commonBlock->details.common.offset;
-            commonBlock->details.common.offset += symbol->size;
-            if (commonBlock->details.common.offset > commonBlock->details.common.limit) {
-                commonBlock->details.common.limit = commonBlock->details.common.offset;
+    for (commonBlock = commonBlocks; commonBlock != NULL; commonBlock = commonBlock->next) {
+        commonBlock->details.common.offset = 0;
+        for (symbol = commonBlock->details.common.firstMember; symbol != NULL; symbol = symbol->details.variable.nextInCommon) {
+            if (symbol->details.variable.isStorageAssigned == FALSE) {
+                symbol->details.variable.offset = commonBlock->details.common.offset;
+                commonBlock->details.common.offset += symbol->size;
+                if (commonBlock->details.common.offset > commonBlock->details.common.limit) {
+                    commonBlock->details.common.limit = commonBlock->details.common.offset;
+                }
             }
         }
     }
     /*
      *  Pass 2. Assign storage.
      */
-    for (symbol = symbols; symbol != NULL; symbol = symbol->next) {
-        if (symbol->class == SymClass_Global
-            && symbol->details.variable.isStorageAssigned == FALSE
-            && symbol->details.variable.isSubordinate == FALSE) {
-            symbol->details.variable.isStorageAssigned = TRUE;
-            offset = symbol->details.variable.offset << 3;
-            if (symbol->details.variable.nextInStorage != NULL) {
-                baseOffset = offset;
-                dt = getSymbolType(symbol);
-                size = (dt->type == BaseType_Character) ? countArrayElements(symbol) * dt->constraint : symbol->size << 3;
-                highestOffset = baseOffset + size;
-                equiv = symbol->details.variable.nextInStorage;
-                equivOffset = symbol->details.variable.nextOffset;
-                while (equiv != NULL) {
-                    dt = getSymbolType(equiv);
-                    equiv->details.variable.isStorageAssigned = TRUE;
-                    baseOffset += equivOffset;
-                    if (dt->type == BaseType_Character) {
-                        dt->firstChrOffset = baseOffset & 7;
-                        size = countArrayElements(equiv) * dt->constraint;
+    for (commonBlock = commonBlocks; commonBlock != NULL; commonBlock = commonBlock->next) {
+        for (symbol = commonBlock->details.common.firstMember; symbol != NULL; symbol = symbol->details.variable.nextInCommon) {
+            if (symbol->details.variable.isStorageAssigned == FALSE) {
+                symbol->details.variable.isStorageAssigned = TRUE;
+                offset = symbol->details.variable.offset << 3;
+                if (symbol->details.variable.nextInStorage != NULL) {
+                    baseOffset = offset;
+                    dt = getSymbolType(symbol);
+                    size = (dt->type == BaseType_Character) ? countArrayElements(symbol) * dt->constraint : symbol->size << 3;
+                    highestOffset = baseOffset + size;
+                    equiv = symbol->details.variable.nextInStorage;
+                    equivOffset = symbol->details.variable.nextOffset;
+                    while (equiv != NULL) {
+                        dt = getSymbolType(equiv);
+                        equiv->details.variable.isStorageAssigned = TRUE;
+                        baseOffset += equivOffset;
+                        if (dt->type == BaseType_Character) {
+                            dt->firstChrOffset = baseOffset & 7;
+                            size = countArrayElements(equiv) * dt->constraint;
+                        }
+                        else if ((baseOffset & 7) == 0) {
+                            size = equiv->size << 3;
+                        }
+                        else {
+                            err("Invalid equivalence: %s, %s\n", symbol->identifier, equiv->identifier);
+                        }
+                        equiv->details.variable.offset = baseOffset >> 3;
+                        if (highestOffset < baseOffset + size) highestOffset = baseOffset + size;
+                        equivOffset = equiv->details.variable.nextOffset;
+                        equiv = equiv->details.variable.nextInStorage;
                     }
-                    else if ((baseOffset & 7) == 0) {
-                        size = equiv->size << 3;
+                    highestOffset = ((highestOffset + 7) & ~7L) >> 3;
+                    if (highestOffset > commonBlock->details.common.limit) {
+                        commonBlock->details.common.limit = highestOffset;
                     }
-                    else {
-                        err("Invalid equivalence: %s, %s\n", symbol->identifier, equiv->identifier);
-                    }
-                    equiv->details.variable.offset = baseOffset >> 3;
-                    if (highestOffset < baseOffset + size) highestOffset = baseOffset + size;
-                    equivOffset = equiv->details.variable.nextOffset;
-                    equiv = equiv->details.variable.nextInStorage;
-                }
-                highestOffset = ((highestOffset + 7) & ~7L) >> 3;
-                if (highestOffset > symbol->details.variable.staticBlock->details.common.limit) {
-                    symbol->details.variable.staticBlock->details.common.limit = highestOffset;
                 }
             }
         }
@@ -891,13 +898,12 @@ bool linkVariables(Symbol *fromSym, int fromOffset, Symbol *toSym, int toOffset)
     left   = fromSym;
     right  = toSym;
     offset = fromOffset - toOffset;
-    if (offset == 0) {
-        if (calculateSize(fromSym) < calculateSize(toSym)) {
-            left  = toSym;
-            right = fromSym;
-        }
+    if (right->class == SymClass_Global && left->class != SymClass_Global) {
+        left   = toSym;
+        right  = fromSym;
+        offset = -offset;
     }
-    else if (offset < 0) {
+    else if (offset < 0 && left->class != SymClass_Global) {
         left   = toSym;
         right  = fromSym;
         offset = -offset;
@@ -1014,7 +1020,9 @@ static void resetCommonTree(Symbol *symbol) {
     if (symbol != NULL) {
         resetCommonTree(symbol->left);
         resetCommonTree(symbol->right);
-        symbol->details.common.offset = 0;
+        symbol->details.common.offset      = 0;
+        symbol->details.common.firstMember = NULL;
+        symbol->details.common.lastMember  = NULL;
     }
 }
 

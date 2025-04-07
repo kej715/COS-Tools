@@ -304,6 +304,8 @@ typedef struct commonBlockDetails {
     char label[8];
     int offset;
     int limit;
+    struct symbol *firstMember;
+    struct symbol *lastMember;
 } CommonBlockDetails;
 
 #define MAX_INTRINSIC_ARGS 3
@@ -343,6 +345,7 @@ typedef struct variableDetails {
     int isStorageAssigned;
     int isSubordinate;
     struct symbol *staticBlock;
+    struct symbol *nextInCommon;
     struct symbol *nextInStorage;
     int nextOffset;
 } VariableDetails;

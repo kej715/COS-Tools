@@ -278,9 +278,9 @@ static char *appendLine(char *sp, char *lp) {
 static void assignStorage(void) {
     resolveTypes();
     presetOffsetCalculation();
+    calculateCommonOffsets();
     autoOffset = -calculateAutoOffsets();
     staticOffset = calculateStaticOffsets();
-    calculateCommonOffsets();
     evaluateStaticInitializers();
 }
 
@@ -5429,6 +5429,13 @@ static void parseCOMMON(char *s) {
                 err("Duplicate declaration of %s", name);
                 return;
             }
+            if (commonBlock->details.common.firstMember == NULL) {
+                commonBlock->details.common.firstMember = symbol;
+            }
+            else {
+                commonBlock->details.common.lastMember->details.variable.nextInCommon = symbol;
+            }
+            commonBlock->details.common.lastMember = symbol;
             if (*s == '\0') {
                 break;
             }
